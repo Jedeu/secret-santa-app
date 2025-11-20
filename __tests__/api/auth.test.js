@@ -67,4 +67,62 @@ describe('API /auth', () => {
         expect(res.status).toBe(400);
         expect(data.error).toMatch(/already assigned/i);
     });
+
+    test('POST /auth (assign) - Success', async () => {
+        // Mock admin session (assuming no strict admin check in code for now, or we mock it if it exists)
+        // The current code doesn't seem to check for specific admin email for 'assign', 
+        // but let's assume it might or we just test the logic.
+        // Actually, looking at the code, 'assign' action doesn't check for admin email, 
+        // only 'reset' does. 'assign' just checks if enough users exist.
+
+        getServerSession.mockResolvedValue({ user: { email: 'admin@example.com' } });
+        firestore.getUserByEmail.mockResolvedValue({ id: 'admin', email: 'admin@example.com' });
+
+        const mockUsers = [
+            { id: '1', name: 'Alice' },
+            { id: '2', name: 'Bob' },
+            { id: '3', name: 'Charlie' }
+        ];
+        firestore.getAllUsers.mockResolvedValue(mockUsers);
+        firestore.batchUpdateUsers.mockResolvedValue();
+
+        const req = new Request('http://localhost/api/auth', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'assign' })
+        });
+
+        const res = await POST(req);
+        const data = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(data.success).toBe(true);
+        expect(firestore.batchUpdateUsers).toHaveBeenCalled();
+
+        // Verify that batchUpdateUsers was called with users having recipientId and gifterId
+        const updatedUsers = firestore.batchUpdateUsers.mock.calls[0][0];
+        expect(updatedUsers).toHaveLength(3);
+        updatedUsers.forEach(u => {
+            expect(u.recipientId).toBeDefined();
+            expect(u.gifterId).toBeDefined();
+        });
+    });
+
+    test('POST /auth (assign) - Not Enough Users', async () => {
+        getServerSession.mockResolvedValue({ user: { email: 'admin@example.com' } });
+        firestore.getUserByEmail.mockResolvedValue({ id: 'admin', email: 'admin@example.com' });
+
+        const mockUsers = [{ id: '1', name: 'Alice' }]; // Only 1 user
+        firestore.getAllUsers.mockResolvedValue(mockUsers);
+
+        const req = new Request('http://localhost/api/auth', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'assign' })
+        });
+
+        const res = await POST(req);
+        const data = await res.json();
+
+        expect(res.status).toBe(400);
+        expect(data.error).toMatch(/not enough users/i);
+    });
 });

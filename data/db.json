@@ -47,6 +47,24 @@
       "image": null,
       "recipientId": null,
       "gifterId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3"
+    },
+    {
+      "id": "83c8daca-b0b8-414b-8084-293d77adb07f",
+      "name": "Natalie",
+      "email": "natalie.c@gmail.com",
+      "oauthId": "natalie.c@gmail.com",
+      "image": "https://ui-avatars.com/api/?name=Natalie",
+      "recipientId": "75bcbd86-b8a3-48eb-a88d-069644db214d",
+      "gifterId": null
+    },
+    {
+      "id": "75bcbd86-b8a3-48eb-a88d-069644db214d",
+      "name": "Jana",
+      "email": null,
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": "83c8daca-b0b8-414b-8084-293d77adb07f"
     }
   ],
   "messages": [
@@ -63,6 +81,27 @@
       "toId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
       "content": "I can't wait for my gift!",
       "timestamp": "2025-11-20T17:43:12.310Z"
+    },
+    {
+      "id": "61d25c00-b9fd-46a2-b05a-3c81ed39d441",
+      "fromId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "toId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
+      "content": "Lolol",
+      "timestamp": "2025-11-20T23:28:34.245Z"
+    },
+    {
+      "id": "7d2f2897-8f09-46af-a596-f48db91c9ce0",
+      "fromId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "toId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
+      "content": "You funny",
+      "timestamp": "2025-11-20T23:28:41.281Z"
+    },
+    {
+      "id": "8d28eab1-5749-4789-8e43-858669e62bfe",
+      "fromId": "83c8daca-b0b8-414b-8084-293d77adb07f",
+      "toId": null,
+      "content": "?!?!",
+      "timestamp": "2025-11-20T23:28:59.048Z"
     }
   ],
   "lastRead": [
@@ -89,12 +128,22 @@
     {
       "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
       "conversationId": "2ff545a4-468d-43fc-af43-291b1f2ac993_86d78fb4-c3d2-4c52-b822-865771f4d9e3",
-      "lastReadAt": "2025-11-20T18:33:45.519Z"
+      "lastReadAt": "2025-11-20T23:29:30.654Z"
     },
     {
       "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
       "conversationId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3_",
-      "lastReadAt": "2025-11-20T18:33:45.528Z"
+      "lastReadAt": "2025-11-20T23:29:25.769Z"
+    },
+    {
+      "userId": "83c8daca-b0b8-414b-8084-293d77adb07f",
+      "conversationId": "75bcbd86-b8a3-48eb-a88d-069644db214d_83c8daca-b0b8-414b-8084-293d77adb07f",
+      "lastReadAt": "2025-11-20T23:29:08.751Z"
+    },
+    {
+      "userId": "83c8daca-b0b8-414b-8084-293d77adb07f",
+      "conversationId": "83c8daca-b0b8-414b-8084-293d77adb07f_",
+      "lastReadAt": "2025-11-20T23:29:07.021Z"
     }
   ]
 }
