@@ -96,6 +96,9 @@ describe('UI Interaction Flows', () => {
                 content: 'Hello User B!'
             })
         }));
+
+        // Wait for input to be cleared (fixes act warning)
+        await waitFor(() => expect(input.value).toBe(''));
     });
 
     test('2. User A can send a message to secret santa (User C)', async () => {
@@ -134,6 +137,9 @@ describe('UI Interaction Flows', () => {
                 content: 'Hi Santa!'
             })
         }));
+
+        // Wait for input to be cleared (fixes act warning)
+        await waitFor(() => expect(input.value).toBe(''));
     });
 
     test('3. User A see both conversations in the Public Feed', async () => {
@@ -269,6 +275,9 @@ describe('UI Interaction Flows', () => {
                 content: 'Thanks Santa!'
             })
         }));
+
+        // Wait for input to be cleared (fixes act warning)
+        await waitFor(() => expect(input.value).toBe(''));
     });
 
     test('6. Verify tests 5 & 6 are reflected in the public feed', async () => {
