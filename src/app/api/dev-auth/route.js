@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDB, saveDB } from '@/lib/db';
+import { getUserByEmail, createUser, getAllUsers, batchUpdateUsers, getUserById } from '@/lib/firestore';
 import { v4 as uuidv4 } from 'uuid';
 
 // DEVELOPMENT MODE ONLY - Simple auth bypass for testing
@@ -7,50 +7,54 @@ import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(request) {
     const { name, action, userId, recipientName } = await request.json();
-    const db = getDB();
 
     // Simple login - find or create user by name
     if (!action && name) {
-        let user = db.users.find(u => u.name.toLowerCase() === name.toLowerCase());
+        // In dev mode, we use name + @dev.test as email
+        const email = `${name.toLowerCase()}@dev.test`;
+        let user = await getUserByEmail(email);
 
         if (!user) {
             // Create new user
             user = {
                 id: uuidv4(),
                 name,
-                email: `${name.toLowerCase()}@dev.test`, // Fake email for dev mode
+                email,
                 oauthId: null,
                 image: null,
                 recipientId: null,
                 gifterId: null
             };
-            db.users.push(user);
+            await createUser(user);
 
             // If recipient provided during signup, link them
             if (recipientName) {
-                let recipient = db.users.find(u => u.name.toLowerCase() === recipientName.toLowerCase());
+                const recipientEmail = `${recipientName.toLowerCase()}@dev.test`;
+                let recipient = await getUserByEmail(recipientEmail);
+
                 if (!recipient) {
                     recipient = {
                         id: uuidv4(),
                         name: recipientName,
-                        email: `${recipientName.toLowerCase()}@dev.test`,
+                        email: recipientEmail,
                         oauthId: null,
                         image: null,
                         recipientId: null,
                         gifterId: null
                     };
-                    db.users.push(recipient);
+                    await createUser(recipient);
                 }
+
                 user.recipientId = recipient.id;
                 recipient.gifterId = user.id;
-            }
 
-            saveDB(db);
+                await batchUpdateUsers([user, recipient]);
+            }
         } else {
-            // Ensure existing user has dev email for bypass to work
+            // Ensure existing user has dev email for bypass to work (should already be true if found by email)
             if (!user.email || !user.email.endsWith('@dev.test')) {
-                user.email = `${name.toLowerCase()}@dev.test`;
-                saveDB(db);
+                // This case shouldn't happen if we search by email, but just in case
+                // We can't easily update email if it's the key, but here we assume it's fine.
             }
         }
 
@@ -59,7 +63,7 @@ export async function POST(request) {
 
     // Set recipient for existing user
     if (action === 'setRecipient') {
-        const user = db.users.find(u => u.id === userId);
+        const user = await getUserById(userId);
         if (!user) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
@@ -70,23 +74,26 @@ export async function POST(request) {
             }, { status: 400 });
         }
 
-        let recipient = db.users.find(u => u.name.toLowerCase() === recipientName.toLowerCase());
+        const recipientEmail = `${recipientName.toLowerCase()}@dev.test`;
+        let recipient = await getUserByEmail(recipientEmail);
+
         if (!recipient) {
             recipient = {
                 id: uuidv4(),
                 name: recipientName,
-                email: `${recipientName.toLowerCase()}@dev.test`,
+                email: recipientEmail,
                 oauthId: null,
                 image: null,
                 recipientId: null,
                 gifterId: null
             };
-            db.users.push(recipient);
+            await createUser(recipient);
         }
 
         user.recipientId = recipient.id;
         recipient.gifterId = user.id;
-        saveDB(db);
+
+        await batchUpdateUsers([user, recipient]);
 
         return NextResponse.json({ success: true, user });
     }
