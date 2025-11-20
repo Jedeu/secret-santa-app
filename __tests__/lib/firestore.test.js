@@ -1,4 +1,4 @@
-import { getUserByEmail, createUser, sendMessage, getMessages, getAllUsers, batchUpdateUsers } from '@/lib/firestore';
+import { getUserByEmail, createUser, sendMessage, getMessages, getAllUsers, batchUpdateUsers, markAsRead, getLastRead, resetDatabase } from '@/lib/firestore';
 import fs from 'fs';
 import path from 'path';
 
@@ -104,5 +104,28 @@ describe('Firestore (Local Fallback)', () => {
 
         expect(mockDb.users[0].recipientId).toBe('2');
         expect(mockDb.users[1].recipientId).toBe('1');
+    });
+
+    test('markAsRead and getLastRead work correctly', async () => {
+        await markAsRead('1', 'conv_1_2');
+
+        const lastRead = await getLastRead('1', 'conv_1_2');
+        expect(lastRead).toBeDefined();
+        expect(lastRead.userId).toBe('1');
+        expect(lastRead.conversationId).toBe('conv_1_2');
+        expect(lastRead.lastReadAt).toBeDefined();
+    });
+
+    test('resetDatabase clears all data', async () => {
+        mockDb.users = [{ id: '1', name: 'Alice' }];
+        mockDb.messages = [{ id: 'm1', content: 'Hi' }];
+        mockDb.lastRead = [{ userId: '1', conversationId: 'c1' }];
+
+        await resetDatabase();
+
+        expect(mockDb.users).toHaveLength(0);
+        expect(mockDb.messages).toHaveLength(0);
+        expect(mockDb.lastRead).toHaveLength(0);
+        expect(fs.writeFileSync).toHaveBeenCalled();
     });
 });

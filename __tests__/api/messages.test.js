@@ -77,4 +77,40 @@ describe('API /messages', () => {
             expect(data[0].isSantaMsg).toBe(true);
         });
     });
+    describe('GET /messages (Authenticated)', () => {
+        test('GET /messages?userId=... - Success', async () => {
+            getServerSession.mockResolvedValue({ user: { email: 'alice@example.com' } });
+
+            const alice = { id: '1', name: 'Alice', email: 'alice@example.com' };
+            firestore.getUserByEmail.mockResolvedValue(alice);
+            firestore.getUserById.mockResolvedValue(alice);
+
+            const mockMessages = [
+                { id: 'm1', fromId: '1', toId: '2', content: 'Sent' },
+                { id: 'm2', fromId: '2', toId: '1', content: 'Received' }
+            ];
+            firestore.getUserMessages.mockResolvedValue(mockMessages);
+
+            const req = new Request('http://localhost/api/messages?userId=1');
+            const res = await GET(req);
+            const data = await res.json();
+
+            expect(res.status).toBe(200);
+            expect(data).toHaveLength(2);
+            expect(firestore.getUserMessages).toHaveBeenCalledWith('1');
+        });
+
+        test('GET /messages?userId=... - Forbidden (Accessing other user)', async () => {
+            getServerSession.mockResolvedValue({ user: { email: 'alice@example.com' } });
+
+            const alice = { id: '1', name: 'Alice', email: 'alice@example.com' };
+            firestore.getUserByEmail.mockResolvedValue(alice);
+
+            // Alice tries to get Bob's messages
+            const req = new Request('http://localhost/api/messages?userId=2');
+            const res = await GET(req);
+
+            expect(res.status).toBe(403);
+        });
+    });
 });
