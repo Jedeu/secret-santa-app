@@ -1,11 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useSession, signIn, signOut } from 'next-auth/react';
+import { useSession, signIn, signOut, getProviders } from 'next-auth/react';
 import Chat from '@/components/Chat';
 import PublicFeed from '@/components/PublicFeed';
-
-// Simple development mode bypass for testing without OAuth
-const BYPASS_AUTH = process.env.NEXT_PUBLIC_BYPASS_AUTH === 'true';
 
 // Tab button component
 function TabButton({ active, onClick, children, unreadCount }) {
@@ -55,23 +52,18 @@ export default function Home() {
     const [needsRecipient, setNeedsRecipient] = useState(false);
     const [unreadCounts, setUnreadCounts] = useState({ recipient: 0, santa: 0 });
     const [activeTab, setActiveTab] = useState('recipient'); // 'recipient', 'santa', 'feed'
+    const [providers, setProviders] = useState(null);
 
-    // DEV MODE: Simple name-based auth state
-    const [devUser, setDevUser] = useState(null);
-    const [devNameInput, setDevNameInput] = useState('');
+    // Dev login state
+    const [devName, setDevName] = useState('');
+    const [devEmail, setDevEmail] = useState('');
 
-    // Use either OAuth session or dev mode user
-    const currentUser = BYPASS_AUTH ? devUser : session?.user;
-    const isLoading = BYPASS_AUTH ? false : status === 'loading';
+    const currentUser = session?.user;
+    const isLoading = status === 'loading';
 
-    // DEV MODE: Load user from localStorage
+    // Fetch providers
     useEffect(() => {
-        if (BYPASS_AUTH) {
-            const saved = localStorage.getItem('dev_user');
-            if (saved) {
-                setDevUser(JSON.parse(saved));
-            }
-        }
+        getProviders().then(setProviders);
     }, []);
 
     // Fetch all users when authenticated
@@ -92,11 +84,7 @@ export default function Home() {
     useEffect(() => {
         if (currentUser && currentUser.recipientId) {
             const fetchUnread = () => {
-                const url = BYPASS_AUTH
-                    ? `/api/unread?userId=${currentUser.id}`
-                    : '/api/unread';
-
-                fetch(url)
+                fetch('/api/unread')
                     .then(res => res.json())
                     .then(data => {
                         if (!data.error) {
@@ -120,24 +108,19 @@ export default function Home() {
         }
     }, [currentUser]);
 
-    // DEV MODE: Simple login handler
     const handleDevLogin = async (e) => {
         e.preventDefault();
-        if (!devNameInput) return;
+        if (!devName || !devEmail) return;
         setLoading(true);
 
         try {
-            const res = await fetch('/api/dev-auth', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: devNameInput, recipientName: recipientInput })
+            await signIn('credentials', {
+                name: devName,
+                email: devEmail,
+                callbackUrl: '/'
             });
-            const data = await res.json();
-            setDevUser(data);
-            localStorage.setItem('dev_user', JSON.stringify(data));
         } catch (err) {
             alert('Failed to login');
-        } finally {
             setLoading(false);
         }
     };
@@ -148,23 +131,13 @@ export default function Home() {
         setLoading(true);
 
         try {
-            const endpoint = BYPASS_AUTH ? '/api/dev-auth' : '/api/auth';
-            const body = BYPASS_AUTH
-                ? { action: 'setRecipient', userId: devUser.id, recipientName: recipientInput }
-                : { action: 'setRecipient', recipientName: recipientInput };
-
-            const res = await fetch(endpoint, {
+            const res = await fetch('/api/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
+                body: JSON.stringify({ action: 'setRecipient', recipientName: recipientInput })
             });
 
             if (res.ok) {
-                const data = await res.json();
-                if (BYPASS_AUTH) {
-                    setDevUser(data.user || data);
-                    localStorage.setItem('dev_user', JSON.stringify(data.user || data));
-                }
                 window.location.reload();
             } else {
                 const error = await res.json();
@@ -192,17 +165,6 @@ export default function Home() {
         }
     };
 
-    const handleLogout = () => {
-        if (BYPASS_AUTH) {
-            setDevUser(null);
-            localStorage.removeItem('dev_user');
-            setDevNameInput('');
-            setRecipientInput('');
-        } else {
-            signOut();
-        }
-    };
-
     // Loading state
     if (isLoading) {
         return (
@@ -220,7 +182,8 @@ export default function Home() {
             <main className="container" style={{ justifyContent: 'center' }}>
                 <div className="card">
                     <h1 className="title">Secret Santa 🎅</h1>
-                    {BYPASS_AUTH && (
+
+                    {providers?.credentials && (
                         <div style={{
                             background: '#fff3cd',
                             border: '1px solid #ffc107',
@@ -230,41 +193,15 @@ export default function Home() {
                             fontSize: '13px',
                             color: '#856404'
                         }}>
-                            ⚠️ <strong>Dev Mode:</strong> OAuth bypassed for testing
+                            ⚠️ <strong>Dev Mode:</strong> OAuth bypass enabled
                         </div>
                     )}
+
                     <p className="text-muted" style={{ textAlign: 'center', marginBottom: '20px' }}>
-                        {BYPASS_AUTH
-                            ? 'Enter your name to test the app.'
-                            : 'Sign in with Google to join the Secret Santa exchange.'
-                        }
+                        Sign in to join the Secret Santa exchange.
                     </p>
 
-                    {BYPASS_AUTH ? (
-                        <form onSubmit={handleDevLogin}>
-                            <input
-                                className="input"
-                                placeholder="Your Name"
-                                value={devNameInput}
-                                onChange={e => setDevNameInput(e.target.value)}
-                                list="users-list"
-                                required
-                            />
-                            <input
-                                className="input"
-                                placeholder="Who are you buying for? (optional)"
-                                value={recipientInput}
-                                onChange={e => setRecipientInput(e.target.value)}
-                                list="users-list"
-                            />
-                            <datalist id="users-list">
-                                {allUsers.map(u => <option key={u.id} value={u.name} />)}
-                            </datalist>
-                            <button className="btn" disabled={loading}>
-                                {loading ? 'Loading...' : 'Enter'}
-                            </button>
-                        </form>
-                    ) : (
+                    {providers?.google && (
                         <button
                             className="btn"
                             onClick={() => signIn('google')}
@@ -272,7 +209,8 @@ export default function Home() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                gap: '10px'
+                                gap: '10px',
+                                marginBottom: '16px'
                             }}
                         >
                             <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -283,6 +221,32 @@ export default function Home() {
                             </svg>
                             Sign in with Google
                         </button>
+                    )}
+
+                    {providers?.credentials && (
+                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '16px' }}>
+                            <p style={{ fontSize: '12px', marginBottom: '8px', color: 'var(--text-muted)' }}>Dev Login</p>
+                            <form onSubmit={handleDevLogin} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <input
+                                    className="input"
+                                    placeholder="Name"
+                                    value={devName}
+                                    onChange={e => setDevName(e.target.value)}
+                                    required
+                                />
+                                <input
+                                    className="input"
+                                    type="email"
+                                    placeholder="Email"
+                                    value={devEmail}
+                                    onChange={e => setDevEmail(e.target.value)}
+                                    required
+                                />
+                                <button className="btn" disabled={loading} style={{ background: 'var(--surface-highlight)', color: 'var(--text)' }}>
+                                    {loading ? 'Loading...' : 'Dev Login'}
+                                </button>
+                            </form>
+                        </div>
                     )}
                 </div>
             </main>
@@ -315,14 +279,18 @@ export default function Home() {
                         </button>
                     </form>
                     <button
-                        onClick={handleLogout}
+                        onClick={() => signOut()}
                         style={{
                             color: 'var(--text-muted)',
                             fontSize: '14px',
-                            marginTop: '10px'
+                            marginTop: '10px',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            width: '100%'
                         }}
                     >
-                        {BYPASS_AUTH ? 'Logout' : 'Sign out'}
+                        Sign out
                     </button>
                 </div>
             </main>
@@ -334,8 +302,8 @@ export default function Home() {
         <main className="container">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h1 className="title" style={{ margin: 0, fontSize: '20px' }}>Hi, {currentUser.name} 👋</h1>
-                <button onClick={handleLogout} style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-                    {BYPASS_AUTH ? 'Logout' : 'Sign out'}
+                <button onClick={() => signOut()} style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    Sign out
                 </button>
             </div>
 

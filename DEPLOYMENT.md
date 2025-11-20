@@ -71,3 +71,13 @@ This guide will help you deploy your Secret Santa application to Vercel with a F
 1. Visit your deployed app.
 2. Sign in with Google.
 3. Verify you can see the dashboard.
+
+## 6. Troubleshooting
+
+### Error: `redirect_uri_mismatch` on Vercel Preview
+If you see this error while testing on a Vercel Preview URL (e.g., `https://project-git-branch-user.vercel.app`):
+1. **Cause**: Google OAuth requires **exact** URI matches. Vercel generates unique URLs for every preview deployment (e.g., for pull requests), which are not in your Google Cloud Console whitelist.
+2. **Fix**:
+    - **Option A (Quickest)**: Copy the specific preview URL from your browser address bar (e.g., `https://xmasteak-git-main-jed.vercel.app`) and add it to your **Authorized redirect URIs** in Google Cloud Console.
+    - **Option B (Recommended)**: Test OAuth functionality on `localhost:3000` or your main production URL (`https://xmasteak.vercel.app`) instead of preview URLs.
+
