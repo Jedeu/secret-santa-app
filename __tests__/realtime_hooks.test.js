@@ -236,7 +236,7 @@ describe('useRealtimeUnreadCounts Hook', () => {
         expect(fetch).toHaveBeenCalledWith('/api/unread?userId=user1');
     });
 
-    test('should return zero counts initially', () => {
+    test('should return zero counts initially', async () => {
         fetch.mockResolvedValue({
             ok: true,
             json: async () => ({ recipientUnread: 5, santaUnread: 2 })
@@ -247,6 +247,11 @@ describe('useRealtimeUnreadCounts Hook', () => {
         // Should start with zeros
         expect(result.current.recipientUnread).toBe(0);
         expect(result.current.santaUnread).toBe(0);
+
+        // Wait for the update to complete to avoid "act" warning
+        await waitFor(() => {
+            expect(result.current.recipientUnread).toBe(5);
+        });
     });
 
     test('should not fetch if userId is undefined', async () => {
