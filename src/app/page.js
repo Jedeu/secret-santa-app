@@ -48,6 +48,7 @@ export default function Home() {
     const { data: session, status } = useSession();
     const [recipientInput, setRecipientInput] = useState('');
     const [allUsers, setAllUsers] = useState([]);
+    const [availableRecipients, setAvailableRecipients] = useState([]);
     const [loading, setLoading] = useState(false);
     const [needsRecipient, setNeedsRecipient] = useState(false);
     const [unreadCounts, setUnreadCounts] = useState({ recipient: 0, santa: 0 });
@@ -74,6 +75,24 @@ export default function Home() {
                 .then(data => {
                     if (!data.error) {
                         setAllUsers(data);
+
+                        // Filter available recipients
+                        const ALLOWED_RECIPIENTS = [
+                            'Jed', 'Natalie', 'Chinh', 'Gaby',
+                            'Jana', 'Peter', 'Louis', 'Genevieve'
+                        ];
+
+                        const available = ALLOWED_RECIPIENTS.filter(name => {
+                            // Exclude self
+                            if (name.toLowerCase() === currentUser.name?.toLowerCase()) return false;
+
+                            // Exclude if already taken (has gifterId)
+                            const userObj = data.find(u => u.name.toLowerCase() === name.toLowerCase());
+                            if (userObj && userObj.gifterId) return false;
+
+                            return true;
+                        });
+                        setAvailableRecipients(available);
                     }
                 })
                 .catch(err => console.error('Failed to fetch users:', err));
@@ -162,6 +181,25 @@ export default function Home() {
             window.location.reload();
         } catch (err) {
             alert('Failed to assign users');
+        }
+    };
+
+    const handleReset = async () => {
+        if (!confirm('WARNING: This will delete ALL data (users, messages, assignments). This cannot be undone. Are you sure?')) return;
+
+        try {
+            const res = await fetch('/api/admin/reset', {
+                method: 'POST'
+            });
+
+            if (res.ok) {
+                alert('System reset successfully.');
+                window.location.reload();
+            } else {
+                alert('Failed to reset system.');
+            }
+        } catch (err) {
+            alert('Failed to reset system.');
         }
     };
 
@@ -263,21 +301,42 @@ export default function Home() {
                         Who are you buying a gift for?
                     </p>
                     <form onSubmit={handleSetRecipient}>
-                        <input
+                        <select
                             className="input"
-                            placeholder="Recipient Name"
                             value={recipientInput}
                             onChange={e => setRecipientInput(e.target.value)}
-                            list="users-list"
                             required
-                        />
-                        <datalist id="users-list">
-                            {allUsers.map(u => <option key={u.id} value={u.name} />)}
-                        </datalist>
+                            style={{ width: '100%', padding: '10px' }}
+                        >
+                            <option value="">Select a recipient...</option>
+                            {availableRecipients.map(name => (
+                                <option key={name} value={name}>{name}</option>
+                            ))}
+                        </select>
                         <button className="btn" disabled={loading}>
                             {loading ? 'Setting...' : 'Continue'}
                         </button>
                     </form>
+
+                    {/* Admin Reset on Welcome Screen */}
+                    {currentUser.email === 'jed.piezas@gmail.com' && (
+                        <button
+                            onClick={handleReset}
+                            style={{
+                                marginTop: '20px',
+                                background: '#dc3545',
+                                color: 'white',
+                                width: '100%',
+                                padding: '10px',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Reset App (Admin)
+                        </button>
+                    )}
+
                     <button
                         onClick={() => signOut()}
                         style={{
@@ -310,9 +369,18 @@ export default function Home() {
             {!currentUser.recipientId && (
                 <div className="card" style={{ textAlign: 'center' }}>
                     <p style={{ marginBottom: '10px' }}>Waiting for assignments...</p>
-                    <button className="btn" onClick={handleAssign} style={{ background: 'var(--surface-highlight)' }}>
-                        Start Exchange (Admin)
-                    </button>
+
+                    {/* Admin Controls */}
+                    {currentUser.email === 'jed.piezas@gmail.com' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
+                            <button className="btn" onClick={handleAssign} style={{ background: 'var(--surface-highlight)' }}>
+                                Start Exchange (Admin)
+                            </button>
+                            <button className="btn" onClick={handleReset} style={{ background: '#dc3545', color: 'white' }}>
+                                Reset App (Admin)
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
