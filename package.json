@@ -1,0 +1,21 @@
+{
+  "name": "secret-santa",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "emoji-picker-react": "^4.15.1",
+    "next": "latest",
+    "next-auth": "^4.24.13",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "uuid": "^10.0.0"
+  }
+}

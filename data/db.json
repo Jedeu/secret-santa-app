@@ -1,0 +1,89 @@
+{
+  "users": [
+    {
+      "id": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "name": "Alice",
+      "recipientId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "gifterId": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "email": "alice@dev.test"
+    },
+    {
+      "id": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "name": "Bob",
+      "recipientId": "74be021b-999f-4973-bdc5-dbfbd3dedf59",
+      "gifterId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "email": "bob@dev.test"
+    },
+    {
+      "id": "74be021b-999f-4973-bdc5-dbfbd3dedf59",
+      "name": "Charlie",
+      "recipientId": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "gifterId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48"
+    },
+    {
+      "id": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "name": "Diana",
+      "recipientId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "gifterId": "74be021b-999f-4973-bdc5-dbfbd3dedf59"
+    }
+  ],
+  "messages": [
+    {
+      "id": "d9a508bb-51c7-4f61-ac3f-9e2c124d2680",
+      "fromId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "toId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "content": "Hi Bob! What would you like for Christmas? 🎁",
+      "timestamp": "2025-11-19T20:46:17.401Z"
+    },
+    {
+      "id": "f2ca3406-21f2-448b-8010-9d1566d515d8",
+      "fromId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "toId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "content": "Hi Santa! I would love a new book! 📚",
+      "timestamp": "2025-11-19T20:46:17.405Z"
+    },
+    {
+      "id": "91b955e9-203f-452f-b7f9-4239474bf15a",
+      "fromId": "74be021b-999f-4973-bdc5-dbfbd3dedf59",
+      "toId": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "content": "Hey Diana! Do you prefer chocolate or candy? 🍫",
+      "timestamp": "2025-11-19T20:46:17.409Z"
+    },
+    {
+      "id": "a49a93ea-0529-49e9-8238-adb9f7fcdb83",
+      "fromId": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "toId": "74be021b-999f-4973-bdc5-dbfbd3dedf59",
+      "content": "I love chocolate! Thanks for asking! 😊",
+      "timestamp": "2025-11-19T20:46:17.413Z"
+    },
+    {
+      "id": "ac6e77d9-80df-4df2-b3ce-8abe9fb077ae",
+      "fromId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "toId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "content": "Or a dog 🐶",
+      "timestamp": "2025-11-20T01:06:17.884Z"
+    }
+  ],
+  "lastRead": [
+    {
+      "userId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "lastReadAt": "2025-11-20T01:06:27.296Z"
+    },
+    {
+      "userId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "lastReadAt": "2025-11-20T01:06:23.955Z"
+    },
+    {
+      "userId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "conversationId": "74be021b-999f-4973-bdc5-dbfbd3dedf59_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "lastReadAt": "2025-11-20T01:06:09.167Z"
+    },
+    {
+      "userId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "lastReadAt": "2025-11-20T01:06:10.234Z"
+    }
+  ]
+}
