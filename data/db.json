@@ -25,6 +25,24 @@
       "name": "Diana",
       "recipientId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
       "gifterId": "74be021b-999f-4973-bdc5-dbfbd3dedf59"
+    },
+    {
+      "id": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "name": "Jed",
+      "email": "jed.piezas@gmail.com",
+      "oauthId": "jed.piezas@gmail.com",
+      "image": "https://ui-avatars.com/api/?name=Jed",
+      "recipientId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
+      "gifterId": null
+    },
+    {
+      "id": "2ff545a4-468d-43fc-af43-291b1f2ac993",
+      "name": "Natalie",
+      "email": null,
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3"
     }
   ],
   "messages": [
@@ -91,6 +109,16 @@
       "userId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
       "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
       "lastReadAt": "2025-11-20T01:06:10.234Z"
+    },
+    {
+      "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "conversationId": "2ff545a4-468d-43fc-af43-291b1f2ac993_86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "lastReadAt": "2025-11-20T18:33:45.519Z"
+    },
+    {
+      "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "conversationId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3_",
+      "lastReadAt": "2025-11-20T18:33:45.528Z"
     }
   ]
 }

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
+import { useRealtimeMessages } from '@/hooks/useRealtimeMessages';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -35,23 +36,13 @@ function formatRelativeTime(timestamp) {
 }
 
 export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount }) {
-    const [messages, setMessages] = useState([]);
+    // Use real-time message subscription instead of polling
+    const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
     const emojiPickerRef = useRef(null);
-
-    const fetchMessages = async () => {
-        const res = await fetch(`/api/messages?userId=${currentUser.id}`);
-        const data = await res.json();
-        // Filter for this specific conversation
-        const relevant = data.filter(msg =>
-            (msg.fromId === currentUser.id && msg.toId === otherUser.id) ||
-            (msg.fromId === otherUser.id && msg.toId === currentUser.id)
-        );
-        setMessages(relevant);
-    };
 
     // Mark messages as read when component mounts or messages change
     const markAsRead = async () => {
@@ -66,10 +57,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
     };
 
     useEffect(() => {
-        fetchMessages();
         markAsRead(); // Mark as read when opening chat
-        const interval = setInterval(fetchMessages, 2000); // Poll every 2s
-        return () => clearInterval(interval);
     }, [currentUser.id, otherUser.id]);
 
     useEffect(() => {
@@ -99,7 +87,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
         });
 
         setNewMessage('');
-        fetchMessages();
+        // No need to manually fetch - real-time listener will update automatically
     };
 
     // Handle emoji selection
