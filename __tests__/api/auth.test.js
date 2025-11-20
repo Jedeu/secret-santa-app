@@ -22,12 +22,12 @@ describe('API /auth', () => {
         const mockUser = { id: '1', name: 'Alice', email: 'alice@example.com', recipientId: null };
         firestore.getUserByEmail.mockResolvedValue(mockUser);
         firestore.getAllUsers.mockResolvedValue([mockUser]);
-        firestore.createUser.mockResolvedValue({ id: '2', name: 'Bob' });
+        firestore.createUser.mockResolvedValue({ id: '2', name: 'Natalie' });
         firestore.batchUpdateUsers.mockResolvedValue();
 
         const req = new Request('http://localhost/api/auth', {
             method: 'POST',
-            body: JSON.stringify({ action: 'setRecipient', recipientName: 'Bob' })
+            body: JSON.stringify({ action: 'setRecipient', recipientName: 'Natalie' })
         });
 
         const res = await POST(req);

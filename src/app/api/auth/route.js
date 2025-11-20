@@ -31,16 +31,40 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Recipient name is required' }, { status: 400 });
         }
 
+        // Validate recipient is in the allowed list
+        const ALLOWED_RECIPIENTS = [
+            'Jed', 'Natalie', 'Chinh', 'Gaby',
+            'Jana', 'Peter', 'Louis', 'Genevieve'
+        ];
+
+        // Case-insensitive check
+        const normalizedRecipientName = ALLOWED_RECIPIENTS.find(
+            name => name.toLowerCase() === recipientName.toLowerCase()
+        );
+
+        if (!normalizedRecipientName) {
+            return NextResponse.json({
+                error: 'Invalid recipient. Please select from the list.'
+            }, { status: 400 });
+        }
+
         // Find or create recipient
         const allUsers = await getAllUsers();
         let recipient = allUsers.find(u => u.name.toLowerCase() === recipientName.toLowerCase());
 
-        if (!recipient) {
+        if (recipient) {
+            // Check if recipient is already taken (has a gifter)
+            if (recipient.gifterId) {
+                return NextResponse.json({
+                    error: 'This recipient has already been selected by someone else.'
+                }, { status: 400 });
+            }
+        } else {
             // Create placeholder recipient if they don't exist yet
             recipient = {
                 id: uuidv4(),
-                name: recipientName,
-                email: null, // Will be filled when they authenticate
+                name: normalizedRecipientName, // Use the canonical casing
+                email: null,
                 oauthId: null,
                 image: null,
                 recipientId: null,
@@ -50,35 +74,8 @@ export async function POST(request) {
         }
 
         // Link them
-        // We need to update both user and recipient
         user.recipientId = recipient.id;
         recipient.gifterId = user.id;
-
-        // Update both in Firestore
-        // We can use batchUpdateUsers but that takes an array of users with updated fields
-        // Or just update individually.
-        // Let's use batchUpdateUsers for consistency if we have it, or just update individually.
-        // firestore.js has updateUser(userId, data)
-        // But I didn't export it? I did.
-
-        // Wait, I exported `updateUser` but I also exported `batchUpdateUsers`.
-        // Let's use `batchUpdateUsers` for atomicity if possible, but `batchUpdateUsers` in my implementation takes an array of FULL user objects or partial?
-        // My implementation:
-        /*
-        export async function batchUpdateUsers(users) {
-            checkFirestore();
-            const batch = firestore.batch();
-            users.forEach(user => {
-                const ref = firestore.collection('users').doc(user.id);
-                batch.update(ref, {
-                    recipientId: user.recipientId,
-                    gifterId: user.gifterId
-                });
-            });
-            await batch.commit();
-        }
-        */
-        // It updates recipientId and gifterId. Perfect.
 
         await batchUpdateUsers([user, recipient]);
 
@@ -135,7 +132,12 @@ export async function GET() {
     }
 
     const users = await getAllUsers();
-    // Return list of users (names only) for selection
-    return NextResponse.json(users.map(u => ({ name: u.name, id: u.id })));
+    // Return list of users with gifterId so frontend can filter taken ones
+    // Also return name and id
+    return NextResponse.json(users.map(u => ({
+        name: u.name,
+        id: u.id,
+        gifterId: u.gifterId // Expose this so we can disable/hide taken recipients
+    })));
 }
 

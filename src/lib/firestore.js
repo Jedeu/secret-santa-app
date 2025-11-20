@@ -228,3 +228,28 @@ export async function batchUpdateUsers(users) {
 
     await batch.commit();
 }
+
+// --- Admin ---
+
+export async function resetDatabase() {
+    if (!useFirestore()) {
+        const db = {
+            users: [],
+            messages: [],
+            lastRead: []
+        };
+        saveLocalDB(db);
+        return;
+    }
+
+    // Delete all collections
+    const collections = ['users', 'messages', 'lastRead'];
+    for (const collectionName of collections) {
+        const snapshot = await firestore.collection(collectionName).get();
+        const batch = firestore.batch();
+        snapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+    }
+}
