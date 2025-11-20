@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { firestore, useClientFirestore } from '@/lib/firebase-client';
-import { collection, query, where, onSnapshot, or, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 
 /**
  * Custom hook to subscribe to real-time message updates for a specific conversation
@@ -20,41 +20,60 @@ export function useRealtimeMessages(userId, otherUserId) {
 
         // If Firestore is available, use real-time listeners
         if (hasFirestore && firestore) {
-            // Query for messages where:
-            // (fromId == userId AND toId == otherUserId) OR (fromId == otherUserId AND toId == userId)
+            // Instead of using OR query (which is inefficient), we'll use two separate queries
+            // Query 1: Messages from userId to otherUserId
             const messagesRef = collection(firestore, 'messages');
 
-            // Create query for messages in this conversation
-            const q = query(
+            const q1 = query(
                 messagesRef,
-                or(
-                    where('fromId', '==', userId),
-                    where('fromId', '==', otherUserId)
-                ),
+                where('fromId', '==', userId),
+                where('toId', '==', otherUserId),
                 orderBy('timestamp', 'asc')
             );
 
-            // Subscribe to real-time updates
-            const unsubscribe = onSnapshot(q, (snapshot) => {
-                const msgs = [];
+            // Query 2: Messages from otherUserId to userId
+            const q2 = query(
+                messagesRef,
+                where('fromId', '==', otherUserId),
+                where('toId', '==', userId),
+                orderBy('timestamp', 'asc')
+            );
+
+            // Combine messages from both queries
+            let msgs1 = [];
+            let msgs2 = [];
+
+            const unsubscribe1 = onSnapshot(q1, (snapshot) => {
+                msgs1 = [];
                 snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    // Filter to only include messages between these two users
-                    if (
-                        (data.fromId === userId && data.toId === otherUserId) ||
-                        (data.fromId === otherUserId && data.toId === userId)
-                    ) {
-                        msgs.push(data);
-                    }
+                    msgs1.push(doc.data());
                 });
-                msgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-                setMessages(msgs);
+                // Merge and sort
+                const allMsgs = [...msgs1, ...msgs2];
+                allMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                setMessages(allMsgs);
             }, (error) => {
-                console.error('Error in real-time message listener:', error);
+                console.error('Error in real-time message listener (sent):', error);
             });
 
-            // Cleanup subscription on unmount
-            return () => unsubscribe();
+            const unsubscribe2 = onSnapshot(q2, (snapshot) => {
+                msgs2 = [];
+                snapshot.forEach((doc) => {
+                    msgs2.push(doc.data());
+                });
+                // Merge and sort
+                const allMsgs = [...msgs1, ...msgs2];
+                allMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                setMessages(allMsgs);
+            }, (error) => {
+                console.error('Error in real-time message listener (received):', error);
+            });
+
+            // Cleanup both subscriptions on unmount
+            return () => {
+                unsubscribe1();
+                unsubscribe2();
+            };
         } else {
             // Fallback to polling for local dev (no Firestore)
             const fetchMessages = async () => {

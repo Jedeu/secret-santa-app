@@ -3,6 +3,48 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 
+// --- Cache Layer ---
+// Simple in-memory cache to reduce Firestore reads during authentication
+const userCache = new Map();
+const CACHE_TTL = 60000; // 1 minute
+
+// Server-side cache for collections (public feed optimization)
+let allUsersCache = null;
+let allUsersCacheTime = 0;
+let allMessagesCache = null;
+let allMessagesCacheTime = 0;
+const COLLECTION_CACHE_TTL = 5000; // 5 seconds for public feed data
+
+function getCachedUser(key) {
+    const cached = userCache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
+    }
+    return null;
+}
+
+function setCachedUser(key, data) {
+    userCache.set(key, { data, timestamp: Date.now() });
+}
+
+function clearUserCache() {
+    userCache.clear();
+    // Also clear collection caches when users change
+    allUsersCache = null;
+    allUsersCacheTime = 0;
+}
+
+// --- Name Normalization ---
+// Normalize names to Title Case for consistent storage and querying
+function toTitleCase(name) {
+    if (!name) return '';
+    return name
+        .trim()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+}
+
 // --- Local DB Fallback Logic ---
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 
@@ -40,9 +82,20 @@ export async function getUserByEmail(email) {
         const db = getLocalDB();
         return db.users.find(u => u.email === email) || null;
     }
+
+    // Check cache first
+    const cacheKey = `email:${email}`;
+    const cached = getCachedUser(cacheKey);
+    if (cached !== null) {
+        return cached;
+    }
+
     const snapshot = await firestore.collection('users').where('email', '==', email).limit(1).get();
-    if (snapshot.empty) return null;
-    return snapshot.docs[0].data();
+    const user = snapshot.empty ? null : snapshot.docs[0].data();
+
+    // Cache the result
+    setCachedUser(cacheKey, user);
+    return user;
 }
 
 export async function getUserById(id) {
@@ -58,18 +111,27 @@ export async function getUserById(id) {
 export async function getUsersByName(name) {
     if (!useFirestore()) {
         const db = getLocalDB();
-        return db.users.find(u => u.name.toLowerCase() === name.toLowerCase()) || null;
+        return db.users.find(u => u.name === name) || null;
     }
-    // Note: This is case-sensitive by default in Firestore. 
-    // For true case-insensitive search, we'd need a normalized field (e.g., name_lower).
-    // For now, we'll fetch all and filter in memory if the list is small (which it is: 8 users).
-    // Or we can just rely on exact match if that's acceptable, but the original code used toLowerCase().
 
-    // Since we only have 8 users, fetching all is fine.
-    const snapshot = await firestore.collection('users').get();
-    const users = [];
-    snapshot.forEach(doc => users.push(doc.data()));
-    return users.filter(u => u.name.toLowerCase() === name.toLowerCase())[0] || null;
+    // Check cache first
+    const cacheKey = `name:${name}`;
+    const cached = getCachedUser(cacheKey);
+    if (cached !== null) {
+        return cached;
+    }
+
+    // Simple exact match - names are normalized to Title Case
+    const snapshot = await firestore.collection('users')
+        .where('name', '==', name)
+        .limit(1)
+        .get();
+
+    const user = snapshot.empty ? null : snapshot.docs[0].data();
+
+    // Cache the result
+    setCachedUser(cacheKey, user);
+    return user;
 }
 
 export async function createUser(user) {
@@ -80,10 +142,18 @@ export async function createUser(user) {
         return user;
     }
     // user object should have { id, name, email, oauthId, image, recipientId, gifterId }
-    // We use 'id' as the document ID for easier lookup if we wanted, but let's stick to query by field for consistency with existing structure
-    // actually, using user.id as doc ID is better.
-    await firestore.collection('users').doc(user.id).set(user);
-    return user;
+    // Normalize name to Title Case for consistent querying
+    const normalizedUser = {
+        ...user,
+        name: toTitleCase(user.name)
+    };
+
+    await firestore.collection('users').doc(normalizedUser.id).set(normalizedUser);
+
+    // Clear cache since we added a new user
+    clearUserCache();
+
+    return normalizedUser;
 }
 
 export async function updateUser(userId, data) {
@@ -96,7 +166,17 @@ export async function updateUser(userId, data) {
         }
         return;
     }
-    await firestore.collection('users').doc(userId).update(data);
+
+    // Normalize name to Title Case if updating name
+    const updateData = { ...data };
+    if (data.name) {
+        updateData.name = toTitleCase(data.name);
+    }
+
+    await firestore.collection('users').doc(userId).update(updateData);
+
+    // Clear cache since user data changed
+    clearUserCache();
 }
 
 export async function getAllUsers() {
@@ -107,6 +187,23 @@ export async function getAllUsers() {
     const snapshot = await firestore.collection('users').get();
     const users = [];
     snapshot.forEach(doc => users.push(doc.data()));
+    return users;
+}
+
+// Cached version for public feed (reduces reads when multiple users view feed simultaneously)
+export async function getAllUsersWithCache() {
+    if (!useFirestore()) {
+        return getAllUsers();
+    }
+
+    const now = Date.now();
+    if (allUsersCache && (now - allUsersCacheTime) < COLLECTION_CACHE_TTL) {
+        return allUsersCache;
+    }
+
+    const users = await getAllUsers();
+    allUsersCache = users;
+    allUsersCacheTime = now;
     return users;
 }
 
@@ -152,6 +249,48 @@ export async function getAllMessages() {
     return messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 }
 
+// Cached version for public feed (reduces reads when multiple users view feed simultaneously)
+export async function getAllMessagesWithCache() {
+    if (!useFirestore()) {
+        return getAllMessages();
+    }
+
+    const now = Date.now();
+    if (allMessagesCache && (now - allMessagesCacheTime) < COLLECTION_CACHE_TTL) {
+        return allMessagesCache;
+    }
+
+    const messages = await getAllMessages();
+    allMessagesCache = messages;
+    allMessagesCacheTime = now;
+    return messages;
+}
+
+// Get all messages for a specific user (sent or received)
+export async function getUserMessages(userId) {
+    if (!useFirestore()) {
+        const db = getLocalDB();
+        return db.messages.filter(msg =>
+            msg.fromId === userId || msg.toId === userId
+        ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    }
+
+    // Use two queries: messages sent by user and messages received by user
+    const sent = await firestore.collection('messages')
+        .where('fromId', '==', userId)
+        .get();
+
+    const received = await firestore.collection('messages')
+        .where('toId', '==', userId)
+        .get();
+
+    const messages = [];
+    sent.forEach(doc => messages.push(doc.data()));
+    received.forEach(doc => messages.push(doc.data()));
+
+    return messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
 export async function sendMessage(message) {
     if (!useFirestore()) {
         const db = getLocalDB();
@@ -161,6 +300,11 @@ export async function sendMessage(message) {
     }
     // message: { id, fromId, toId, content, timestamp }
     await firestore.collection('messages').doc(message.id).set(message);
+
+    // Clear message cache so public feed shows new message immediately
+    allMessagesCache = null;
+    allMessagesCacheTime = 0;
+
     return message;
 }
 
