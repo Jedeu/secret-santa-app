@@ -68,6 +68,10 @@ export default function PublicFeed() {
             };
         }
         threads[threadId].messages.push(msg);
+        // Update lastMessage if this message is newer
+        if (new Date(msg.timestamp) > new Date(threads[threadId].lastMessage.timestamp)) {
+            threads[threadId].lastMessage = msg;
+        }
     });
 
     const threadList = Object.values(threads).sort((a, b) =>
