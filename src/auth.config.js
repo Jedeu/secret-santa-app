@@ -1,6 +1,6 @@
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { getUserByEmail, createUser, getUserById } from '@/lib/firestore';
+import { getUserByEmail, createUser, getUserById, getUsersByName, updateUser } from '@/lib/firestore';
 import { v4 as uuidv4 } from 'uuid';
 
 const providers = [
@@ -45,17 +45,32 @@ export const authOptions = {
                 let dbUser = await getUserByEmail(user.email);
 
                 if (!dbUser) {
-                    // Create new user in our database
-                    dbUser = {
-                        id: uuidv4(),
-                        name: user.name || (profile && profile.name) || user.email.split('@')[0],
-                        email: user.email,
-                        oauthId: account.providerAccountId,
-                        image: user.image,
-                        recipientId: null,
-                        gifterId: null
-                    };
-                    await createUser(dbUser);
+                    // Check if there is a placeholder user with the same name (case-insensitive)
+                    // This handles the case where a user was added as a recipient (placeholder) before they logged in
+                    const existingUser = await getUsersByName(user.name);
+
+                    if (existingUser && !existingUser.email) {
+                        // Claim the placeholder account
+                        dbUser = existingUser;
+                        await updateUser(dbUser.id, {
+                            email: user.email,
+                            oauthId: account.providerAccountId,
+                            image: user.image,
+                            name: user.name // Update name to match OAuth profile
+                        });
+                    } else {
+                        // Create new user in our database
+                        dbUser = {
+                            id: uuidv4(),
+                            name: user.name || (profile && profile.name) || user.email.split('@')[0],
+                            email: user.email,
+                            oauthId: account.providerAccountId,
+                            image: user.image,
+                            recipientId: null,
+                            gifterId: null
+                        };
+                        await createUser(dbUser);
+                    }
                 }
                 return true;
             } catch (error) {
