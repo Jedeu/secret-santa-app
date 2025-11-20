@@ -1,29 +1,19 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useRealtimeAllMessages } from '@/hooks/useRealtimeMessages';
 
 export default function PublicFeed() {
-    const [messages, setMessages] = useState([]);
+    // Use real-time message subscription instead of polling
+    const messages = useRealtimeAllMessages();
     const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
     const [lastViewed, setLastViewed] = useState({}); // Track when each thread was last viewed
 
-    const fetchMessages = async () => {
-        const res = await fetch('/api/messages');
-        const data = await res.json();
-        data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        setMessages(data);
-    };
-
     useEffect(() => {
-        fetchMessages();
-        const interval = setInterval(fetchMessages, 3000);
-
         // Load last viewed times from localStorage
         const saved = localStorage.getItem('publicFeedLastViewed');
         if (saved) {
             setLastViewed(JSON.parse(saved));
         }
-
-        return () => clearInterval(interval);
     }, []);
 
     // Group messages by the "Recipient" of the Secret Santa pair.

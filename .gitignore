@@ -14,8 +14,11 @@
 /build
 
 # Misc
-.DS_Store
+.DS_Stored
 *.pem
+
+# Local Database
+data/db.json
 
 # Debug
 npm-debug.log*

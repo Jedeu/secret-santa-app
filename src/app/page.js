@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useSession, signIn, signOut, getProviders } from 'next-auth/react';
 import Chat from '@/components/Chat';
 import PublicFeed from '@/components/PublicFeed';
+import { useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
 
 // Tab button component
 function TabButton({ active, onClick, children, unreadCount }) {
@@ -51,7 +52,6 @@ export default function Home() {
     const [availableRecipients, setAvailableRecipients] = useState([]);
     const [loading, setLoading] = useState(false);
     const [needsRecipient, setNeedsRecipient] = useState(false);
-    const [unreadCounts, setUnreadCounts] = useState({ recipient: 0, santa: 0 });
     const [activeTab, setActiveTab] = useState('recipient'); // 'recipient', 'santa', 'feed'
     const [providers, setProviders] = useState(null);
 
@@ -61,6 +61,13 @@ export default function Home() {
 
     const currentUser = session?.user;
     const isLoading = status === 'loading';
+
+    // Use real-time unread counts instead of polling
+    const unreadData = useRealtimeUnreadCounts(currentUser?.id);
+    const unreadCounts = {
+        recipient: unreadData.recipientUnread || 0,
+        santa: unreadData.santaUnread || 0
+    };
 
     // Fetch providers
     useEffect(() => {
@@ -96,25 +103,6 @@ export default function Home() {
                     }
                 })
                 .catch(err => console.error('Failed to fetch users:', err));
-        }
-    }, [currentUser]);
-
-    // Fetch unread counts
-    useEffect(() => {
-        if (currentUser && currentUser.recipientId) {
-            const fetchUnread = () => {
-                fetch('/api/unread')
-                    .then(res => res.json())
-                    .then(data => {
-                        if (!data.error) {
-                            setUnreadCounts(data);
-                        }
-                    })
-                    .catch(err => console.error('Failed to fetch unread:', err));
-            };
-            fetchUnread();
-            const interval = setInterval(fetchUnread, 3000); // Poll every 3s
-            return () => clearInterval(interval);
         }
     }, [currentUser]);
 

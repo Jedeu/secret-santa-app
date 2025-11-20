@@ -19,13 +19,34 @@
       "gifterId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe"
     },
     {
-      "id": "6e7cddd0-25a7-4e6a-b9f0-0173faddfdd4",
-      "name": "Louis",
+      "id": "74be021b-999f-4973-bdc5-dbfbd3dedf59",
+      "name": "Charlie",
+      "recipientId": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "gifterId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48"
+    },
+    {
+      "id": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
+      "name": "Diana",
+      "recipientId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "gifterId": "74be021b-999f-4973-bdc5-dbfbd3dedf59"
+    },
+    {
+      "id": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "name": "Jed",
+      "email": "jed.piezas@gmail.com",
+      "oauthId": "jed.piezas@gmail.com",
+      "image": "https://ui-avatars.com/api/?name=Jed",
+      "recipientId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
+      "gifterId": null
+    },
+    {
+      "id": "2ff545a4-468d-43fc-af43-291b1f2ac993",
+      "name": "Natalie",
       "email": null,
       "oauthId": null,
       "image": null,
       "recipientId": null,
-      "gifterId": "41085360-f50b-4355-abe3-daf127ec802f"
+      "gifterId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3"
     }
   ],
   "messages": [
@@ -61,9 +82,19 @@
       "lastReadAt": "2025-11-20T17:42:49.863Z"
     },
     {
-      "userId": "41085360-f50b-4355-abe3-daf127ec802f",
-      "conversationId": "41085360-f50b-4355-abe3-daf127ec802f_fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "lastReadAt": "2025-11-20T17:42:59.715Z"
+      "userId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "lastReadAt": "2025-11-20T01:06:10.234Z"
+    },
+    {
+      "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "conversationId": "2ff545a4-468d-43fc-af43-291b1f2ac993_86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "lastReadAt": "2025-11-20T18:33:45.519Z"
+    },
+    {
+      "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "conversationId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3_",
+      "lastReadAt": "2025-11-20T18:33:45.528Z"
     }
   ]
 }
