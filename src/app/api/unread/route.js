@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMessages, markAsRead, getLastRead, getUserById, getAllUsers } from '@/lib/firestore';
+import { getMessages, markAsRead, getLastRead, getUserById, getUserByEmail } from '@/lib/firestore';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/auth.config";
 
@@ -24,8 +24,8 @@ export async function GET(request) {
 
     let user = null;
     if (session) {
-        const users = await getAllUsers();
-        user = users.find(u => u.email === session.user.email);
+        // Use getUserByEmail instead of getAllUsers for efficiency
+        user = await getUserByEmail(session.user.email);
     } else {
         user = await getUserById(devUserId);
     }
@@ -88,8 +88,8 @@ export async function POST(request) {
 
     let user = null;
     if (session) {
-        const users = await getAllUsers();
-        user = users.find(u => u.email === session.user.email);
+        // Use getUserByEmail instead of getAllUsers for efficiency
+        user = await getUserByEmail(session.user.email);
     } else {
         user = await getUserById(userId);
     }

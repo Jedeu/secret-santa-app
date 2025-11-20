@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMessages, sendMessage, getAllMessages, getUserById, getAllUsers } from '@/lib/firestore';
+import { getMessages, sendMessage, getAllMessagesWithCache, getAllUsersWithCache, getUserMessages, getUserById, getUserByEmail } from '@/lib/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/auth.config";
@@ -12,8 +12,10 @@ export async function GET(request) {
         // Public feed: Return all messages but mask names for Secret Santa pairs
         // No authentication required for public feed viewing
 
-        const allMessages = await getAllMessages();
-        const allUsers = await getAllUsers();
+        const allMessages = await getAllMessagesWithCache();
+        // Note: We still need all users for the public feed to map message IDs to names
+        // This is cached on the server side (5 second TTL)
+        const allUsers = await getAllUsersWithCache();
 
         const publicMessages = allMessages.map(msg => {
             const fromUser = allUsers.find(u => u.id === msg.fromId);
@@ -72,13 +74,8 @@ export async function GET(request) {
     // Verify the user is requesting their own messages
     let authenticatedUser = null;
     if (session) {
-        // We can't rely on session.user.id being populated if it wasn't in the DB when session started (though it should be)
-        // But let's fetch fresh from DB to be safe or trust session.
-        // Actually session callback fetches from DB.
-        // Let's fetch fresh to be sure.
-        // Wait, session.user.email is reliable.
-        const users = await getAllUsers(); // Optimization: could use getUserByEmail but we need to check ID match
-        authenticatedUser = users.find(u => u.email === session.user.email);
+        // Use getUserByEmail instead of getAllUsers for efficiency
+        authenticatedUser = await getUserByEmail(session.user.email);
     } else {
         authenticatedUser = await getUserById(userId);
     }
@@ -87,24 +84,9 @@ export async function GET(request) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    // We need messages where user is sender OR receiver.
-    // getMessages(userId, otherId) gets conversation between two.
-    // But here we want ALL messages for this user?
-    // The original code: db.messages.filter(msg => msg.fromId === userId || msg.toId === userId)
-    // This returns ALL messages involving the user.
-    // Firestore: We need to query for (fromId == userId) and (toId == userId) separately and merge.
-
-    // Wait, getMessages in firestore.js takes (userId, otherId).
-    // I should add getUserMessages(userId) to firestore.js?
-    // Or just use raw firestore calls here? Better to keep logic in firestore.js.
-    // But I can't easily change firestore.js right now without another tool call.
-    // Let's use getAllMessages and filter in memory for now (small scale).
-    // It's 100-200 messages per year. In-memory filtering is totally fine.
-
-    const allMessages = await getAllMessages();
-    const userMessages = allMessages.filter(msg =>
-        msg.fromId === userId || msg.toId === userId
-    );
+    // Get all messages for this user (sent or received)
+    // Use efficient getUserMessages instead of getAllMessages + filter
+    const userMessages = await getUserMessages(userId);
 
     return NextResponse.json(userMessages);
 }
@@ -124,8 +106,8 @@ export async function POST(request) {
     // Verify the authenticated user is the sender
     let authenticatedUser = null;
     if (session) {
-        const users = await getAllUsers();
-        authenticatedUser = users.find(u => u.email === session.user.email);
+        // Use getUserByEmail instead of getAllUsers for efficiency
+        authenticatedUser = await getUserByEmail(session.user.email);
     } else {
         authenticatedUser = sender;
     }

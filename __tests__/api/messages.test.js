@@ -19,7 +19,7 @@ describe('API /messages', () => {
             getServerSession.mockResolvedValue({ user: { email: 'alice@example.com' } });
 
             const alice = { id: '1', name: 'Alice', email: 'alice@example.com', recipientId: '2' };
-            firestore.getAllUsers.mockResolvedValue([alice]);
+            firestore.getUserByEmail.mockResolvedValue(alice);
             firestore.getUserById.mockResolvedValue(alice);
             firestore.sendMessage.mockResolvedValue();
 
@@ -40,7 +40,7 @@ describe('API /messages', () => {
             getServerSession.mockResolvedValue({ user: { email: 'alice@example.com' } });
 
             const alice = { id: '1', name: 'Alice', email: 'alice@example.com', recipientId: '2', gifterId: '3' };
-            firestore.getAllUsers.mockResolvedValue([alice]);
+            firestore.getUserByEmail.mockResolvedValue(alice);
             firestore.getUserById.mockResolvedValue(alice);
 
             // Alice tries to message user 4 (not recipient or Santa)
@@ -64,8 +64,8 @@ describe('API /messages', () => {
                 { id: '2', name: 'Bob', gifterId: '1' }
             ];
 
-            firestore.getAllMessages.mockResolvedValue(messages);
-            firestore.getAllUsers.mockResolvedValue(users);
+            firestore.getAllMessagesWithCache.mockResolvedValue(messages);
+            firestore.getAllUsersWithCache.mockResolvedValue(users);
 
             const req = new Request('http://localhost/api/messages');
             const res = await GET(req);
