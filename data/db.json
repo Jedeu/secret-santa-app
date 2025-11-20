@@ -62,18 +62,25 @@
       "toId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
       "content": "Or a dog 🐶",
       "timestamp": "2025-11-20T01:06:17.884Z"
+    },
+    {
+      "id": "3121051c-04fb-48a5-a46c-c2802fada4a7",
+      "fromId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
+      "toId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
+      "content": "Well that's too bad LOL",
+      "timestamp": "2025-11-20T01:44:03.229Z"
     }
   ],
   "lastRead": [
     {
       "userId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
       "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_7e33456d-61dd-41cd-ba28-fa9b1000e82a",
-      "lastReadAt": "2025-11-20T01:06:27.296Z"
+      "lastReadAt": "2025-11-20T01:44:12.819Z"
     },
     {
       "userId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
       "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
-      "lastReadAt": "2025-11-20T01:06:23.955Z"
+      "lastReadAt": "2025-11-20T01:44:18.194Z"
     },
     {
       "userId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",

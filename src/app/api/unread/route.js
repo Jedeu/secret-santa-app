@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDB, saveDB } from '@/lib/db';
+import { getMessages, markAsRead, getLastRead, getUserById, getAllUsers } from '@/lib/firestore';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/auth.config";
 
@@ -14,18 +14,21 @@ export async function GET(request) {
     const devUserId = searchParams.get('userId'); // For dev mode
 
     const session = await getServerSession(authOptions);
-    const db = getDB();
 
     // Check if this is a dev mode request
-    const isDev = devUserId && db.users.find(u => u.id === devUserId && u.email?.endsWith('@dev.test'));
+    const isDev = devUserId && (await getUserById(devUserId))?.email?.endsWith('@dev.test');
 
     if (!session && !isDev) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const user = session
-        ? db.users.find(u => u.email === session.user.email)
-        : db.users.find(u => u.id === devUserId);
+    let user = null;
+    if (session) {
+        const users = await getAllUsers();
+        user = users.find(u => u.email === session.user.email);
+    } else {
+        user = await getUserById(devUserId);
+    }
 
     if (!user) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -36,12 +39,14 @@ export async function GET(request) {
 
     if (user.recipientId) {
         const recipientConvId = getConversationId(user.id, user.recipientId);
-        const lastRead = db.lastRead?.find(lr =>
-            lr.userId === user.id && lr.conversationId === recipientConvId
-        );
+        const lastRead = await getLastRead(user.id, recipientConvId);
         const lastReadAt = lastRead?.lastReadAt || new Date(0).toISOString();
 
-        const unreadMessages = db.messages.filter(msg =>
+        // Fetch messages between user and recipient
+        // We want messages FROM recipient TO user
+        const messages = await getMessages(user.id, user.recipientId);
+
+        const unreadMessages = messages.filter(msg =>
             msg.fromId === user.recipientId &&
             msg.toId === user.id &&
             msg.timestamp > lastReadAt
@@ -51,12 +56,14 @@ export async function GET(request) {
 
     if (user.gifterId) {
         const santaConvId = getConversationId(user.id, user.gifterId);
-        const lastRead = db.lastRead?.find(lr =>
-            lr.userId === user.id && lr.conversationId === santaConvId
-        );
+        const lastRead = await getLastRead(user.id, santaConvId);
         const lastReadAt = lastRead?.lastReadAt || new Date(0).toISOString();
 
-        const unreadMessages = db.messages.filter(msg =>
+        // Fetch messages between user and santa
+        // We want messages FROM santa TO user
+        const messages = await getMessages(user.id, user.gifterId);
+
+        const unreadMessages = messages.filter(msg =>
             msg.fromId === user.gifterId &&
             msg.toId === user.id &&
             msg.timestamp > lastReadAt
@@ -71,44 +78,29 @@ export async function POST(request) {
     // Mark conversation as read
     const session = await getServerSession(authOptions);
     const { otherUserId, userId } = await request.json();
-    const db = getDB();
 
     // Check if this is a dev mode request
-    const isDev = userId && db.users.find(u => u.id === userId && u.email?.endsWith('@dev.test'));
+    const isDev = userId && (await getUserById(userId))?.email?.endsWith('@dev.test');
 
     if (!session && !isDev) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const user = session
-        ? db.users.find(u => u.email === session.user.email)
-        : db.users.find(u => u.id === userId);
+    let user = null;
+    if (session) {
+        const users = await getAllUsers();
+        user = users.find(u => u.email === session.user.email);
+    } else {
+        user = await getUserById(userId);
+    }
+
     if (!user) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     const conversationId = getConversationId(user.id, otherUserId);
 
-    // Initialize lastRead array if it doesn't exist (for existing databases)
-    if (!db.lastRead) {
-        db.lastRead = [];
-    }
+    await markAsRead(user.id, conversationId);
 
-    // Find or create lastRead entry
-    let lastReadEntry = db.lastRead.find(lr =>
-        lr.userId === user.id && lr.conversationId === conversationId
-    );
-
-    if (lastReadEntry) {
-        lastReadEntry.lastReadAt = new Date().toISOString();
-    } else {
-        db.lastRead.push({
-            userId: user.id,
-            conversationId,
-            lastReadAt: new Date().toISOString()
-        });
-    }
-
-    saveDB(db);
     return NextResponse.json({ success: true });
 }
