@@ -4,6 +4,7 @@ import { useSession, signIn, signOut, getProviders } from 'next-auth/react';
 import Chat from '@/components/Chat';
 import PublicFeed from '@/components/PublicFeed';
 import { useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
+import { getParticipantNames } from '@/lib/participants';
 
 // Tab button component
 function TabButton({ active, onClick, children, unreadCount }) {
@@ -69,6 +70,12 @@ export default function Home() {
         santa: unreadData.santaUnread || 0
     };
 
+    // Initialize participants on app load
+    useEffect(() => {
+        fetch('/api/init', { method: 'POST' })
+            .catch(err => console.error('Failed to initialize participants:', err));
+    }, []);
+
     // Fetch providers
     useEffect(() => {
         getProviders().then(setProviders);
@@ -83,11 +90,8 @@ export default function Home() {
                     if (!data.error) {
                         setAllUsers(data);
 
-                        // Filter available recipients
-                        const ALLOWED_RECIPIENTS = [
-                            'Jed', 'Natalie', 'Chinh', 'Gaby',
-                            'Jana', 'Peter', 'Louis', 'Genevieve'
-                        ];
+                        // Filter available recipients from hardcoded list
+                        const ALLOWED_RECIPIENTS = getParticipantNames();
 
                         const available = ALLOWED_RECIPIENTS.filter(name => {
                             // Exclude self
@@ -349,9 +353,30 @@ export default function Home() {
         <main className="container">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h1 className="title" style={{ margin: 0, fontSize: '20px' }}>Hi, {currentUser.name} 👋</h1>
-                <button onClick={() => signOut()} style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}>
-                    Sign out
-                </button>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    {/* Admin Reset Button - Always visible for admin */}
+                    {currentUser.email === 'jed.piezas@gmail.com' && (
+                        <button
+                            onClick={handleReset}
+                            style={{
+                                background: '#dc3545',
+                                color: 'white',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: '500'
+                            }}
+                            title="Reset all data and assignments"
+                        >
+                            🔄 Reset
+                        </button>
+                    )}
+                    <button onClick={() => signOut()} style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}>
+                        Sign out
+                    </button>
+                </div>
             </div>
 
             {!currentUser.recipientId && (

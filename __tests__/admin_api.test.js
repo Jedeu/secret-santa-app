@@ -4,7 +4,11 @@ import { getServerSession } from "next-auth/next";
 // Mock dependencies
 jest.mock("next-auth/next");
 jest.mock("@/lib/firestore", () => ({
-    resetDatabase: jest.fn()
+    resetDatabase: jest.fn(),
+    ensureAllParticipants: jest.fn()
+}));
+jest.mock("@/lib/participants", () => ({
+    PARTICIPANTS: []
 }));
 jest.mock("@/auth.config", () => ({
     authOptions: {}

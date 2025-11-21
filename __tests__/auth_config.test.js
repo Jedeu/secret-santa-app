@@ -6,65 +6,100 @@ jest.mock('@/lib/firestore');
 jest.mock('next-auth/providers/google', () => jest.fn());
 jest.mock('next-auth/providers/credentials', () => jest.fn());
 
-describe('Auth Configuration', () => {
+describe('Auth Configuration - Pre-created Participants', () => {
     beforeEach(() => {
         jest.clearAllMocks();
     });
 
-    test('signIn callback claims placeholder account', async () => {
+    test('signIn callback updates existing participant with OAuth data', async () => {
         const { signIn } = authOptions.callbacks;
 
         const mockUser = {
-            email: 'natalie@example.com',
-            name: 'Natalie',
-            image: 'http://image.com/natalie'
+            email: 'jed.piezas@gmail.com',
+            name: 'Jed Piezas',
+            image: 'http://image.com/jed'
         };
-        const mockAccount = { providerAccountId: '123' };
+        const mockAccount = { providerAccountId: 'oauth123' };
 
-        // 1. getUserByEmail returns null (no account with this email yet)
-        firestore.getUserByEmail.mockResolvedValue(null);
-
-        // 2. getUsersByName returns a placeholder user (no email)
-        const mockPlaceholder = {
-            id: 'placeholder-id',
-            name: 'Natalie',
-            email: null,
+        // Mock existing participant (pre-created, no OAuth data yet)
+        const mockExistingUser = {
+            id: 'jed-id',
+            name: 'Jed',
+            email: 'jed.piezas@gmail.com',
+            oauthId: null,
+            image: null,
             recipientId: null,
-            gifterId: 'jed-id'
+            gifterId: null
         };
-        firestore.getUsersByName.mockResolvedValue(mockPlaceholder);
-
-        // 3. updateUser should be called
+        firestore.getUserByEmail.mockResolvedValue(mockExistingUser);
         firestore.updateUser.mockResolvedValue();
 
-        await signIn({ user: mockUser, account: mockAccount });
+        const result = await signIn({ user: mockUser, account: mockAccount });
 
-        expect(firestore.getUserByEmail).toHaveBeenCalledWith('natalie@example.com');
-        expect(firestore.getUsersByName).toHaveBeenCalledWith('Natalie');
-        expect(firestore.updateUser).toHaveBeenCalledWith('placeholder-id', expect.objectContaining({
-            email: 'natalie@example.com',
-            oauthId: '123',
-            image: 'http://image.com/natalie'
-        }));
-        expect(firestore.createUser).not.toHaveBeenCalled();
+        expect(result).toBe(true);
+        expect(firestore.getUserByEmail).toHaveBeenCalledWith('jed.piezas@gmail.com');
+        expect(firestore.updateUser).toHaveBeenCalledWith('jed-id', {
+            oauthId: 'oauth123',
+            image: 'http://image.com/jed',
+            name: 'Jed Piezas'
+        });
     });
 
-    test('signIn callback creates new user if no placeholder', async () => {
+    test('signIn callback rejects user not in participants list', async () => {
         const { signIn } = authOptions.callbacks;
 
         const mockUser = {
-            email: 'new@example.com',
-            name: 'New User',
+            email: 'unauthorized@example.com',
+            name: 'Unauthorized User'
         };
         const mockAccount = { providerAccountId: '456' };
 
+        // User not in participants list
         firestore.getUserByEmail.mockResolvedValue(null);
-        firestore.getUsersByName.mockResolvedValue(null); // No placeholder
-        firestore.createUser.mockResolvedValue();
 
-        await signIn({ user: mockUser, account: mockAccount });
+        const result = await signIn({ user: mockUser, account: mockAccount });
 
-        expect(firestore.createUser).toHaveBeenCalled();
+        expect(result).toBe(false);
         expect(firestore.updateUser).not.toHaveBeenCalled();
+    });
+
+    test('signIn callback does not update if OAuth data already set', async () => {
+        const { signIn } = authOptions.callbacks;
+
+        const mockUser = {
+            email: 'jed.piezas@gmail.com',
+            name: 'Jed Piezas',
+            image: 'http://image.com/jed'
+        };
+        const mockAccount = { providerAccountId: 'oauth123' };
+
+        // User already has OAuth data
+        const mockExistingUser = {
+            id: 'jed-id',
+            oauthId: 'oauth123', // Already set
+            image: 'http://image.com/jed'
+        };
+        firestore.getUserByEmail.mockResolvedValue(mockExistingUser);
+
+        const result = await signIn({ user: mockUser, account: mockAccount });
+
+        expect(result).toBe(true);
+        expect(firestore.updateUser).not.toHaveBeenCalled(); // No update needed
+    });
+
+    test('signIn callback handles errors gracefully', async () => {
+        const { signIn } = authOptions.callbacks;
+
+        const mockUser = {
+            email: 'jed.piezas@gmail.com',
+            name: 'Jed'
+        };
+        const mockAccount = { providerAccountId: '123' };
+
+        firestore.getUserByEmail.mockRejectedValue(new Error('Database error'));
+
+        const result = await signIn({ user: mockUser, account: mockAccount });
+
+        expect(result).toBe(false);
     });
 });
