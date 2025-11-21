@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getUserByEmail, createUser, getAllUsers, batchUpdateUsers } from '@/lib/firestore';
+import { getUserByEmail, createUser, getAllUsers, batchUpdateUsers, ensureAllParticipants } from '@/lib/firestore';
+import { PARTICIPANTS, getParticipantEmail } from '@/lib/participants';
 import { v4 as uuidv4 } from 'uuid';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/auth.config";
@@ -32,10 +33,7 @@ export async function POST(request) {
         }
 
         // Validate recipient is in the allowed list
-        const ALLOWED_RECIPIENTS = [
-            'Jed', 'Natalie', 'Chinh', 'Gaby',
-            'Jana', 'Peter', 'Louis', 'Genevieve'
-        ];
+        const ALLOWED_RECIPIENTS = PARTICIPANTS.map(p => p.name);
 
         // Case-insensitive check
         const normalizedRecipientName = ALLOWED_RECIPIENTS.find(
@@ -48,29 +46,36 @@ export async function POST(request) {
             }, { status: 400 });
         }
 
-        // Find or create recipient
-        const allUsers = await getAllUsers();
-        let recipient = allUsers.find(u => u.name.toLowerCase() === recipientName.toLowerCase());
+        // Get the email for this recipient from the hardcoded list
+        const recipientEmail = getParticipantEmail(normalizedRecipientName);
+        if (!recipientEmail) {
+            return NextResponse.json({
+                error: 'Could not find email for this recipient.'
+            }, { status: 500 });
+        }
 
-        if (recipient) {
-            // Check if recipient is already taken (has a gifter)
-            if (recipient.gifterId) {
-                return NextResponse.json({
-                    error: 'This recipient has already been selected by someone else.'
-                }, { status: 400 });
-            }
-        } else {
-            // Create placeholder recipient if they don't exist yet
+        // Find the recipient by email (should already exist from ensureAllParticipants)
+        let recipient = await getUserByEmail(recipientEmail);
+
+        if (!recipient) {
+            // This shouldn't happen if ensureAllParticipants was called, but create as fallback
             recipient = {
                 id: uuidv4(),
-                name: normalizedRecipientName, // Use the canonical casing
-                email: null,
+                name: normalizedRecipientName,
+                email: recipientEmail,
                 oauthId: null,
                 image: null,
                 recipientId: null,
                 gifterId: null
             };
             await createUser(recipient);
+        }
+
+        // Check if recipient is already taken (has a gifter)
+        if (recipient.gifterId) {
+            return NextResponse.json({
+                error: 'This recipient has already been selected by someone else.'
+            }, { status: 400 });
         }
 
         // Link them

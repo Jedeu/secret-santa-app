@@ -63,7 +63,14 @@ function getLocalDB() {
         fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
     }
     const data = fs.readFileSync(DB_PATH, 'utf8');
-    return JSON.parse(data);
+    try {
+        return JSON.parse(data);
+    } catch (e) {
+        // If the JSON is corrupted, reset to a clean structure
+        const initialData = { users: [], messages: [], lastRead: [] };
+        fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
+        return initialData;
+    }
 }
 
 function saveLocalDB(data) {
@@ -111,7 +118,7 @@ export async function getUserById(id) {
 export async function getUsersByName(name) {
     if (!useFirestore()) {
         const db = getLocalDB();
-        return db.users.find(u => u.name === name) || null;
+        return db.users.find(u => u.name.toLowerCase() === name.toLowerCase()) || null;
     }
 
     // Check cache first
@@ -133,6 +140,34 @@ export async function getUsersByName(name) {
     setCachedUser(cacheKey, user);
     return user;
 }
+
+// Get placeholder user by name (user without email)
+// Used during OAuth sign-in to find and merge placeholder accounts
+export async function getPlaceholderUserByName(name) {
+    if (!useFirestore()) {
+        const db = getLocalDB();
+        // Find first user with matching name (case-insensitive) and no email
+        return db.users.find(u =>
+            u.name.toLowerCase() === name.toLowerCase() && !u.email
+        ) || null;
+    }
+
+    // For Firestore, we need to get all users with this name and filter client-side
+    // because Firestore doesn't support querying for null/undefined fields easily
+    const snapshot = await firestore.collection('users')
+        .where('name', '==', name)
+        .get();
+
+    // Find first user without email
+    for (const doc of snapshot.docs) {
+        const user = doc.data();
+        if (!user.email) {
+            return user;
+        }
+    }
+    return null;
+}
+
 
 export async function createUser(user) {
     if (!useFirestore()) {
@@ -371,6 +406,56 @@ export async function batchUpdateUsers(users) {
     });
 
     await batch.commit();
+}
+
+// --- Participant Management ---
+
+// Ensure all participants from the hardcoded list exist in the database
+// This should be called during app initialization
+export async function ensureAllParticipants(participants) {
+    if (!useFirestore()) {
+        const db = getLocalDB();
+
+        for (const participant of participants) {
+            // Check if user already exists by email
+            const existing = db.users.find(u => u.email === participant.email);
+
+            if (!existing) {
+                // Create the user
+                const newUser = {
+                    id: uuidv4(),
+                    name: participant.name,
+                    email: participant.email,
+                    oauthId: null, // Will be set when they log in
+                    image: null,   // Will be set when they log in
+                    recipientId: null,
+                    gifterId: null
+                };
+                db.users.push(newUser);
+            }
+        }
+
+        saveLocalDB(db);
+        return;
+    }
+
+    // For Firestore
+    for (const participant of participants) {
+        const existing = await getUserByEmail(participant.email);
+
+        if (!existing) {
+            const newUser = {
+                id: uuidv4(),
+                name: participant.name,
+                email: participant.email,
+                oauthId: null,
+                image: null,
+                recipientId: null,
+                gifterId: null
+            };
+            await createUser(newUser);
+        }
+    }
 }
 
 // --- Admin ---

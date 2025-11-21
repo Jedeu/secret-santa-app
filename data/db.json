@@ -1,149 +1,78 @@
 {
   "users": [
     {
-      "id": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "name": "Jed",
-      "email": "jed@example.com",
-      "oauthId": "jed@example.com",
-      "image": "https://ui-avatars.com/api/?name=Jed",
-      "recipientId": "41085360-f50b-4355-abe3-daf127ec802f",
-      "gifterId": null
-    },
-    {
-      "id": "41085360-f50b-4355-abe3-daf127ec802f",
-      "name": "Natalie",
-      "email": "natalie@example.com",
-      "oauthId": "natalie@example.com",
-      "image": "https://ui-avatars.com/api/?name=Natalie",
-      "recipientId": "6e7cddd0-25a7-4e6a-b9f0-0173faddfdd4",
-      "gifterId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe"
-    },
-    {
-      "id": "74be021b-999f-4973-bdc5-dbfbd3dedf59",
-      "name": "Charlie",
-      "recipientId": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
-      "gifterId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48"
-    },
-    {
-      "id": "7e33456d-61dd-41cd-ba28-fa9b1000e82a",
-      "name": "Diana",
-      "recipientId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5",
-      "gifterId": "74be021b-999f-4973-bdc5-dbfbd3dedf59"
-    },
-    {
-      "id": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
+      "id": "0e23ce44-e615-452b-b7b6-5edb4dac872d",
       "name": "Jed",
       "email": "jed.piezas@gmail.com",
-      "oauthId": "jed.piezas@gmail.com",
-      "image": "https://ui-avatars.com/api/?name=Jed",
-      "recipientId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
-      "gifterId": null
-    },
-    {
-      "id": "2ff545a4-468d-43fc-af43-291b1f2ac993",
-      "name": "Natalie",
-      "email": null,
       "oauthId": null,
       "image": null,
       "recipientId": null,
-      "gifterId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3"
-    },
-    {
-      "id": "83c8daca-b0b8-414b-8084-293d77adb07f",
-      "name": "Natalie",
-      "email": "natalie.c@gmail.com",
-      "oauthId": "natalie.c@gmail.com",
-      "image": "https://ui-avatars.com/api/?name=Natalie",
-      "recipientId": "75bcbd86-b8a3-48eb-a88d-069644db214d",
       "gifterId": null
     },
     {
-      "id": "75bcbd86-b8a3-48eb-a88d-069644db214d",
+      "id": "b7550726-9402-46d8-99d0-0190889e3fb4",
+      "name": "Natalie",
+      "email": "ncammarasana@gmail.com",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
+    },
+    {
+      "id": "1de668eb-8cb3-4a7b-b2fc-3c7be1c4c01c",
+      "name": "Chinh",
+      "email": "chinhhuynhlmft@gmail.com",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
+    },
+    {
+      "id": "9904316c-95e1-4637-981b-56944b2efa96",
+      "name": "Gaby",
+      "email": "gabrielle@glim.ca",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
+    },
+    {
+      "id": "780483fd-ae6d-4cfb-8ce6-601b893a4c05",
       "name": "Jana",
-      "email": null,
+      "email": "jana.j.maclaren@gmail.com",
       "oauthId": null,
       "image": null,
       "recipientId": null,
-      "gifterId": "83c8daca-b0b8-414b-8084-293d77adb07f"
+      "gifterId": null
+    },
+    {
+      "id": "3fdacc38-7d29-43f5-89d9-1c705b392bd9",
+      "name": "Peter",
+      "email": "peter.planta@gmail.com",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
+    },
+    {
+      "id": "f7634e64-352b-45d4-84e6-d0e31ee77991",
+      "name": "Louis",
+      "email": "ldeschner@gmail.com",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
+    },
+    {
+      "id": "301d664d-cdcc-4c3e-a7e6-45e477dd2e3a",
+      "name": "Genevieve",
+      "email": "genevieve.ayukawa@gmail.com",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
     }
   ],
-  "messages": [
-    {
-      "id": "b67f563c-8faf-4caa-8363-9b76ff19f807",
-      "fromId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "toId": "41085360-f50b-4355-abe3-daf127ec802f",
-      "content": "Ho ho ho! I am your Secret Santa.",
-      "timestamp": "2025-11-20T17:42:14.926Z"
-    },
-    {
-      "id": "c0359694-134b-4c8f-aadd-c3120251452b",
-      "fromId": "41085360-f50b-4355-abe3-daf127ec802f",
-      "toId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "content": "I can't wait for my gift!",
-      "timestamp": "2025-11-20T17:43:12.310Z"
-    },
-    {
-      "id": "61d25c00-b9fd-46a2-b05a-3c81ed39d441",
-      "fromId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
-      "toId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
-      "content": "Lolol",
-      "timestamp": "2025-11-20T23:28:34.245Z"
-    },
-    {
-      "id": "7d2f2897-8f09-46af-a596-f48db91c9ce0",
-      "fromId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
-      "toId": "2ff545a4-468d-43fc-af43-291b1f2ac993",
-      "content": "You funny",
-      "timestamp": "2025-11-20T23:28:41.281Z"
-    },
-    {
-      "id": "8d28eab1-5749-4789-8e43-858669e62bfe",
-      "fromId": "83c8daca-b0b8-414b-8084-293d77adb07f",
-      "toId": null,
-      "content": "?!?!",
-      "timestamp": "2025-11-20T23:28:59.048Z"
-    }
-  ],
-  "lastRead": [
-    {
-      "userId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "conversationId": "41085360-f50b-4355-abe3-daf127ec802f_fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "lastReadAt": "2025-11-20T17:43:36.030Z"
-    },
-    {
-      "userId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe",
-      "conversationId": "fea83e4c-27ad-4fb2-b92e-10b96f3cbbbe_",
-      "lastReadAt": "2025-11-20T17:43:36.031Z"
-    },
-    {
-      "userId": "41085360-f50b-4355-abe3-daf127ec802f",
-      "conversationId": "41085360-f50b-4355-abe3-daf127ec802f_6e7cddd0-25a7-4e6a-b9f0-0173faddfdd4",
-      "lastReadAt": "2025-11-20T17:42:49.863Z"
-    },
-    {
-      "userId": "dec1ca1d-3834-4fff-95a5-0d59ef550c48",
-      "conversationId": "23d92b8a-327f-4b30-bc1e-f2b72c151ce5_dec1ca1d-3834-4fff-95a5-0d59ef550c48",
-      "lastReadAt": "2025-11-20T01:06:10.234Z"
-    },
-    {
-      "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
-      "conversationId": "2ff545a4-468d-43fc-af43-291b1f2ac993_86d78fb4-c3d2-4c52-b822-865771f4d9e3",
-      "lastReadAt": "2025-11-20T23:29:30.654Z"
-    },
-    {
-      "userId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3",
-      "conversationId": "86d78fb4-c3d2-4c52-b822-865771f4d9e3_",
-      "lastReadAt": "2025-11-20T23:29:25.769Z"
-    },
-    {
-      "userId": "83c8daca-b0b8-414b-8084-293d77adb07f",
-      "conversationId": "75bcbd86-b8a3-48eb-a88d-069644db214d_83c8daca-b0b8-414b-8084-293d77adb07f",
-      "lastReadAt": "2025-11-20T23:29:08.751Z"
-    },
-    {
-      "userId": "83c8daca-b0b8-414b-8084-293d77adb07f",
-      "conversationId": "83c8daca-b0b8-414b-8084-293d77adb07f_",
-      "lastReadAt": "2025-11-20T23:29:07.021Z"
-    }
-  ]
+  "messages": [],
+  "lastRead": []
 }

@@ -1,7 +1,6 @@
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { getUserByEmail, createUser, getUserById, getUsersByName, updateUser } from '@/lib/firestore';
-import { v4 as uuidv4 } from 'uuid';
+import { getUserByEmail, updateUser } from '@/lib/firestore';
 
 const providers = [
     GoogleProvider({
@@ -41,37 +40,26 @@ export const authOptions = {
     callbacks: {
         async signIn({ user, account, profile }) {
             try {
-                // Sync OAuth user with our database
+                // All participants should already exist with their emails
+                // Just need to update their OAuth data when they first log in
                 let dbUser = await getUserByEmail(user.email);
 
                 if (!dbUser) {
-                    // Check if there is a placeholder user with the same name (case-insensitive)
-                    // This handles the case where a user was added as a recipient (placeholder) before they logged in
-                    const existingUser = await getUsersByName(user.name);
-
-                    if (existingUser && !existingUser.email) {
-                        // Claim the placeholder account
-                        dbUser = existingUser;
-                        await updateUser(dbUser.id, {
-                            email: user.email,
-                            oauthId: account.providerAccountId,
-                            image: user.image,
-                            name: user.name // Update name to match OAuth profile
-                        });
-                    } else {
-                        // Create new user in our database
-                        dbUser = {
-                            id: uuidv4(),
-                            name: user.name || (profile && profile.name) || user.email.split('@')[0],
-                            email: user.email,
-                            oauthId: account.providerAccountId,
-                            image: user.image,
-                            recipientId: null,
-                            gifterId: null
-                        };
-                        await createUser(dbUser);
-                    }
+                    // User not in the hardcoded participants list
+                    // This shouldn't happen in production, but handle gracefully
+                    console.warn(`User ${user.email} not in participants list`);
+                    return false; // Deny sign-in
                 }
+
+                // Update OAuth data if not already set
+                if (!dbUser.oauthId) {
+                    await updateUser(dbUser.id, {
+                        oauthId: account.providerAccountId,
+                        image: user.image,
+                        name: user.name // Update name to match OAuth profile
+                    });
+                }
+
                 return true;
             } catch (error) {
                 console.error("Error in signIn callback:", error);
