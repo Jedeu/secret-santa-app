@@ -9,6 +9,12 @@ jest.mock('next-auth/providers/credentials', () => jest.fn());
 describe('Auth Configuration - Pre-created Participants', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.spyOn(console, 'error').mockImplementation(() => { });
+    });
+
+    afterEach(() => {
+        // Restore original console.error
+        console.error.mockRestore();
     });
 
     test('signIn callback updates existing participant with OAuth data', async () => {
@@ -101,5 +107,7 @@ describe('Auth Configuration - Pre-created Participants', () => {
         const result = await signIn({ user: mockUser, account: mockAccount });
 
         expect(result).toBe(false);
+        // Ensure console.error was called
+        expect(console.error).toHaveBeenCalled();
     });
 });
