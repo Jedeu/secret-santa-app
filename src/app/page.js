@@ -70,12 +70,6 @@ export default function Home() {
         santa: unreadData.santaUnread || 0
     };
 
-    // Initialize participants on app load
-    useEffect(() => {
-        fetch('/api/init', { method: 'POST' })
-            .catch(err => console.error('Failed to initialize participants:', err));
-    }, []);
-
     // Fetch providers
     useEffect(() => {
         getProviders().then(setProviders);
