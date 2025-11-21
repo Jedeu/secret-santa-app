@@ -63,7 +63,14 @@ function getLocalDB() {
         fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
     }
     const data = fs.readFileSync(DB_PATH, 'utf8');
-    return JSON.parse(data);
+    try {
+        return JSON.parse(data);
+    } catch (e) {
+        // If the JSON is corrupted, reset to a clean structure
+        const initialData = { users: [], messages: [], lastRead: [] };
+        fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
+        return initialData;
+    }
 }
 
 function saveLocalDB(data) {

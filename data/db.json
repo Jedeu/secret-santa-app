@@ -1,16 +1,16 @@
 {
   "users": [
     {
-      "id": "da0d9072-dfc5-48e6-9178-13d50d3177ba",
-      "name": "Booboo the foo",
+      "id": "0e23ce44-e615-452b-b7b6-5edb4dac872d",
+      "name": "Jed",
       "email": "jed.piezas@gmail.com",
-      "oauthId": "jed.piezas@gmail.com",
-      "image": "https://ui-avatars.com/api/?name=Booboo%20the%20foo",
-      "recipientId": "8d13c6f8-e1a7-47b0-8a64-4b14ab975088",
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
       "gifterId": null
     },
     {
-      "id": "d4332d80-aae7-433f-a10a-c5a33f5cd242",
+      "id": "b7550726-9402-46d8-99d0-0190889e3fb4",
       "name": "Natalie",
       "email": "ncammarasana@gmail.com",
       "oauthId": null,
@@ -19,7 +19,7 @@
       "gifterId": null
     },
     {
-      "id": "ba04ba8f-7a32-44fc-868c-9a720b06add7",
+      "id": "1de668eb-8cb3-4a7b-b2fc-3c7be1c4c01c",
       "name": "Chinh",
       "email": "chinhhuynhlmft@gmail.com",
       "oauthId": null,
@@ -28,7 +28,7 @@
       "gifterId": null
     },
     {
-      "id": "6728c048-4df7-4957-90d3-f0f868b987ce",
+      "id": "9904316c-95e1-4637-981b-56944b2efa96",
       "name": "Gaby",
       "email": "gabrielle@glim.ca",
       "oauthId": null,
@@ -37,25 +37,25 @@
       "gifterId": null
     },
     {
-      "id": "6bd54f24-5b7a-464e-be41-3068b82d325d",
+      "id": "780483fd-ae6d-4cfb-8ce6-601b893a4c05",
       "name": "Jana",
       "email": "jana.j.maclaren@gmail.com",
       "oauthId": null,
       "image": null,
       "recipientId": null,
-      "gifterId": "8d13c6f8-e1a7-47b0-8a64-4b14ab975088"
+      "gifterId": null
     },
     {
-      "id": "8d13c6f8-e1a7-47b0-8a64-4b14ab975088",
+      "id": "3fdacc38-7d29-43f5-89d9-1c705b392bd9",
       "name": "Peter",
       "email": "peter.planta@gmail.com",
-      "oauthId": "peter.planta@gmail.com",
-      "image": "https://ui-avatars.com/api/?name=Peter",
-      "recipientId": "6bd54f24-5b7a-464e-be41-3068b82d325d",
-      "gifterId": "da0d9072-dfc5-48e6-9178-13d50d3177ba"
+      "oauthId": null,
+      "image": null,
+      "recipientId": null,
+      "gifterId": null
     },
     {
-      "id": "93fd1e19-d2a5-400f-814b-1f3af65651a3",
+      "id": "f7634e64-352b-45d4-84e6-d0e31ee77991",
       "name": "Louis",
       "email": "ldeschner@gmail.com",
       "oauthId": null,
@@ -64,7 +64,7 @@
       "gifterId": null
     },
     {
-      "id": "7fcd2b8f-13fd-4550-add8-eae8a3257ffe",
+      "id": "301d664d-cdcc-4c3e-a7e6-45e477dd2e3a",
       "name": "Genevieve",
       "email": "genevieve.ayukawa@gmail.com",
       "oauthId": null,

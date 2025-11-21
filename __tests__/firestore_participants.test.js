@@ -3,13 +3,11 @@
  */
 
 import { ensureAllParticipants, getAllUsers, getUserByEmail } from '@/lib/firestore';
+import { PARTICIPANTS } from '@/lib/participants';
+
+const mockParticipants = PARTICIPANTS;
 
 describe('ensureAllParticipants', () => {
-    const mockParticipants = [
-        { name: 'Alice', email: 'alice@example.com' },
-        { name: 'Bob', email: 'bob@example.com' },
-        { name: 'Charlie', email: 'charlie@example.com' }
-    ];
 
     beforeEach(() => {
         // Reset the local DB before each test
@@ -24,7 +22,7 @@ describe('ensureAllParticipants', () => {
         await ensureAllParticipants(mockParticipants);
 
         const allUsers = await getAllUsers();
-        expect(allUsers).toHaveLength(3);
+        expect(allUsers).toHaveLength(PARTICIPANTS.length);
 
         // Check each participant was created correctly
         for (const participant of mockParticipants) {
@@ -43,28 +41,30 @@ describe('ensureAllParticipants', () => {
         // First call - creates participants
         await ensureAllParticipants(mockParticipants);
         const usersAfterFirst = await getAllUsers();
-        expect(usersAfterFirst).toHaveLength(3);
+        expect(usersAfterFirst).toHaveLength(PARTICIPANTS.length);
 
         // Second call - should not create duplicates
         await ensureAllParticipants(mockParticipants);
         const usersAfterSecond = await getAllUsers();
-        expect(usersAfterSecond).toHaveLength(3);
+        expect(usersAfterSecond).toHaveLength(PARTICIPANTS.length);
 
         // Verify same IDs
-        expect(usersAfterSecond[0].id).toBe(usersAfterFirst[0].id);
-        expect(usersAfterSecond[1].id).toBe(usersAfterFirst[1].id);
-        expect(usersAfterSecond[2].id).toBe(usersAfterFirst[2].id);
+        // IDs should stay the same for all participants
+        const idsFirst = usersAfterFirst.map(u => u.id).sort();
+        const idsSecond = usersAfterSecond.map(u => u.id).sort();
+        expect(idsSecond).toEqual(idsFirst);
     });
 
     test('should preserve existing user data when called again', async () => {
         await ensureAllParticipants(mockParticipants);
 
         // Get Alice and update her
-        const alice = await getUserByEmail('alice@example.com');
+        const participant = mockParticipants[0];
+        const user = await getUserByEmail(participant.email);
         const { updateUser } = require('@/lib/firestore');
-        await updateUser(alice.id, {
+        await updateUser(user.id, {
             oauthId: 'oauth123',
-            image: 'https://example.com/alice.jpg',
+            image: 'https://example.com/' + participant.name.toLowerCase() + '.jpg',
             recipientId: 'some-recipient-id'
         });
 
@@ -72,10 +72,11 @@ describe('ensureAllParticipants', () => {
         await ensureAllParticipants(mockParticipants);
 
         // Alice's data should be preserved
-        const aliceAfter = await getUserByEmail('alice@example.com');
-        expect(aliceAfter.oauthId).toBe('oauth123');
-        expect(aliceAfter.image).toBe('https://example.com/alice.jpg');
-        expect(aliceAfter.recipientId).toBe('some-recipient-id');
+        const participant2 = mockParticipants[0];
+        const userAfter = await getUserByEmail(participant2.email);
+        expect(userAfter.oauthId).toBe('oauth123');
+        expect(userAfter.image).toBe('https://example.com/' + participant2.name.toLowerCase() + '.jpg');
+        expect(userAfter.recipientId).toBe('some-recipient-id');
     });
 
     test('should handle empty participant list', async () => {
