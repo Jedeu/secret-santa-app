@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMessages, markAsRead, getLastRead, getUserById, getUserByEmail } from '@/lib/firestore';
+import { getMessages, markAsRead, getLastRead, getUserById, getUserByEmail, getUnreadCount } from '@/lib/firestore';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/auth.config";
 
@@ -42,16 +42,8 @@ export async function GET(request) {
         const lastRead = await getLastRead(user.id, recipientConvId);
         const lastReadAt = lastRead?.lastReadAt || new Date(0).toISOString();
 
-        // Fetch messages between user and recipient
-        // We want messages FROM recipient TO user
-        const messages = await getMessages(user.id, user.recipientId);
-
-        const unreadMessages = messages.filter(msg =>
-            msg.fromId === user.recipientId &&
-            msg.toId === user.id &&
-            msg.timestamp > lastReadAt
-        );
-        unreadCounts.recipient = unreadMessages.length;
+        // Efficiently count unread messages
+        unreadCounts.recipient = await getUnreadCount(user.id, user.recipientId, lastReadAt);
     }
 
     if (user.gifterId) {
@@ -59,16 +51,8 @@ export async function GET(request) {
         const lastRead = await getLastRead(user.id, santaConvId);
         const lastReadAt = lastRead?.lastReadAt || new Date(0).toISOString();
 
-        // Fetch messages between user and santa
-        // We want messages FROM santa TO user
-        const messages = await getMessages(user.id, user.gifterId);
-
-        const unreadMessages = messages.filter(msg =>
-            msg.fromId === user.gifterId &&
-            msg.toId === user.id &&
-            msg.timestamp > lastReadAt
-        );
-        unreadCounts.santa = unreadMessages.length;
+        // Efficiently count unread messages
+        unreadCounts.santa = await getUnreadCount(user.id, user.gifterId, lastReadAt);
     }
 
     return NextResponse.json(unreadCounts);

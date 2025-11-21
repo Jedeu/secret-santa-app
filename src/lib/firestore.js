@@ -343,6 +343,40 @@ export async function sendMessage(message) {
     return message;
 }
 
+export async function getUnreadCount(userId, otherId, lastReadAt) {
+    if (!useFirestore()) {
+        const db = getLocalDB();
+        return db.messages.filter(msg =>
+            msg.fromId === otherId &&
+            msg.toId === userId &&
+            msg.timestamp > lastReadAt
+        ).length;
+    }
+
+    // Use Firestore Aggregation Query for efficiency (1 read per 1000 items)
+    // We only count messages FROM the other person TO the user that are newer than lastReadAt
+    try {
+        const snapshot = await firestore.collection('messages')
+            .where('fromId', '==', otherId)
+            .where('toId', '==', userId)
+            .where('timestamp', '>', lastReadAt)
+            .count()
+            .get();
+
+        return snapshot.data().count;
+    } catch (error) {
+        console.error('Error counting unread messages, falling back to regular query:', error);
+        // Fallback for older SDKs or if count() fails
+        const snapshot = await firestore.collection('messages')
+            .where('fromId', '==', otherId)
+            .where('toId', '==', userId)
+            .where('timestamp', '>', lastReadAt)
+            .get();
+
+        return snapshot.size;
+    }
+}
+
 // --- Read Status ---
 
 export async function markAsRead(userId, conversationId) {
