@@ -129,10 +129,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
 
     return (
         <div className="card" style={{
-            height: 'calc(100dvh - 220px)',
-            minHeight: '300px',
+            flex: 1,
+            minHeight: 0, // Crucial for flex scrolling
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            marginBottom: 0, // Remove margin in full-height mode
+            overflow: 'hidden' // Ensure content doesn't spill out
         }}>
             <h3 className="subtitle" style={{
                 borderBottom: '1px solid var(--border)',
@@ -171,14 +173,26 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 alignItems: isMe ? 'flex-end' : 'flex-start',
-                                maxWidth: '70%'
+                                maxWidth: '75%'
                             }}>
+                                {!isMe && (
+                                    <span style={{
+                                        fontSize: '11px',
+                                        color: 'var(--text-muted)',
+                                        marginBottom: '2px',
+                                        marginLeft: '4px',
+                                        fontWeight: '500'
+                                    }}>
+                                        {isSantaChat ? (msg.fromId === currentUser.id ? 'You' : 'Santa 🎅') : (msg.fromId === currentUser.id ? 'You' : otherUser.name)}
+                                    </span>
+                                )}
                                 <div style={{
                                     background: isMe ? 'var(--primary)' : 'var(--surface-highlight)',
                                     color: isMe ? 'white' : 'var(--foreground)',
                                     padding: '8px 12px',
-                                    borderRadius: '12px',
-                                    fontSize: '14px'
+                                    borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                                    fontSize: '14px',
+                                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                                 }}>
                                     <ReactMarkdown
                                         remarkPlugins={[remarkGfm]}
@@ -202,11 +216,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                     </ReactMarkdown>
                                 </div>
                                 <span style={{
-                                    fontSize: '11px',
+                                    fontSize: '10px',
                                     color: 'var(--text-muted)',
-                                    marginTop: '4px',
-                                    paddingLeft: '4px',
-                                    paddingRight: '4px'
+                                    marginTop: '2px',
+                                    paddingRight: isMe ? '4px' : 0,
+                                    paddingLeft: isMe ? 0 : '4px',
+                                    opacity: 0.8
                                 }}>
                                     {formatRelativeTime(msg.timestamp)}
                                 </span>

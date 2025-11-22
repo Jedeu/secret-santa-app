@@ -52,7 +52,10 @@ button {
   max-width: 600px;
   margin: 0 auto;
   padding: 20px;
-  min-height: 100vh;
+  height: 100vh;
+  /* Fixed height for app-like feel */
+  overflow: hidden;
+  /* Prevent body scroll */
   display: flex;
   flex-direction: column;
 }
@@ -118,4 +121,21 @@ button {
 .text-muted {
   color: var(--text-muted);
   font-size: 14px;
+}
+
+@media (max-width: 800px) {
+  .container {
+    height: 100dvh;
+    min-height: 0;
+    /* Override base min-height to prevent scroll */
+    padding: 10px;
+    overflow: hidden;
+    /* Prevent body scroll */
+  }
+
+  /* Ensure the main content area takes available space */
+  main.container {
+    display: flex;
+    flex-direction: column;
+  }
 }
