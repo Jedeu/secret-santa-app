@@ -77,7 +77,7 @@ describe('UI Interaction Flows', () => {
         });
 
         // Mock empty message history initially
-        realtimeHooks.useRealtimeMessages.mockReturnValue([]);
+        realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
 
         render(<Home />);
 
@@ -115,7 +115,7 @@ describe('UI Interaction Flows', () => {
             error: null
         });
 
-        realtimeHooks.useRealtimeMessages.mockReturnValue([]);
+        realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
 
         render(<Home />);
         await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());
@@ -166,7 +166,7 @@ describe('UI Interaction Flows', () => {
         ];
 
         realtimeHooks.useRealtimeAllMessages.mockReturnValue(feedMessages);
-        realtimeHooks.useRealtimeMessages.mockReturnValue([]); // For chat tabs
+        // realtimeHooks.useRealtimeMessages.mockReturnValue([]); // No longer needed
 
         render(<Home />);
         await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());
@@ -203,12 +203,8 @@ describe('UI Interaction Flows', () => {
             }
         ];
 
-        realtimeHooks.useRealtimeMessages.mockImplementation((userId, otherUserId) => {
-            if (userId === userB.id && otherUserId === userA.id) {
-                return santaMessages;
-            }
-            return [];
-        });
+        // Update to mock useRealtimeAllMessages
+        realtimeHooks.useRealtimeAllMessages.mockReturnValue(santaMessages);
 
         render(<Home />);
         await waitFor(() => expect(screen.getByText('Hi, User B 👋')).toBeInTheDocument());
@@ -229,7 +225,7 @@ describe('UI Interaction Flows', () => {
             error: null
         });
 
-        realtimeHooks.useRealtimeMessages.mockReturnValue([]);
+        realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
 
         render(<Home />);
         await waitFor(() => expect(screen.getByText('Hi, User B 👋')).toBeInTheDocument());
@@ -277,7 +273,7 @@ describe('UI Interaction Flows', () => {
         ];
 
         realtimeHooks.useRealtimeAllMessages.mockReturnValue(feedMessages);
-        realtimeHooks.useRealtimeMessages.mockReturnValue([]);
+        // realtimeHooks.useRealtimeMessages.mockReturnValue([]); // No longer needed
 
         render(<Home />);
         await waitFor(() => expect(screen.getByText('Hi, User C 👋')).toBeInTheDocument());
@@ -324,12 +320,8 @@ describe('UI Interaction Flows', () => {
             }
         ];
 
-        realtimeHooks.useRealtimeMessages.mockImplementation((userId, otherUserId) => {
-            if (userId === userA.id && otherUserId === userB.id) {
-                return recipientMessages;
-            }
-            return [];
-        });
+        // Update to mock useRealtimeAllMessages
+        realtimeHooks.useRealtimeAllMessages.mockReturnValue(recipientMessages);
 
         render(<Home />);
         await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());

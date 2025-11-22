@@ -38,9 +38,9 @@ function formatRelativeTime(timestamp) {
     return messageTime.toLocaleDateString('en-US', options);
 }
 
-export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount }) {
-    // Use real-time message subscription instead of polling
-    const messages = useRealtimeMessages(currentUser.id, otherUser.id);
+export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount, messages }) {
+    // Use messages passed from parent instead of fetching internally
+    // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const bottomRef = useRef(null);
@@ -123,7 +123,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
     }, [showEmojiPicker]);
 
     return (
-        <div className="card" style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
+        <div className="card" style={{
+            height: 'calc(100dvh - 220px)',
+            minHeight: '300px',
+            display: 'flex',
+            flexDirection: 'column'
+        }}>
             <h3 className="subtitle" style={{
                 borderBottom: '1px solid var(--border)',
                 paddingBottom: '10px',

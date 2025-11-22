@@ -155,7 +155,7 @@ describe('useRealtimeAllMessages Hook', () => {
             return jest.fn();
         });
 
-        const { result } = renderHook(() => useRealtimeAllMessages());
+        const { result } = renderHook(() => useRealtimeAllMessages({ id: 'user1' }));
 
         await waitFor(() => {
             expect(mockOnSnapshot).toHaveBeenCalled();
@@ -178,7 +178,7 @@ describe('useRealtimeAllMessages Hook', () => {
         const mockUnsubscribe = jest.fn();
         mockOnSnapshot.mockReturnValue(mockUnsubscribe);
 
-        const { unmount } = renderHook(() => useRealtimeAllMessages());
+        const { unmount } = renderHook(() => useRealtimeAllMessages({ id: 'user1' }));
 
         await waitFor(() => {
             expect(mockOnSnapshot).toHaveBeenCalled();

@@ -59,7 +59,7 @@ export default function Home() {
     const [activeTab, setActiveTab] = useState('recipient'); // 'recipient', 'santa', 'feed'
 
     // Lift Public Feed messages to prevent re-downloading on tab switch
-    const allMessages = useRealtimeAllMessages();
+    const allMessages = useRealtimeAllMessages(currentUser);
 
     // Use real-time unread counts instead of polling
     const unreadData = useRealtimeUnreadCounts(
@@ -108,6 +108,15 @@ export default function Home() {
             fetchUsers();
         }
     }, [currentUser]);
+
+    // Helper to filter messages for specific conversation
+    const getConversationMessages = (userId, otherId) => {
+        if (!userId || !otherId) return [];
+        return allMessages.filter(msg =>
+            (msg.fromId === userId && msg.toId === otherId) ||
+            (msg.fromId === otherId && msg.toId === userId)
+        ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    };
 
     // Check if user needs to set recipient
     useEffect(() => {
@@ -485,6 +494,7 @@ export default function Home() {
                                 id: currentUser.recipientId,
                                 name: allUsers.find(u => u.id === currentUser.recipientId)?.name || 'Recipient'
                             }}
+                            messages={getConversationMessages(currentUser.id, currentUser.recipientId)}
                             isSantaChat={false}
                             unreadCount={unreadCounts.recipient || 0}
                         />
@@ -494,6 +504,7 @@ export default function Home() {
                         <Chat
                             currentUser={currentUser}
                             otherUser={{ id: currentUser.gifterId, name: 'Santa' }}
+                            messages={getConversationMessages(currentUser.id, currentUser.gifterId)}
                             isSantaChat={true}
                             unreadCount={unreadCounts.santa || 0}
                         />
