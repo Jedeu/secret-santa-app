@@ -3,6 +3,14 @@
 
 // Used for __tests__/testing-library.js
 // Learn more: https://github.com/testing-library/jest-dom
+// Mock fetch globally for Firebase Auth (needed in Node environment)
+global.fetch = jest.fn(() =>
+    Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+    })
+);
+
 import '@testing-library/jest-dom'
 
 // Suppress specific console warnings

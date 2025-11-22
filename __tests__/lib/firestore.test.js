@@ -1,131 +1,216 @@
 import { getUserByEmail, createUser, sendMessage, getMessages, getAllUsers, batchUpdateUsers, markAsRead, getLastRead, resetDatabase } from '@/lib/firestore';
-import fs from 'fs';
-import path from 'path';
 
-// Mock fs to avoid writing to disk
-jest.mock('fs');
-jest.mock('path', () => ({
-    join: jest.fn(() => '/mock/db.json'),
-    dirname: jest.fn(() => '/mock')
-}));
-
-// Mock Firebase (we want to test local fallback logic mostly, or mock firestore if we can)
-// Since the app uses local fallback when firestore is not init, we'll test that path for simplicity
-// as it covers the core logic. Ideally we'd mock the firestore module itself.
+// Mock Firebase Admin SDK
 jest.mock('@/lib/firebase', () => ({
-    firestore: null // Force local DB fallback
+    firestore: {
+        collection: jest.fn(function () { return this; }),
+        where: jest.fn(function () { return this; }),
+        limit: jest.fn(function () { return this; }),
+        orderBy: jest.fn(function () { return this; }),
+        get: jest.fn(),
+        doc: jest.fn(() => ({
+            set: jest.fn(),
+            get: jest.fn(),
+            update: jest.fn(),
+            ref: 'mockRef'
+        })),
+        batch: jest.fn(),
+    }
 }));
 
-describe('Firestore (Local Fallback)', () => {
-    const mockDbPath = '/mock/db.json';
-    let mockDb;
+// Get reference to the mocked firestore for test setup
+import { firestore as mockFirestore } from '@/lib/firebase';
 
+describe('Firestore Functions (Unit Tests with Mocks)', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        // path mocks are handled in factory
+    });
 
-        // Initial DB state
-        mockDb = {
-            users: [],
-            messages: [],
-            lastRead: []
-        };
+    describe('getUserByEmail', () => {
+        test('should return user when found', async () => {
+            const mockUser = { id: '1', name: 'Alice', email: 'alice@example.com' };
+            mockFirestore.get.mockResolvedValueOnce({
+                empty: false,
+                docs: [{ data: () => mockUser }]
+            });
 
-        // Mock fs.existsSync
-        fs.existsSync.mockImplementation((p) => {
-            if (p === mockDbPath) return true;
-            if (p === '/mock') return true;
-            return false;
+            const user = await getUserByEmail('alice@example.com');
+
+            expect(user).toEqual(mockUser);
+            expect(mockFirestore.collection).toHaveBeenCalledWith('users');
+            expect(mockFirestore.where).toHaveBeenCalledWith('email', '==', 'alice@example.com');
         });
 
-        // Mock fs.readFileSync
-        fs.readFileSync.mockImplementation(() => JSON.stringify(mockDb));
+        test('should return null when user not found', async () => {
+            mockFirestore.get.mockResolvedValueOnce({ empty: true });
 
-        // Mock fs.writeFileSync
-        fs.writeFileSync.mockImplementation((p, data) => {
-            if (p === mockDbPath) {
-                mockDb = JSON.parse(data);
-            }
+            const user = await getUserByEmail('notfound@example.com');
+
+            expect(user).toBeNull();
         });
     });
 
-    test('createUser adds a user to the DB', async () => {
-        const newUser = { id: '1', name: 'Alice', email: 'alice@example.com' };
-        await createUser(newUser);
+    describe('createUser', () => {
+        test('should create user with normalized name', async () => {
+            const mockDoc = { set: jest.fn().mockResolvedValue(undefined) };
+            mockFirestore.doc.mockReturnValue(mockDoc);
 
-        expect(mockDb.users).toHaveLength(1);
-        expect(mockDb.users[0]).toEqual(newUser);
-        expect(fs.writeFileSync).toHaveBeenCalled();
+            const newUser = { id: '1', name: 'alice smith', email: 'alice@example.com' };
+
+            await createUser(newUser);
+
+            expect(mockFirestore.collection).toHaveBeenCalledWith('users');
+            expect(mockFirestore.doc).toHaveBeenCalledWith('1');
+            expect(mockDoc.set).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    name: 'Alice Smith', // Should be title-cased
+                    email: 'alice@example.com'
+                })
+            );
+        });
     });
 
-    test('getUserByEmail finds the correct user', async () => {
-        mockDb.users = [{ id: '1', name: 'Alice', email: 'alice@example.com' }];
+    describe('sendMessage', () => {
+        test('should send message to Firestore', async () => {
+            const mockDoc = { set: jest.fn().mockResolvedValue(undefined) };
+            mockFirestore.doc.mockReturnValue(mockDoc);
 
-        const user = await getUserByEmail('alice@example.com');
-        expect(user).toEqual(mockDb.users[0]);
+            const msg = { id: 'm1', fromId: '1', toId: '2', content: 'Hello', timestamp: '2023-01-01T10:00:00Z' };
 
-        const notFound = await getUserByEmail('bob@example.com');
-        expect(notFound).toBeNull();
+            await sendMessage(msg);
+
+            expect(mockFirestore.collection).toHaveBeenCalledWith('messages');
+            expect(mockFirestore.doc).toHaveBeenCalledWith('m1');
+            expect(mockDoc.set).toHaveBeenCalledWith(msg);
+        });
     });
 
-    test('sendMessage adds a message', async () => {
-        const msg = { id: 'm1', fromId: '1', toId: '2', content: 'Hello' };
-        await sendMessage(msg);
+    describe('getMessages', () => {
+        test('should retrieve conversation between two users', async () => {
+            const msg1 = { id: 'm1', fromId: '1', toId: '2', content: 'Hi', timestamp: '2023-01-01T10:00:00Z' };
+            const msg2 = { id: 'm2', fromId: '2', toId: '1', content: 'Hello', timestamp: '2023-01-01T10:01:00Z' };
 
-        expect(mockDb.messages).toHaveLength(1);
-        expect(mockDb.messages[0]).toEqual(msg);
+            // Mock two separate queries (sent and received)
+            mockFirestore.get
+                .mockResolvedValueOnce({
+                    forEach: (cb) => [msg1].forEach(msg => cb({ data: () => msg }))
+                })
+                .mockResolvedValueOnce({
+                    forEach: (cb) => [msg2].forEach(msg => cb({ data: () => msg }))
+                });
+
+            const conversation = await getMessages('1', '2');
+
+            expect(conversation).toHaveLength(2);
+            expect(conversation[0].id).toBe('m1');
+            expect(conversation[1].id).toBe('m2');
+        });
     });
 
-    test('getMessages retrieves conversation between two users', async () => {
-        mockDb.messages = [
-            { id: 'm1', fromId: '1', toId: '2', content: 'Hi', timestamp: '2023-01-01T10:00:00Z' },
-            { id: 'm2', fromId: '2', toId: '1', content: 'Hello', timestamp: '2023-01-01T10:01:00Z' },
-            { id: 'm3', fromId: '1', toId: '3', content: 'Other', timestamp: '2023-01-01T10:02:00Z' }
-        ];
+    describe('getAllUsers', () => {
+        test('should retrieve all users', async () => {
+            const users = [
+                { id: '1', name: 'Alice' },
+                { id: '2', name: 'Bob' }
+            ];
 
-        const conversation = await getMessages('1', '2');
-        expect(conversation).toHaveLength(2);
-        expect(conversation[0].id).toBe('m1');
-        expect(conversation[1].id).toBe('m2');
+            mockFirestore.get.mockResolvedValueOnce({
+                forEach: (cb) => users.forEach(user => cb({ data: () => user }))
+            });
+
+            const result = await getAllUsers();
+
+            expect(result).toEqual(users);
+            expect(mockFirestore.collection).toHaveBeenCalledWith('users');
+        });
     });
 
-    test('batchUpdateUsers updates multiple users', async () => {
-        mockDb.users = [
-            { id: '1', name: 'Alice', recipientId: null },
-            { id: '2', name: 'Bob', recipientId: null }
-        ];
+    describe('batchUpdateUsers', () => {
+        test('should batch update multiple users', async () => {
+            const mockBatch = {
+                update: jest.fn(),
+                commit: jest.fn().mockResolvedValue(undefined)
+            };
+            mockFirestore.batch.mockReturnValue(mockBatch);
+            mockFirestore.doc.mockReturnValue({ ref: 'mockRef' });
 
-        const updates = [
-            { id: '1', recipientId: '2' },
-            { id: '2', recipientId: '1' }
-        ];
+            const updates = [
+                { id: '1', recipientId: '2', gifterId: '3' },
+                { id: '2', recipientId: '1', gifterId: '4' }
+            ];
 
-        await batchUpdateUsers(updates);
+            await batchUpdateUsers(updates);
 
-        expect(mockDb.users[0].recipientId).toBe('2');
-        expect(mockDb.users[1].recipientId).toBe('1');
+            expect(mockFirestore.batch).toHaveBeenCalled();
+            expect(mockBatch.update).toHaveBeenCalledTimes(2);
+            expect(mockBatch.commit).toHaveBeenCalled();
+        });
     });
 
-    test('markAsRead and getLastRead work correctly', async () => {
-        await markAsRead('1', 'conv_1_2');
+    describe('markAsRead and getLastRead', () => {
+        test('should mark conversation as read', async () => {
+            const mockDoc = { set: jest.fn().mockResolvedValue(undefined) };
+            mockFirestore.doc.mockReturnValue(mockDoc);
 
-        const lastRead = await getLastRead('1', 'conv_1_2');
-        expect(lastRead).toBeDefined();
-        expect(lastRead.userId).toBe('1');
-        expect(lastRead.conversationId).toBe('conv_1_2');
-        expect(lastRead.lastReadAt).toBeDefined();
+            await markAsRead('user1', 'conv_1_2');
+
+            expect(mockFirestore.collection).toHaveBeenCalledWith('lastRead');
+            expect(mockFirestore.doc).toHaveBeenCalledWith('user1_conv_1_2');
+            expect(mockDoc.set).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    userId: 'user1',
+                    conversationId: 'conv_1_2'
+                })
+            );
+        });
+
+        test('should get last read timestamp', async () => {
+            const mockData = { userId: 'user1', conversationId: 'conv_1_2', lastReadAt: '2023-01-01T10:00:00Z' };
+            const mockDoc = {
+                get: jest.fn().mockResolvedValue({
+                    exists: true,
+                    data: () => mockData
+                })
+            };
+            mockFirestore.doc.mockReturnValue(mockDoc);
+
+            const result = await getLastRead('user1', 'conv_1_2');
+
+            expect(result).toEqual(mockData);
+        });
+
+        test('should return null when no read status exists', async () => {
+            const mockDoc = {
+                get: jest.fn().mockResolvedValue({ exists: false })
+            };
+            mockFirestore.doc.mockReturnValue(mockDoc);
+
+            const result = await getLastRead('user1', 'conv_1_2');
+
+            expect(result).toBeNull();
+        });
     });
 
-    test('resetDatabase clears all data', async () => {
-        mockDb.users = [{ id: '1', name: 'Alice' }];
-        mockDb.messages = [{ id: 'm1', content: 'Hi' }];
-        mockDb.lastRead = [{ userId: '1', conversationId: 'c1' }];
+    describe('resetDatabase', () => {
+        test('should delete all documents from all collections', async () => {
+            const mockBatch = {
+                delete: jest.fn(),
+                commit: jest.fn().mockResolvedValue(undefined)
+            };
+            mockFirestore.batch.mockReturnValue(mockBatch);
 
-        await resetDatabase();
+            // Mock empty collections with docs array
+            mockFirestore.get.mockResolvedValue({
+                docs: [],
+                forEach: jest.fn()
+            });
 
-        expect(mockDb.users).toHaveLength(0);
-        expect(mockDb.messages).toHaveLength(0);
-        expect(mockDb.lastRead).toHaveLength(0);
-        expect(fs.writeFileSync).toHaveBeenCalled();
+            await resetDatabase();
+
+            expect(mockFirestore.collection).toHaveBeenCalledWith('users');
+            expect(mockFirestore.collection).toHaveBeenCalledWith('messages');
+            expect(mockFirestore.collection).toHaveBeenCalledWith('lastRead');
+            expect(mockBatch.commit).toHaveBeenCalledTimes(3);
+        });
     });
 });
