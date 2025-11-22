@@ -1,19 +1,25 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from '@testing-library/react';
-import Home from '@/app/page';
-import { useSession, getProviders } from 'next-auth/react';
 
-// Mock next-auth
-jest.mock('next-auth/react');
+import { render, screen, waitFor } from '@testing-library/react';
+import { useUser } from '@/hooks/useUser';
+
+// Mock useUser hook
+jest.mock('@/hooks/useUser');
+
+// Mock firebase-client to prevent initialization issues
+jest.mock('@/lib/firebase-client', () => ({
+    firestore: null,
+    clientAuth: null
+}));
+
+// Now import the component after mocks are set up
+import Home from '@/app/page';
 
 // Mock child components to simplify testing
 jest.mock('@/components/Chat', () => () => <div data-testid="chat-component">Chat</div>);
 jest.mock('@/components/PublicFeed', () => () => <div data-testid="feed-component">Feed</div>);
-
-// Mock fetch
-global.fetch = jest.fn();
 
 describe('Admin UI Visibility', () => {
     beforeEach(() => {
@@ -23,24 +29,17 @@ describe('Admin UI Visibility', () => {
             json: async () => [],
             ok: true
         });
-
-        // Mock getProviders
-        getProviders.mockResolvedValue({
-            google: { id: 'google', name: 'Google' },
-            credentials: { id: 'credentials', name: 'Credentials' }
-        });
     });
 
     it('shows reset button for admin user (jed.piezas@gmail.com)', async () => {
-        useSession.mockReturnValue({
-            data: {
-                user: {
-                    name: 'Jed',
-                    email: 'jed.piezas@gmail.com',
-                    recipientId: null // Ensure we are in the "waiting" state where button is visible
-                }
+        useUser.mockReturnValue({
+            user: {
+                name: 'Jed',
+                email: 'jed.piezas@gmail.com',
+                recipientId: null // Ensure we are in the "waiting" state where button is visible
             },
-            status: 'authenticated'
+            loading: false,
+            error: null
         });
 
         render(<Home />);
@@ -51,15 +50,14 @@ describe('Admin UI Visibility', () => {
     });
 
     it('does NOT show reset button for non-admin user', async () => {
-        useSession.mockReturnValue({
-            data: {
-                user: {
-                    name: 'Chinh',
-                    email: 'chinh@example.com',
-                    recipientId: null
-                }
+        useUser.mockReturnValue({
+            user: {
+                name: 'Chinh',
+                email: 'chinh@example.com',
+                recipientId: null
             },
-            status: 'authenticated'
+            loading: false,
+            error: null
         });
 
         render(<Home />);
@@ -70,15 +68,14 @@ describe('Admin UI Visibility', () => {
     });
 
     it('does NOT show reset button if user has a recipient (even if admin)', async () => {
-        useSession.mockReturnValue({
-            data: {
-                user: {
-                    name: 'Jed',
-                    email: 'jed.piezas@gmail.com',
-                    recipientId: 'some-id'
-                }
+        useUser.mockReturnValue({
+            user: {
+                name: 'Jed',
+                email: 'jed.piezas@gmail.com',
+                recipientId: 'some-id'
             },
-            status: 'authenticated'
+            loading: false,
+            error: null
         });
 
         render(<Home />);

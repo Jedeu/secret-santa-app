@@ -3,7 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
-import { useRealtimeMessages } from '@/hooks/useRealtimeMessages';
+import { useRealtimeMessages, updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
+import { firestore } from '@/lib/firebase-client';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { v4 as uuidv4 } from 'uuid';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -45,19 +48,8 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
     const emojiPickerRef = useRef(null);
 
     // Mark messages as read when component mounts or messages change
-    const markAsRead = async () => {
-        await fetch('/api/unread', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                otherUserId: otherUser.id,
-                userId: currentUser.id  // For dev mode
-            })
-        });
-    };
-
     useEffect(() => {
-        markAsRead(); // Mark as read when opening chat
+        updateLastReadTimestamp(currentUser.id, otherUser.id);
     }, [currentUser.id, otherUser.id]);
 
     useEffect(() => {
@@ -76,18 +68,23 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        await fetch('/api/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        try {
+            // Write directly to Firestore for instant updates
+            const messageData = {
+                id: uuidv4(),
                 fromId: currentUser.id,
                 toId: otherUser.id,
-                content: newMessage
-            })
-        });
+                content: newMessage.trim(),
+                timestamp: new Date().toISOString() // Use ISO string for consistency
+            };
 
-        setNewMessage('');
-        // No need to manually fetch - real-time listener will update automatically
+            await addDoc(collection(firestore, 'messages'), messageData);
+            setNewMessage('');
+            // Real-time listener will automatically update the UI
+        } catch (error) {
+            console.error('Error sending message:', error);
+            alert('Failed to send message. Please try again.');
+        }
     };
 
     // Handle emoji selection

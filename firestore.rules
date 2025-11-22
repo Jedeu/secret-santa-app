@@ -1,0 +1,14 @@
+// Minimal Firestore security rules for the Secret Santa app
+// Allow any authenticated user to read/write their own documents.
+// Adjust as needed for production security.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write on any collection for authenticated users
+    // You can tighten this by checking request.auth.uid against document fields.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

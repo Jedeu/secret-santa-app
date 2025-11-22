@@ -1,10 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useRealtimeAllMessages } from '@/hooks/useRealtimeMessages';
 
-export default function PublicFeed() {
-    // Use real-time message subscription instead of polling
-    const messages = useRealtimeAllMessages();
+export default function PublicFeed({ messages = [], allUsers = [] }) {
     const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
     const [lastViewed, setLastViewed] = useState({}); // Track when each thread was last viewed
 
@@ -20,42 +17,50 @@ export default function PublicFeed() {
     // In every pair, there is one Santa and one Recipient.
     // The Recipient is the public identity that defines the thread (e.g. "Santa for Bob").
     const threads = {};
-    messages.forEach(msg => {
-        // We need to identify the "Recipient" user ID in this pair.
-        // Based on our API logic:
-        // If isSantaMsg=true, from=Santa, to=Recipient. RecipientID is toId.
-        // If isSantaMsg=false, from=Recipient, to=Santa. RecipientID is fromId.
+    messages.forEach(rawMsg => {
+        // Resolve users to determine direction and names
+        const fromUser = allUsers.find(u => u.id === rawMsg.fromId);
+        const toUser = allUsers.find(u => u.id === rawMsg.toId);
 
-        // However, the public API masks IDs for the Santa side?
-        // Let's check the API response structure from previous steps.
-        // The API returns the original msg object + fromName/toName masked.
-        // It does NOT mask the IDs in the object itself, only the names are computed for display?
-        // Wait, looking at route.js:
-        // return { ...msg, fromName: ..., toName: ... }
-        // It returns the full message object.
-        // So we have fromId and toId.
+        let isSantaMsg = rawMsg.isSantaMsg;
 
-        // We need to know which ID belongs to the "Recipient" role in this specific exchange.
-        // But we don't have the user database here to know who is whose recipient.
-        // We only have the message.
-        // Fortunately, the API adds `isSantaMsg`.
-        // If isSantaMsg === true: from=Santa, to=Recipient. Key = msg.toId.
-        // If isSantaMsg === false: from=Recipient, to=Santa. Key = msg.fromId.
-
-        let threadId;
-        let threadName;
-
-        if (msg.isSantaMsg) {
-            threadId = msg.toId;
-            threadName = `Santa ➔ ${msg.toName}`;
-        } else {
-            threadId = msg.fromId;
-            threadName = `${msg.fromName} ➔ Santa`;
+        // If isSantaMsg is undefined, derive it from user relationships
+        if (isSantaMsg === undefined) {
+            if (fromUser && fromUser.recipientId === rawMsg.toId) {
+                isSantaMsg = true; // Santa -> Recipient
+            } else if (toUser && toUser.gifterId === rawMsg.fromId) {
+                isSantaMsg = true; // Santa -> Recipient (checked via recipient)
+            } else {
+                isSantaMsg = false; // Recipient -> Santa
+            }
         }
 
-        // Actually, we want a stable name for the thread, like "Exchange: Bob".
-        // If isSantaMsg=true, toName is Bob.
-        // If isSantaMsg=false, fromName is Bob.
+        let fromName = rawMsg.fromName;
+        let toName = rawMsg.toName;
+
+        if (!fromName) {
+            fromName = isSantaMsg ? 'Secret Santa' : (fromUser?.name || 'Unknown');
+        }
+        if (!toName) {
+            toName = isSantaMsg ? (toUser?.name || 'Unknown') : 'Secret Santa';
+        }
+
+        const msg = {
+            ...rawMsg,
+            isSantaMsg,
+            fromName,
+            toName
+        };
+
+        let threadId;
+        // We group by the Recipient's ID to keep the conversation together
+        if (msg.isSantaMsg) {
+            threadId = msg.toId;
+        } else {
+            threadId = msg.fromId;
+        }
+
+        // Stable name for the thread
         const recipientName = msg.isSantaMsg ? msg.toName : msg.fromName;
         const stableThreadName = `🎁 ${recipientName}'s Gift Exchange`;
 

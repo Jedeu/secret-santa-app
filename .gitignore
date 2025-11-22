@@ -17,9 +17,6 @@
 .DS_Stored
 *.pem
 
-# Local Database
-data/db.json
-
 # Debug
 npm-debug.log*
 yarn-debug.log*
