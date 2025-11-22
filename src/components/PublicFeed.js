@@ -101,7 +101,14 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
     };
 
     return (
-        <div className="card">
+        <div className="card" style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            marginBottom: 0,
+            overflow: 'hidden'
+        }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
                 {selectedThread && (
                     <button
@@ -117,7 +124,7 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
                 </h3>
             </div>
 
-            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
                 {!selectedThread ? (
                     // Thread List
                     threadList.length === 0 ? (
@@ -165,20 +172,70 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
                     )
                 ) : (
                     // Message View
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {threads[selectedThread]?.messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)).map(msg => (
-                            <div key={msg.id} style={{
-                                padding: '8px 12px',
-                                background: 'var(--surface-highlight)',
-                                borderRadius: '8px',
-                                fontSize: '14px'
-                            }}>
-                                <div style={{ marginBottom: '4px', fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>
-                                    {msg.fromName} ➔ {msg.toName}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px' }}>
+                        {(() => {
+                            const sortedMessages = threads[selectedThread]?.messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)) || [];
+                            const groups = [];
+
+                            sortedMessages.forEach(msg => {
+                                const lastGroup = groups[groups.length - 1];
+                                const isSanta = msg.isSantaMsg;
+
+                                if (lastGroup && lastGroup.isSanta === isSanta) {
+                                    lastGroup.messages.push(msg);
+                                } else {
+                                    groups.push({
+                                        id: msg.id, // Use first message id as group key
+                                        isSanta,
+                                        fromName: msg.fromName,
+                                        messages: [msg]
+                                    });
+                                }
+                            });
+
+                            return groups.map(group => (
+                                <div key={group.id} style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: group.isSanta ? 'flex-end' : 'flex-start',
+                                    width: '100%'
+                                }}>
+                                    <div style={{
+                                        marginBottom: '4px',
+                                        fontSize: '11px',
+                                        fontWeight: '600',
+                                        color: 'var(--text-muted)',
+                                        padding: '0 4px'
+                                    }}>
+                                        {group.isSanta ? '🎅 Santa' : group.fromName}
+                                    </div>
+
+                                    <div style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '2px',
+                                        maxWidth: '85%',
+                                        alignItems: group.isSanta ? 'flex-end' : 'flex-start'
+                                    }}>
+                                        {group.messages.map((msg, idx) => (
+                                            <div key={msg.id} style={{
+                                                padding: '8px 12px',
+                                                background: 'var(--surface-highlight)',
+                                                color: 'var(--foreground)',
+                                                borderRadius: '4px',
+                                                fontSize: '14px',
+                                                borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
+                                                borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
+                                                marginBottom: '2px',
+                                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                            }}>
+                                                {msg.content}
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                                <div>{msg.content}</div>
-                            </div>
-                        ))}
+                            ));
+                        })()}
                     </div>
                 )}
             </div>

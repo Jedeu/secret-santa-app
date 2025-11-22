@@ -46,28 +46,65 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
     const emojiPickerRef = useRef(null);
+    const lastReadRef = useRef(0);
 
     // Mark messages as read when component mounts or messages change
     useEffect(() => {
         updateLastReadTimestamp(currentUser.id, otherUser.id);
+        lastReadRef.current = Date.now();
     }, [currentUser.id, otherUser.id]);
 
-    useEffect(() => {
-        // Mark as read when new messages arrive while chat is open
-        if (messages.length > 0) {
-            updateLastReadTimestamp(currentUser.id, otherUser.id);
-        }
+    const scrollToBottom = (behavior = 'smooth') => {
+        bottomRef.current?.scrollIntoView({ behavior });
+    };
 
-        // Only auto-scroll if we're already near the bottom (within 100px)
-        // This prevents annoying scroll jumps when user is reading old messages
+    const checkIfRead = () => {
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
-            const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100;
-            if (isNearBottom) {
-                bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 20;
+            if (isAtBottom) {
+                // Debounce: only update if > 2 seconds since last update
+                const now = Date.now();
+                if (now - lastReadRef.current > 2000) {
+                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    lastReadRef.current = now;
+                }
             }
         }
-    }, [messages.length, currentUser.id, otherUser.id]); // Only trigger when message count changes
+    };
+
+    useEffect(() => {
+        // Check if content fits in viewport (no scroll needed) -> Mark as read
+        const chatContainer = bottomRef.current?.parentElement;
+        if (chatContainer) {
+            if (chatContainer.scrollHeight <= chatContainer.clientHeight) {
+                // Debounce: only update if > 2 seconds since last update
+                const now = Date.now();
+                if (now - lastReadRef.current > 2000) {
+                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    lastReadRef.current = now;
+                }
+            }
+        }
+    }, [messages, currentUser.id, otherUser.id]);
+
+    useEffect(() => {
+        // Auto-scroll logic for *my* messages
+        const chatContainer = bottomRef.current?.parentElement;
+        if (chatContainer) {
+            const lastMessage = messages[messages.length - 1];
+            const isMyMessage = lastMessage?.fromId === currentUser.id;
+
+            if (isMyMessage) {
+                // Use 'auto' for instant scroll if it's my message to avoid lag perception
+                scrollToBottom('auto');
+            }
+        }
+    }, [messages, currentUser.id]);
+
+    const handleScroll = (e) => {
+        checkIfRead();
+    };
 
     const sendMessage = async (e) => {
         e.preventDefault();
@@ -85,7 +122,8 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
 
             await addDoc(collection(firestore, 'messages'), messageData);
             setNewMessage('');
-            // Real-time listener will automatically update the UI
+            // Force scroll to bottom immediately after sending
+            scrollToBottom('auto');
         } catch (error) {
             console.error('Error sending message:', error);
             alert('Failed to send message. Please try again.');
@@ -129,10 +167,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
 
     return (
         <div className="card" style={{
-            height: 'calc(100dvh - 220px)',
-            minHeight: '300px',
+            flex: 1,
+            minHeight: 0, // Crucial for flex scrolling
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            marginBottom: 0, // Remove margin in full-height mode
+            overflow: 'hidden' // Ensure content doesn't spill out
         }}>
             <h3 className="subtitle" style={{
                 borderBottom: '1px solid var(--border)',
@@ -158,7 +198,10 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 )}
             </h3>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
+            <div
+                style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}
+                onScroll={handleScroll}
+            >
                 {messages.map(msg => {
                     const isMe = msg.fromId === currentUser.id;
                     return (
@@ -171,14 +214,26 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 alignItems: isMe ? 'flex-end' : 'flex-start',
-                                maxWidth: '70%'
+                                maxWidth: '75%'
                             }}>
+                                {!isMe && (
+                                    <span style={{
+                                        fontSize: '11px',
+                                        color: 'var(--text-muted)',
+                                        marginBottom: '2px',
+                                        marginLeft: '4px',
+                                        fontWeight: '500'
+                                    }}>
+                                        {isSantaChat ? (msg.fromId === currentUser.id ? 'You' : 'Santa 🎅') : (msg.fromId === currentUser.id ? 'You' : otherUser.name)}
+                                    </span>
+                                )}
                                 <div style={{
                                     background: isMe ? 'var(--primary)' : 'var(--surface-highlight)',
                                     color: isMe ? 'white' : 'var(--foreground)',
                                     padding: '8px 12px',
-                                    borderRadius: '12px',
-                                    fontSize: '14px'
+                                    borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                                    fontSize: '14px',
+                                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                                 }}>
                                     <ReactMarkdown
                                         remarkPlugins={[remarkGfm]}
@@ -202,11 +257,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                     </ReactMarkdown>
                                 </div>
                                 <span style={{
-                                    fontSize: '11px',
+                                    fontSize: '10px',
                                     color: 'var(--text-muted)',
-                                    marginTop: '4px',
-                                    paddingLeft: '4px',
-                                    paddingRight: '4px'
+                                    marginTop: '2px',
+                                    paddingRight: isMe ? '4px' : 0,
+                                    paddingLeft: isMe ? 0 : '4px',
+                                    opacity: 0.8
                                 }}>
                                     {formatRelativeTime(msg.timestamp)}
                                 </span>
