@@ -8,16 +8,6 @@ import { PARTICIPANTS } from '@/lib/participants';
 const mockParticipants = PARTICIPANTS;
 
 describe('ensureAllParticipants', () => {
-
-    beforeEach(() => {
-        // Reset the local DB before each test
-        const fs = require('fs');
-        const path = require('path');
-        const dbPath = path.join(process.cwd(), 'data', 'db.json');
-        const initialData = { users: [], messages: [], lastRead: [] };
-        fs.writeFileSync(dbPath, JSON.stringify(initialData, null, 2));
-    });
-
     test('should create all participants if they do not exist', async () => {
         await ensureAllParticipants(mockParticipants);
 

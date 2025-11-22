@@ -5,15 +5,6 @@
 import { POST } from '@/app/api/init/route';
 import { getAllUsers } from '@/lib/firestore';
 
-// Reset database before each test
-beforeEach(() => {
-    const fs = require('fs');
-    const path = require('path');
-    const dbPath = path.join(process.cwd(), 'data', 'db.json');
-    const initialData = { users: [], messages: [], lastRead: [] };
-    fs.writeFileSync(dbPath, JSON.stringify(initialData, null, 2));
-});
-
 describe('POST /api/init', () => {
     test('should initialize all 8 participants', async () => {
         const response = await POST();

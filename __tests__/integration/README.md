@@ -19,6 +19,13 @@ npm run test:integration
 - **firestore_participants.test.js**: Tests participant initialization and management with real Firestore
 - **init.test.js**: Tests the `/api/init` endpoint that seeds participant data
 
+## Test Data Management
+
+Integration tests use the Firebase Emulator, which provides automatic data isolation:
+- Each emulator session starts fresh with an empty database
+- No need for manual database resets between tests
+- The emulator maintains its own in-memory data separate from production
+
 ## Why Separate from Unit Tests?
 
 Integration tests are slower and require external services (Firebase Emulator). By separating them:
