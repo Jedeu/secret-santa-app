@@ -72,7 +72,25 @@ export default function Home() {
         santa: unreadData.santaUnread || 0
     };
 
+    // Helper to filter messages for specific conversation
+    const getConversationMessages = (userId, otherId) => {
+        if (!userId || !otherId) return [];
+        return allMessages.filter(msg =>
+            (msg.fromId === userId && msg.toId === otherId) ||
+            (msg.fromId === otherId && msg.toId === userId)
+        ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    };
 
+    // Memoize messages to prevent infinite render loops
+    const recipientMessages = useMemo(() =>
+        getConversationMessages(currentUser?.id, currentUser?.recipientId),
+        [allMessages, currentUser?.id, currentUser?.recipientId]
+    );
+
+    const santaMessages = useMemo(() =>
+        getConversationMessages(currentUser?.id, currentUser?.gifterId),
+        [allMessages, currentUser?.id, currentUser?.gifterId]
+    );
 
     // Fetch all users when authenticated
     useEffect(() => {
@@ -108,15 +126,6 @@ export default function Home() {
             fetchUsers();
         }
     }, [currentUser]);
-
-    // Helper to filter messages for specific conversation
-    const getConversationMessages = (userId, otherId) => {
-        if (!userId || !otherId) return [];
-        return allMessages.filter(msg =>
-            (msg.fromId === userId && msg.toId === otherId) ||
-            (msg.fromId === otherId && msg.toId === userId)
-        ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-    };
 
     // Check if user needs to set recipient
     useEffect(() => {
@@ -404,17 +413,6 @@ export default function Home() {
             </main>
         );
     }
-
-    // Memoize messages to prevent infinite render loops
-    const recipientMessages = useMemo(() =>
-        getConversationMessages(currentUser?.id, currentUser?.recipientId),
-        [allMessages, currentUser?.id, currentUser?.recipientId]
-    );
-
-    const santaMessages = useMemo(() =>
-        getConversationMessages(currentUser?.id, currentUser?.gifterId),
-        [allMessages, currentUser?.id, currentUser?.gifterId]
-    );
 
     return (
         <main className="container">
