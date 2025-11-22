@@ -52,22 +52,47 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         updateLastReadTimestamp(currentUser.id, otherUser.id);
     }, [currentUser.id, otherUser.id]);
 
-    useEffect(() => {
-        // Mark as read when new messages arrive while chat is open
-        if (messages.length > 0) {
-            updateLastReadTimestamp(currentUser.id, otherUser.id);
-        }
+    const scrollToBottom = (behavior = 'smooth') => {
+        bottomRef.current?.scrollIntoView({ behavior });
+    };
 
-        // Only auto-scroll if we're already near the bottom (within 100px)
-        // This prevents annoying scroll jumps when user is reading old messages
+    const checkIfRead = () => {
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
-            const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100;
-            if (isNearBottom) {
-                bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 20;
+            if (isAtBottom) {
+                updateLastReadTimestamp(currentUser.id, otherUser.id);
             }
         }
-    }, [messages.length, currentUser.id, otherUser.id]); // Only trigger when message count changes
+    };
+
+    useEffect(() => {
+        // Check if content fits in viewport (no scroll needed) -> Mark as read
+        const chatContainer = bottomRef.current?.parentElement;
+        if (chatContainer) {
+            if (chatContainer.scrollHeight <= chatContainer.clientHeight) {
+                updateLastReadTimestamp(currentUser.id, otherUser.id);
+            }
+        }
+    }, [messages, currentUser.id, otherUser.id]);
+
+    useEffect(() => {
+        // Auto-scroll logic for *my* messages
+        const chatContainer = bottomRef.current?.parentElement;
+        if (chatContainer) {
+            const lastMessage = messages[messages.length - 1];
+            const isMyMessage = lastMessage?.fromId === currentUser.id;
+
+            if (isMyMessage) {
+                // Use 'auto' for instant scroll if it's my message to avoid lag perception
+                scrollToBottom('auto');
+            }
+        }
+    }, [messages, currentUser.id]);
+
+    const handleScroll = (e) => {
+        checkIfRead();
+    };
 
     const sendMessage = async (e) => {
         e.preventDefault();
@@ -85,7 +110,8 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
 
             await addDoc(collection(firestore, 'messages'), messageData);
             setNewMessage('');
-            // Real-time listener will automatically update the UI
+            // Force scroll to bottom immediately after sending
+            scrollToBottom('auto');
         } catch (error) {
             console.error('Error sending message:', error);
             alert('Failed to send message. Please try again.');
@@ -160,7 +186,10 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 )}
             </h3>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
+            <div
+                style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}
+                onScroll={handleScroll}
+            >
                 {messages.map(msg => {
                     const isMe = msg.fromId === currentUser.id;
                     return (
