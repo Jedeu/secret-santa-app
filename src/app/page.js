@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { signInWithPopup, signOut as firebaseSignOut, GoogleAuthProvider } from 'firebase/auth';
 import { collection, getDocs, query, where, limit, writeBatch } from 'firebase/firestore';
 import { clientAuth, firestore } from '@/lib/firebase-client';
@@ -405,7 +405,17 @@ export default function Home() {
         );
     }
 
-    // Authenticated user with recipient assigned
+    // Memoize messages to prevent infinite render loops
+    const recipientMessages = useMemo(() =>
+        getConversationMessages(currentUser?.id, currentUser?.recipientId),
+        [allMessages, currentUser?.id, currentUser?.recipientId]
+    );
+
+    const santaMessages = useMemo(() =>
+        getConversationMessages(currentUser?.id, currentUser?.gifterId),
+        [allMessages, currentUser?.id, currentUser?.gifterId]
+    );
+
     return (
         <main className="container">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -494,7 +504,7 @@ export default function Home() {
                                 id: currentUser.recipientId,
                                 name: allUsers.find(u => u.id === currentUser.recipientId)?.name || 'Recipient'
                             }}
-                            messages={getConversationMessages(currentUser.id, currentUser.recipientId)}
+                            messages={recipientMessages}
                             isSantaChat={false}
                             unreadCount={unreadCounts.recipient || 0}
                         />
@@ -504,7 +514,7 @@ export default function Home() {
                         <Chat
                             currentUser={currentUser}
                             otherUser={{ id: currentUser.gifterId, name: 'Santa' }}
-                            messages={getConversationMessages(currentUser.id, currentUser.gifterId)}
+                            messages={santaMessages}
                             isSantaChat={true}
                             unreadCount={unreadCounts.santa || 0}
                         />

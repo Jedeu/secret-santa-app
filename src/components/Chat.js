@@ -61,7 +61,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         if (chatContainer) {
             const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 20;
             if (isAtBottom) {
-                updateLastReadTimestamp(currentUser.id, otherUser.id);
+                // Debounce: only update if > 2 seconds since last update
+                const now = Date.now();
+                if (now - lastReadRef.current > 2000) {
+                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    lastReadRef.current = now;
+                }
             }
         }
     };
@@ -71,7 +76,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
             if (chatContainer.scrollHeight <= chatContainer.clientHeight) {
-                updateLastReadTimestamp(currentUser.id, otherUser.id);
+                // Debounce: only update if > 2 seconds since last update
+                const now = Date.now();
+                if (now - lastReadRef.current > 2000) {
+                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    lastReadRef.current = now;
+                }
             }
         }
     }, [messages, currentUser.id, otherUser.id]);
