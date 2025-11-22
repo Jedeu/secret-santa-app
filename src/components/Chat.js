@@ -38,9 +38,9 @@ function formatRelativeTime(timestamp) {
     return messageTime.toLocaleDateString('en-US', options);
 }
 
-export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount }) {
-    // Use real-time message subscription instead of polling
-    const messages = useRealtimeMessages(currentUser.id, otherUser.id);
+export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount, messages }) {
+    // Use messages passed from parent instead of fetching internally
+    // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const bottomRef = useRef(null);
@@ -53,6 +53,11 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
     }, [currentUser.id, otherUser.id]);
 
     useEffect(() => {
+        // Mark as read when new messages arrive while chat is open
+        if (messages.length > 0) {
+            updateLastReadTimestamp(currentUser.id, otherUser.id);
+        }
+
         // Only auto-scroll if we're already near the bottom (within 100px)
         // This prevents annoying scroll jumps when user is reading old messages
         const chatContainer = bottomRef.current?.parentElement;
@@ -62,7 +67,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
                 bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
             }
         }
-    }, [messages.length]); // Only trigger when message count changes
+    }, [messages.length, currentUser.id, otherUser.id]); // Only trigger when message count changes
 
     const sendMessage = async (e) => {
         e.preventDefault();
@@ -123,7 +128,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount 
     }, [showEmojiPicker]);
 
     return (
-        <div className="card" style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
+        <div className="card" style={{
+            height: 'calc(100dvh - 220px)',
+            minHeight: '300px',
+            display: 'flex',
+            flexDirection: 'column'
+        }}>
             <h3 className="subtitle" style={{
                 borderBottom: '1px solid var(--border)',
                 paddingBottom: '10px',

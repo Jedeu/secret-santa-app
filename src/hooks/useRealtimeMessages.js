@@ -80,11 +80,11 @@ export function useRealtimeMessages(userId, otherUserId) {
  * 
  * @returns {Array} - Array of all messages
  */
-export function useRealtimeAllMessages() {
+export function useRealtimeAllMessages(user) {
     const [messages, setMessages] = useState([]);
 
     useEffect(() => {
-        if (!firestore) return;
+        if (!firestore || !user) return;
 
         const messagesRef = collection(firestore, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'desc'));
@@ -101,7 +101,7 @@ export function useRealtimeAllMessages() {
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [user]);
 
     return messages;
 }
@@ -120,8 +120,12 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         recipientUnread: 0,
         santaUnread: 0
     });
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     useEffect(() => {
+        const handleRefresh = () => setRefreshTrigger(prev => prev + 1);
+        window.addEventListener('unread-refresh', handleRefresh);
+
         if (!userId || !firestore) return;
 
         // Get lastRead timestamps from localStorage
@@ -185,9 +189,10 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
         // Cleanup all subscriptions on unmount
         return () => {
+            window.removeEventListener('unread-refresh', handleRefresh);
             unsubscribers.forEach(unsub => unsub());
         };
-    }, [userId, recipientId, gifterId]);
+    }, [userId, recipientId, gifterId, refreshTrigger]);
 
     return unreadCounts;
 }
@@ -201,4 +206,7 @@ export function updateLastReadTimestamp(userId, otherUserId) {
     const conversationId = getConversationId(userId, otherUserId);
     const key = `lastRead_${userId}_${conversationId}`;
     localStorage.setItem(key, new Date().toISOString());
+
+    // Dispatch event so the rest of the app knows a read happened
+    window.dispatchEvent(new Event('unread-refresh'));
 }
