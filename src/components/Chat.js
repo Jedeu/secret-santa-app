@@ -38,7 +38,7 @@ function formatRelativeTime(timestamp) {
     return messageTime.toLocaleDateString('en-US', options);
 }
 
-export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount, messages }) {
+export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount, messages, conversationId }) {
     // Use messages passed from parent instead of fetching internally
     // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
@@ -117,7 +117,8 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 fromId: currentUser.id,
                 toId: otherUser.id,
                 content: newMessage.trim(),
-                timestamp: new Date().toISOString() // Use ISO string for consistency
+                timestamp: new Date().toISOString(), // Use ISO string for consistency
+                conversationId: conversationId // Add conversationId for routing
             };
 
             await addDoc(collection(firestore, 'messages'), messageData);

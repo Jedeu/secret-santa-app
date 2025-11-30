@@ -225,29 +225,27 @@ describe('useRealtimeUnreadCounts Hook', () => {
 
         // Trigger recipient snapshot (e.g., 3 unread messages)
         await act(async () => {
+            const recipientDocs = [
+                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) },
+                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) },
+                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) }
+            ];
             recipientCallback({
                 size: 3,
-                docs: [], // We only use size in the simplified hook, or docs if calculating client side
-                // The hook implementation uses snapshot.size or filters docs. 
-                // Let's check the hook implementation. It uses snapshot.size if simple count, 
-                // or filters docs if checking timestamps.
-                // The refactored hook likely filters by timestamp client side or uses a query.
-                // Assuming the hook uses snapshot.docs to filter:
-                docs: [
-                    { data: () => ({ timestamp: { toMillis: () => Date.now() } }) },
-                    { data: () => ({ timestamp: { toMillis: () => Date.now() } }) },
-                    { data: () => ({ timestamp: { toMillis: () => Date.now() } }) }
-                ]
+                docs: recipientDocs,
+                forEach: (cb) => recipientDocs.forEach(cb)
             });
         });
 
         // Trigger santa snapshot (e.g., 1 unread message)
         await act(async () => {
+            const santaDocs = [
+                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) }
+            ];
             santaCallback({
                 size: 1,
-                docs: [
-                    { data: () => ({ timestamp: { toMillis: () => Date.now() } }) }
-                ]
+                docs: santaDocs,
+                forEach: (cb) => santaDocs.forEach(cb)
             });
         });
 

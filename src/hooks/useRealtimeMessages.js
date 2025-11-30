@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { firestore } from '@/lib/firebase-client';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 
+import { getConversationId } from '@/lib/message-utils';
+
 /**
  * Custom hook to subscribe to real-time message updates for a specific conversation
  * 
@@ -135,7 +137,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         };
 
         // Create conversation IDs (sorted for consistency)
-        const getConversationId = (userId1, userId2) => {
+        const getLegacyConversationId = (userId1, userId2) => {
             return [userId1, userId2].sort().join('_');
         };
 
@@ -143,8 +145,11 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
         // Set up listener for recipient messages
         if (recipientId) {
-            const recipientConvId = getConversationId(userId, recipientId);
+            const recipientConvId = getLegacyConversationId(userId, recipientId);
             const recipientLastRead = getLastReadTimestamp(recipientConvId);
+
+            // Expected conversation ID: I am Santa, they are Recipient
+            const expectedConvId = getConversationId(userId, recipientId);
 
             const messagesRef = collection(firestore, 'messages');
             const q = query(
@@ -155,7 +160,19 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             );
 
             const unsubscribe = onSnapshot(q, (snapshot) => {
-                const count = snapshot.size;
+                let count = 0;
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // If message has conversationId, it MUST match
+                    if (data.conversationId) {
+                        if (data.conversationId === expectedConvId) {
+                            count++;
+                        }
+                    } else {
+                        // Legacy message - count it
+                        count++;
+                    }
+                });
                 setUnreadCounts(prev => ({ ...prev, recipientUnread: count }));
             }, (error) => {
                 console.error('Error in recipient unread listener:', error);
@@ -166,8 +183,11 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
         // Set up listener for Santa messages
         if (gifterId) {
-            const santaConvId = getConversationId(userId, gifterId);
+            const santaConvId = getLegacyConversationId(userId, gifterId);
             const santaLastRead = getLastReadTimestamp(santaConvId);
+
+            // Expected conversation ID: They are Santa, I am Recipient
+            const expectedConvId = getConversationId(gifterId, userId);
 
             const messagesRef = collection(firestore, 'messages');
             const q = query(
@@ -178,7 +198,19 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             );
 
             const unsubscribe = onSnapshot(q, (snapshot) => {
-                const count = snapshot.size;
+                let count = 0;
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // If message has conversationId, it MUST match
+                    if (data.conversationId) {
+                        if (data.conversationId === expectedConvId) {
+                            count++;
+                        }
+                    } else {
+                        // Legacy message - count it
+                        count++;
+                    }
+                });
                 setUnreadCounts(prev => ({ ...prev, santaUnread: count }));
             }, (error) => {
                 console.error('Error in Santa unread listener:', error);
