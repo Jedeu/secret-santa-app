@@ -22,8 +22,21 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
 
         let isSantaMsg = rawMsg.isSantaMsg;
 
-        // If isSantaMsg is undefined, derive it from user relationships
-        // (This logic is still useful for legacy messages or display logic)
+        // If message has conversationId, use it to determine role definitively
+        if (rawMsg.conversationId) {
+            // conversationId format: santa_ID_recipient_ID
+            const parts = rawMsg.conversationId.split('_recipient_');
+            if (parts.length === 2) {
+                const santaPart = parts[0]; // santa_ID
+                const santaId = santaPart.replace('santa_', '');
+
+                // If the sender is the Santa of this conversation, it's a Santa message
+                isSantaMsg = rawMsg.fromId === santaId;
+            }
+        }
+
+        // Fallback: If isSantaMsg is still undefined (legacy), derive it from user relationships
+        // Note: This fallback is ambiguous in cycles (A->B and B->A), but it's the best we can do for legacy data.
         if (isSantaMsg === undefined) {
             if (fromUser && fromUser.recipientId === rawMsg.toId) {
                 isSantaMsg = true; // Santa -> Recipient

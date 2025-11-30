@@ -39,9 +39,19 @@ describe('PublicFeed Grouping Logic', () => {
         // Verify content grouping
         // Click on Jed's thread
         fireEvent.click(screen.getByText("🎁 Jed's Gift Exchange"));
+
+        // Check message content
         expect(screen.getByText('Ho ho ho')).toBeInTheDocument();
         expect(screen.getByText('Thanks Santa')).toBeInTheDocument();
         expect(screen.queryByText('I am your Santa')).not.toBeInTheDocument();
+
+        // Verify Sender Identity
+        // "Ho ho ho" is from Louis (Santa) -> Should be labeled "🎅 Santa"
+        // "Thanks Santa" is from Jed (Recipient) -> Should be labeled "Jed"
+
+        // We can check for the presence of the labels
+        expect(screen.getByText('🎅 Santa')).toBeInTheDocument();
+        expect(screen.getByText('Jed')).toBeInTheDocument();
     });
 
     test('handles legacy messages (fallback logic)', () => {
