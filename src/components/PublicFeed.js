@@ -13,9 +13,7 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
         }
     }, []);
 
-    // Group messages by the "Recipient" of the Secret Santa pair.
-    // In every pair, there is one Santa and one Recipient.
-    // The Recipient is the public identity that defines the thread (e.g. "Santa for Bob").
+    // Group messages by conversationId to ensure threads are consolidated correctly.
     const threads = {};
     messages.forEach(rawMsg => {
         // Resolve users to determine direction and names
@@ -25,6 +23,7 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
         let isSantaMsg = rawMsg.isSantaMsg;
 
         // If isSantaMsg is undefined, derive it from user relationships
+        // (This logic is still useful for legacy messages or display logic)
         if (isSantaMsg === undefined) {
             if (fromUser && fromUser.recipientId === rawMsg.toId) {
                 isSantaMsg = true; // Santa -> Recipient
@@ -53,15 +52,35 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
         };
 
         let threadId;
-        // We group by the Recipient's ID to keep the conversation together
-        if (msg.isSantaMsg) {
-            threadId = msg.toId;
+        let recipientName;
+
+        if (msg.conversationId) {
+            // New logic: Use conversationId directly
+            threadId = msg.conversationId;
+
+            // Extract recipientId from conversationId (format: santa_X_recipient_Y)
+            const parts = msg.conversationId.split('_recipient_');
+            if (parts.length === 2) {
+                const recipientId = parts[1];
+                const recipientUser = allUsers.find(u => u.id === recipientId);
+                recipientName = recipientUser?.name || 'Unknown';
+            } else {
+                recipientName = 'Unknown';
+            }
         } else {
-            threadId = msg.fromId;
+            // Legacy logic: Group by Recipient's ID
+            if (msg.isSantaMsg) {
+                threadId = msg.toId;
+                recipientName = msg.toName;
+            } else {
+                threadId = msg.fromId;
+                recipientName = msg.fromName;
+            }
+            // Attempt to normalize legacy threadId to match new format if possible
+            // But without knowing for sure who is Santa/Recipient in a cycle, it's hard.
+            // For now, we keep legacy behavior for legacy messages.
         }
 
-        // Stable name for the thread
-        const recipientName = msg.isSantaMsg ? msg.toName : msg.fromName;
         const stableThreadName = `🎁 ${recipientName}'s Gift Exchange`;
 
         if (!threads[threadId]) {
