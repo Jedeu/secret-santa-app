@@ -7,6 +7,7 @@ import { useUser } from '@/hooks/useUser';
 import Chat from '@/components/Chat';
 import PublicFeed from '@/components/PublicFeed';
 import { useRealtimeUnreadCounts, useRealtimeAllMessages } from '@/hooks/useRealtimeMessages';
+import { getConversationId, filterMessages } from '@/lib/message-utils';
 import { getParticipantNames, getParticipantEmail } from '@/lib/participants';
 
 // Tab button component
@@ -73,23 +74,29 @@ export default function Home() {
     };
 
     // Helper to filter messages for specific conversation
-    const getConversationMessages = (userId, otherId) => {
-        if (!userId || !otherId) return [];
-        return allMessages.filter(msg =>
-            (msg.fromId === userId && msg.toId === otherId) ||
-            (msg.fromId === otherId && msg.toId === userId)
-        ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const getConversationMessages = (userId, otherId, conversationId) => {
+        return filterMessages(allMessages, userId, otherId, conversationId);
     };
 
     // Memoize messages to prevent infinite render loops
+    const recipientConversationId = useMemo(() =>
+        getConversationId(currentUser?.id, currentUser?.recipientId),
+        [currentUser?.id, currentUser?.recipientId]
+    );
+
+    const santaConversationId = useMemo(() =>
+        getConversationId(currentUser?.gifterId, currentUser?.id),
+        [currentUser?.gifterId, currentUser?.id]
+    );
+
     const recipientMessages = useMemo(() =>
-        getConversationMessages(currentUser?.id, currentUser?.recipientId),
-        [allMessages, currentUser?.id, currentUser?.recipientId]
+        getConversationMessages(currentUser?.id, currentUser?.recipientId, recipientConversationId),
+        [allMessages, currentUser?.id, currentUser?.recipientId, recipientConversationId]
     );
 
     const santaMessages = useMemo(() =>
-        getConversationMessages(currentUser?.id, currentUser?.gifterId),
-        [allMessages, currentUser?.id, currentUser?.gifterId]
+        getConversationMessages(currentUser?.id, currentUser?.gifterId, santaConversationId),
+        [allMessages, currentUser?.id, currentUser?.gifterId, santaConversationId]
     );
 
     // Fetch all users when authenticated
@@ -505,6 +512,7 @@ export default function Home() {
                             messages={recipientMessages}
                             isSantaChat={false}
                             unreadCount={unreadCounts.recipient || 0}
+                            conversationId={recipientConversationId}
                         />
                     )}
 
@@ -515,6 +523,7 @@ export default function Home() {
                             messages={santaMessages}
                             isSantaChat={true}
                             unreadCount={unreadCounts.santa || 0}
+                            conversationId={santaConversationId}
                         />
                     )}
 
