@@ -8,9 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
-    "test:unit": "jest --testPathIgnorePatterns=/integration/",
+    "test:unit": "jest --testPathIgnorePatterns=/integration/ --testPathIgnorePatterns=/helpers/ --testPathIgnorePatterns=setup.js",
     "test:integration": "jest __tests__/integration",
     "test:watch": "jest --watch",
+    "test:smart": "./.claude/skills/test-runner/run-tests.sh",
     "emulators": "firebase emulators:start"
   },
   "dependencies": {

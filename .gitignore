@@ -5,6 +5,7 @@
 
 # Testing
 /coverage
+/qa_artifacts
 
 # Next.js
 /.next/
