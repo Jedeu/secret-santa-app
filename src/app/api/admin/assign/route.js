@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAllUsers, batchUpdateUsers } from '@/lib/firestore';
 import { auth as adminAuth } from '@/lib/firebase';
+import { isAdmin } from '@/lib/config';
 
 export async function POST(request) {
     try {
@@ -18,7 +19,7 @@ export async function POST(request) {
         const email = decodedToken.email;
 
         // Check if user is admin
-        if (email !== 'jed.piezas@gmail.com') {
+        if (!isAdmin(email)) {
             return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 403 });
         }
 

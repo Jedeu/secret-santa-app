@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { firestore } from '@/lib/firebase-client';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 
-import { getConversationId } from '@/lib/message-utils';
+import { getConversationId, getLegacyConversationId } from '@/lib/message-utils';
 
 /**
  * Custom hook to subscribe to real-time message updates for a specific conversation
@@ -136,11 +136,6 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             return localStorage.getItem(key) || new Date(0).toISOString();
         };
 
-        // Create conversation IDs (sorted for consistency)
-        const getLegacyConversationId = (userId1, userId2) => {
-            return [userId1, userId2].sort().join('_');
-        };
-
         const unsubscribers = [];
 
         // Set up listener for recipient messages
@@ -231,11 +226,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
 // Helper to update lastRead timestamp in localStorage
 export function updateLastReadTimestamp(userId, otherUserId) {
-    const getConversationId = (userId1, userId2) => {
-        return [userId1, userId2].sort().join('_');
-    };
-
-    const conversationId = getConversationId(userId, otherUserId);
+    const conversationId = getLegacyConversationId(userId, otherUserId);
     const key = `lastRead_${userId}_${conversationId}`;
     localStorage.setItem(key, new Date().toISOString());
 

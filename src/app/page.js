@@ -9,6 +9,7 @@ import PublicFeed from '@/components/PublicFeed';
 import { useRealtimeUnreadCounts, useRealtimeAllMessages } from '@/hooks/useRealtimeMessages';
 import { getConversationId, filterMessages } from '@/lib/message-utils';
 import { getParticipantNames, getParticipantEmail } from '@/lib/participants';
+import { isAdmin } from '@/lib/config';
 
 // Tab button component
 function TabButton({ active, onClick, children, unreadCount }) {
@@ -384,7 +385,7 @@ export default function Home() {
                     </form>
 
                     {/* Admin Reset on Welcome Screen */}
-                    {currentUser.email === 'jed.piezas@gmail.com' && (
+                    {isAdmin(currentUser.email) && (
                         <button
                             onClick={handleReset}
                             style={{
@@ -427,7 +428,7 @@ export default function Home() {
                 <h1 className="title" style={{ margin: 0, fontSize: '20px' }}>Hi, {currentUser.name} 👋</h1>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                     {/* Admin Reset Button - Always visible for admin */}
-                    {currentUser.email === 'jed.piezas@gmail.com' && (
+                    {isAdmin(currentUser.email) && (
                         <button
                             onClick={handleReset}
                             style={{
@@ -456,7 +457,7 @@ export default function Home() {
                     <p style={{ marginBottom: '10px' }}>Waiting for assignments...</p>
 
                     {/* Admin Controls */}
-                    {currentUser.email === 'jed.piezas@gmail.com' && (
+                    {isAdmin(currentUser.email) && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
                             <button className="btn" onClick={handleAssign} style={{ background: 'var(--surface-highlight)' }}>
                                 Start Exchange (Admin)

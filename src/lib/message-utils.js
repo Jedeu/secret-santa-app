@@ -2,7 +2,7 @@
 /**
  * Generates a unique conversation ID for a Secret Santa pair.
  * The ID is deterministic based on the Santa and Recipient IDs.
- * 
+ *
  * @param {string} santaId - The ID of the Santa
  * @param {string} recipientId - The ID of the Recipient
  * @returns {string} - The conversation ID
@@ -10,6 +10,20 @@
 export function getConversationId(santaId, recipientId) {
     if (!santaId || !recipientId) return null;
     return `santa_${santaId}_recipient_${recipientId}`;
+}
+
+/**
+ * Generates a legacy conversation ID by sorting and joining user IDs.
+ * Used for backward compatibility with messages that don't have conversationId.
+ * This format loses directionality (who is Santa vs Recipient).
+ *
+ * @param {string} userId1 - First user's ID
+ * @param {string} userId2 - Second user's ID
+ * @returns {string} - The legacy conversation ID
+ */
+export function getLegacyConversationId(userId1, userId2) {
+    if (!userId1 || !userId2) return null;
+    return [userId1, userId2].sort().join('_');
 }
 
 /**
