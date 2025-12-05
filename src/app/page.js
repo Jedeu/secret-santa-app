@@ -61,7 +61,8 @@ export default function Home() {
     const [activeTab, setActiveTab] = useState('recipient'); // 'recipient', 'santa', 'feed'
 
     // Lift Public Feed messages to prevent re-downloading on tab switch
-    const allMessages = useRealtimeAllMessages(currentUser);
+    // Listener sets up immediately on mount (no user dependency) to avoid cold starts
+    const allMessages = useRealtimeAllMessages();
 
     // Use real-time unread counts instead of polling
     const unreadData = useRealtimeUnreadCounts(

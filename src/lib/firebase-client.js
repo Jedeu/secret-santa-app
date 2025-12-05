@@ -1,5 +1,10 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+    getFirestore,
+    connectFirestoreEmulator,
+    enableIndexedDbPersistence,
+    CACHE_SIZE_UNLIMITED
+} from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 
 // Client-side Firebase configuration
@@ -15,6 +20,7 @@ const firebaseConfig = {
 let app;
 let db = null;
 let auth = null;
+let persistenceEnabled = false;
 
 if (typeof window !== 'undefined') {
     // Only initialize in browser environment
@@ -27,14 +33,37 @@ if (typeof window !== 'undefined') {
             // Connect to emulators in development
             if (process.env.NODE_ENV === 'development') {
                 try {
-                    console.log('🔥 Connecting to Firebase Emulators...');
+                    console.log('[Firestore] Connecting to Firebase Emulators...');
                     connectFirestoreEmulator(db, '127.0.0.1', 8080);
                     connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-                    console.log('✅ Connected to Firebase Emulators (Firestore: 8080, Auth: 9099)');
+                    console.log('[Firestore] Connected to Firebase Emulators (Firestore: 8080, Auth: 9099)');
                 } catch (emulatorError) {
-                    console.error('❌ Failed to connect to Firebase Emulators:', emulatorError.message);
+                    console.error('[Firestore] Failed to connect to Firebase Emulators:', emulatorError.message);
                     console.error('Make sure emulators are running: npm run emulators');
                 }
+            }
+
+            // Enable offline persistence for client-side caching
+            // This reduces Firestore reads by serving data from IndexedDB when possible
+            if (!persistenceEnabled) {
+                enableIndexedDbPersistence(db, {
+                    cacheSizeBytes: CACHE_SIZE_UNLIMITED
+                })
+                    .then(() => {
+                        persistenceEnabled = true;
+                        console.log('[Firestore] Offline persistence enabled - reads will be cached locally');
+                    })
+                    .catch((err) => {
+                        if (err.code === 'failed-precondition') {
+                            // Multiple tabs open, persistence can only be enabled in one tab at a time
+                            console.warn('[Firestore] Persistence unavailable: multiple tabs open');
+                        } else if (err.code === 'unimplemented') {
+                            // Browser doesn't support persistence
+                            console.warn('[Firestore] Persistence unavailable: browser not supported');
+                        } else {
+                            console.warn('[Firestore] Persistence error:', err.message);
+                        }
+                    });
             }
         } catch (error) {
             console.warn('Firebase client initialization failed:', error.message);

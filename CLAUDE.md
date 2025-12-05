@@ -165,3 +165,33 @@ The separation between Admin and Client SDKs is strict.
 Be extra careful when modifying message routing logic.
 - **Legacy vs New:** `src/lib/message-utils.js` contains complex logic to handle both legacy messages (no `conversationId`) and new messages.
 - **Consult Tests:** Always run `__tests__/unit/PublicFeed_grouping.test.js` after touching message logic.
+
+### 4. Firestore Listener Management (Read Optimization)
+
+The app uses optimized Firestore listeners to minimize reads on the free tier.
+
+**Singleton Pattern for All Messages:**
+- `useRealtimeAllMessages()` uses a singleton listener shared across all components
+- Only ONE Firestore listener for all messages exists at any time
+- Prevents duplicate listeners during React.StrictMode double-mounts
+
+**Listener Tracking (Dev Mode):**
+- `src/lib/firestore-listener-tracker.js` provides debugging utilities
+- In browser console, use `window.__firestoreDebug.printListenerSummary()` to see active listeners
+- All listener creation/destruction is logged with `[Firestore]` prefix
+
+**Client-Side Caching:**
+- IndexedDB persistence is enabled via `enableIndexedDbPersistence()`
+- Subsequent reads often come from cache (0 Firestore reads)
+- Look for "from CACHE" vs "from SERVER" in snapshot logs
+
+**Key Optimizations Applied:**
+1. `includeMetadataChanges: false` - Reduces unnecessary snapshot callbacks
+2. Singleton pattern for `allMessages` listener - Prevents duplicate reads
+3. Refs to track listener state in StrictMode - Prevents recreation on double-mount
+4. Memoized params comparison in `useRealtimeUnreadCounts` - Only recreates on real changes
+
+**Expected Read Behavior:**
+- Page refresh: ONE initial read of all messages (N reads for N docs)
+- Send message: ONE read (only the new message via listener update)
+- View message tab: ZERO reads (filtered client-side from cached messages)
