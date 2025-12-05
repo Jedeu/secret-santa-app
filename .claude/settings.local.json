@@ -5,7 +5,8 @@
       "Bash(lsof:*)",
       "Bash(curl:*)",
       "Bash(FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node:*)",
-      "Bash(npm run test:unit:*)"
+      "Bash(npm run test:unit:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
