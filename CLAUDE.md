@@ -198,23 +198,24 @@ The app uses optimized Firestore listeners to minimize reads on the free tier.
 
 ## The RPI Workflow (Research -> Plan -> Implement)
 
-To avoid the "Dumb Zone" (context saturation), we strictly follow this 3-phase process for complex features:
+To avoid the "Dumb Zone" (context saturation), we strictly follow this 3-phase process using our specialized agents.
 
 ### Phase 1: Research (The Truth)
+* **Agent:** `codebase-research-analyst`
 * **Goal:** Understand the *current* state of the codebase relevant to the request.
-* **Action:** Read files, check imports, verify assumptions.
+* **Action:** Read files, check imports, verify assumptions against ground truth (code > docs).
 * **Output:** `RESEARCH.md` (A summary of relevant file paths, existing function signatures, and "gotchas").
-* **Stop:** Do not propose changes yet.
 
-### Phase 2: Plan (The Blueprint)
+### Phase 2: Plan (The Contract)
+* **Agent:** `architect-planner`
 * **Input:** User Request + `RESEARCH.md`.
-* **Goal:** Define *how* we will solve it.
-* **Action:** Create a detailed implementation guide.
-* **Output:** `PLAN.md`.
-    * **Must Include:** Exact file paths, new function signatures (pseudo-code), and test cases.
+* **Goal:** Define *how* we will solve it without ambiguity.
+* **Action:** Create a detailed implementation guide defining **Code Contracts**.
+* **Output:** `PLAN.md` (Must include exact file paths, new function signatures, and test cases).
 * **Review:** The user MUST approve `PLAN.md` before coding starts.
 
 ### Phase 3: Implement (The Build)
-* **Input:** `PLAN.md`.
-* **Action:** Write code and run tests.
-* **Compaction Rule:** If the session gets too long (e.g., >20 exchanges), summarize progress to `PROGRESS.md`, restart the session, and feed it `PROGRESS.md` to continue.
+* **Agent:** `phase3-implementer`
+* **Input:** `PLAN.md` (and `PROGRESS.md` if resuming).
+* **Action:** Write code and run tests (`test-runner`).
+* **Compaction Rule:** If the session gets too long (e.g., >20 exchanges) or you receive warnings of hitting >90% usage limits, summarize progress to `PROGRESS.md` so that another phase3-implementer agent can pick up where you left off in a new session

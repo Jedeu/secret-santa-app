@@ -10,7 +10,9 @@
       "Bash(npm run lint:*)",
       "Bash(npm test:*)",
       "Bash(npx playwright:*)",
-      "Bash(npm run test:e2e:*)"
+      "Bash(npm run test:e2e:*)",
+      "Bash(npx next lint:*)",
+      "Bash(node -e \"require(''/Users/jed.piezas/Desktop/secret-santa-app/src/hooks/useRealtimeMessages.js'')\")"
     ],
     "deny": [],
     "ask": []
