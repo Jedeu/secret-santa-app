@@ -8,10 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
-    "test:unit": "jest --testPathIgnorePatterns=/integration/ --testPathIgnorePatterns=/helpers/ --testPathIgnorePatterns=setup.js",
+    "test:unit": "jest --testPathIgnorePatterns=/integration/ --testPathIgnorePatterns=/helpers/ --testPathIgnorePatterns=setup.js --testPathIgnorePatterns=/e2e/",
     "test:integration": "jest __tests__/integration",
     "test:watch": "jest --watch",
     "test:smart": "./.claude/skills/test-runner/run-tests.sh",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "emulators": "firebase emulators:start"
   },
   "dependencies": {
@@ -26,6 +28,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "firebase-tools": "^14.26.0",

@@ -8,7 +8,9 @@
       "Bash(npm run test:unit:*)",
       "Bash(cat:*)",
       "Bash(npm run lint:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(npx playwright:*)",
+      "Bash(npm run test:e2e:*)"
     ],
     "deny": [],
     "ask": []

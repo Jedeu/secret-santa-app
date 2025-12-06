@@ -8,6 +8,10 @@ import {
     logListenerDestroyed,
     logSnapshotReceived
 } from '@/lib/firestore-listener-tracker';
+import {
+    updateLastReadTimestamp as firestoreUpdateLastRead,
+    getCachedTimestamp as getCachedLastRead
+} from '@/lib/lastReadClient';
 
 /**
  * =============================================================================
@@ -30,9 +34,12 @@ let allMessagesListenerSetup = false;
 /**
  * Set up the singleton all-messages listener
  * Only creates a new listener if one doesn't exist
+ *
+ * IMPORTANT: This should only be called when the user is authenticated.
+ * If called before auth completes, Firestore security rules will reject the request.
  */
 function setupAllMessagesListener() {
-    // Already set up
+    // Already set up or no firestore
     if (allMessagesListenerSetup || !firestore) return;
 
     allMessagesListenerSetup = true;
@@ -69,6 +76,12 @@ function setupAllMessagesListener() {
         },
         (error) => {
             console.error('Error in real-time all messages listener:', error);
+            // Reset flag on permission error to allow retry when authenticated
+            if (error.code === 'permission-denied') {
+                console.warn('[Firestore] Auth not ready, will retry when authenticated');
+                allMessagesListenerSetup = false;
+                allMessagesListener = null;
+            }
         }
     );
 }
@@ -76,13 +89,16 @@ function setupAllMessagesListener() {
 /**
  * Subscribe to all messages updates
  * @param {Function} callback - Called with messages array when data changes
+ * @param {boolean} isAuthenticated - Whether the user is authenticated
  * @returns {Function} - Unsubscribe function
  */
-function subscribeToAllMessages(callback) {
-    // Set up listener if not already done
-    setupAllMessagesListener();
+function subscribeToAllMessages(callback, isAuthenticated) {
+    // Only set up listener when authenticated
+    if (isAuthenticated) {
+        setupAllMessagesListener();
+    }
 
-    // Add subscriber
+    // Add subscriber (even if not yet authenticated - will receive data when ready)
     allMessagesSubscribers.add(callback);
 
     // Immediately call with current data if available
@@ -213,19 +229,23 @@ export function useRealtimeMessages(userId, otherUserId) {
  * Custom hook to subscribe to all messages (for public feed)
  * Uses singleton pattern to prevent duplicate listeners on remount
  *
+ * IMPORTANT: Pass isAuthenticated=true only when user is authenticated.
+ * This prevents Firestore permission errors on fresh login.
+ *
+ * @param {boolean} isAuthenticated - Whether the user is authenticated (default: false)
  * @returns {Array} - Array of all messages
  */
-export function useRealtimeAllMessages() {
+export function useRealtimeAllMessages(isAuthenticated = false) {
     const [messages, setMessages] = useState(allMessagesData);
 
     useEffect(() => {
         // Subscribe to the singleton listener
-        const unsubscribe = subscribeToAllMessages(setMessages);
+        const unsubscribe = subscribeToAllMessages(setMessages, isAuthenticated);
 
         return () => {
             unsubscribe();
         };
-    }, []); // Run once on mount, no dependencies
+    }, [isAuthenticated]); // Re-run when auth state changes
 
     return messages;
 }
@@ -274,10 +294,10 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             listenersRef.current.forEach(unsub => unsub());
         }
 
-        // Get lastRead timestamps from localStorage
-        const getLastReadTimestamp = (conversationId) => {
-            const key = `lastRead_${userId}_${conversationId}`;
-            return localStorage.getItem(key) || new Date(0).toISOString();
+        // Use the module-level getLastReadTimestamp function
+        // which checks cache, Firestore client cache, then localStorage
+        const getLastRead = (conversationId) => {
+            return getLastReadTimestamp(userId, conversationId);
         };
 
         const unsubscribers = [];
@@ -285,7 +305,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         // Set up listener for recipient messages
         if (recipientId) {
             const recipientConvId = getLegacyConversationId(userId, recipientId);
-            const recipientLastRead = getLastReadTimestamp(recipientConvId);
+            const recipientLastRead = getLastRead(recipientConvId);
 
             // Expected conversation ID: I am Santa, they are Recipient
             const expectedConvId = getConversationId(userId, recipientId);
@@ -339,7 +359,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         // Set up listener for Santa messages
         if (gifterId) {
             const santaConvId = getLegacyConversationId(userId, gifterId);
-            const santaLastRead = getLastReadTimestamp(santaConvId);
+            const santaLastRead = getLastRead(santaConvId);
 
             // Expected conversation ID: They are Santa, I am Recipient
             const expectedConvId = getConversationId(gifterId, userId);
@@ -405,13 +425,65 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
     return unreadCounts;
 }
 
-// Helper to update lastRead timestamp in localStorage
+// In-memory cache for lastRead timestamps (synced with lastReadClient)
+const lastReadCache = new Map();
+
+/**
+ * Get lastRead timestamp from cache or Firestore.
+ * This is used internally by useRealtimeUnreadCounts.
+ *
+ * @param {string} userId - Current user's ID
+ * @param {string} conversationId - The conversation ID
+ * @returns {string} - ISO timestamp string, or epoch if not found
+ */
+function getLastReadTimestamp(userId, conversationId) {
+    const key = `${userId}_${conversationId}`;
+
+    // Check local cache first
+    if (lastReadCache.has(key)) {
+        return lastReadCache.get(key);
+    }
+
+    // Check Firestore client cache
+    const cached = getCachedLastRead(userId, conversationId);
+    if (cached) {
+        lastReadCache.set(key, cached);
+        return cached;
+    }
+
+    // Fall back to localStorage for backwards compatibility with existing data
+    const localStorageKey = `lastRead_${userId}_${conversationId}`;
+    const localValue = typeof window !== 'undefined' ? localStorage.getItem(localStorageKey) : null;
+    if (localValue) {
+        lastReadCache.set(key, localValue);
+        return localValue;
+    }
+
+    // Default to epoch if not found anywhere
+    return new Date(0).toISOString();
+}
+
+/**
+ * Update lastRead timestamp.
+ * Writes to Firestore (debounced) and updates local cache immediately.
+ *
+ * @param {string} userId - Current user's ID
+ * @param {string} otherUserId - The other user's ID in the conversation
+ */
 export function updateLastReadTimestamp(userId, otherUserId) {
     const conversationId = getLegacyConversationId(userId, otherUserId);
-    const key = `lastRead_${userId}_${conversationId}`;
-    localStorage.setItem(key, new Date().toISOString());
+    const now = new Date().toISOString();
 
-    // Note: No need to dispatch 'unread-refresh' event anymore
-    // Real-time listeners automatically receive new messages
-    // The unread count will naturally decrease as the lastRead timestamp advances
+    // Update local cache immediately for responsive UI
+    const key = `${userId}_${conversationId}`;
+    lastReadCache.set(key, now);
+
+    // Also update localStorage for backwards compatibility
+    if (typeof window !== 'undefined') {
+        const localStorageKey = `lastRead_${userId}_${conversationId}`;
+        localStorage.setItem(localStorageKey, now);
+    }
+
+    // Write to Firestore (debounced)
+    firestoreUpdateLastRead(userId, conversationId);
 }

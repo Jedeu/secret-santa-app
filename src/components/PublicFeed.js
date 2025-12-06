@@ -1,12 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { updateLastReadTimestamp, getCachedTimestamp } from '@/lib/lastReadClient';
 
-export default function PublicFeed({ messages = [], allUsers = [] }) {
+export default function PublicFeed({ messages = [], allUsers = [], userId }) {
     const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
     const [lastViewed, setLastViewed] = useState({}); // Track when each thread was last viewed
 
     useEffect(() => {
-        // Load last viewed times from localStorage
+        // Load last viewed times from localStorage for backwards compatibility
+        // Firestore values will be loaded on-demand via getCachedTimestamp
         const saved = localStorage.getItem('publicFeedLastViewed');
         if (saved) {
             setLastViewed(JSON.parse(saved));
@@ -128,7 +130,15 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
         const now = new Date().toISOString();
         const newLastViewed = { ...lastViewed, [threadId]: now };
         setLastViewed(newLastViewed);
+
+        // Update localStorage for backwards compatibility
         localStorage.setItem('publicFeedLastViewed', JSON.stringify(newLastViewed));
+
+        // Write to Firestore (debounced) if user is authenticated
+        if (userId) {
+            updateLastReadTimestamp(userId, `publicFeed_${threadId}`);
+        }
+
         setSelectedThread(threadId);
     };
 
