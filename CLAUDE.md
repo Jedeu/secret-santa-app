@@ -195,3 +195,26 @@ The app uses optimized Firestore listeners to minimize reads on the free tier.
 - Page refresh: ONE initial read of all messages (N reads for N docs)
 - Send message: ONE read (only the new message via listener update)
 - View message tab: ZERO reads (filtered client-side from cached messages)
+
+## The RPI Workflow (Research -> Plan -> Implement)
+
+To avoid the "Dumb Zone" (context saturation), we strictly follow this 3-phase process for complex features:
+
+### Phase 1: Research (The Truth)
+* **Goal:** Understand the *current* state of the codebase relevant to the request.
+* **Action:** Read files, check imports, verify assumptions.
+* **Output:** `RESEARCH.md` (A summary of relevant file paths, existing function signatures, and "gotchas").
+* **Stop:** Do not propose changes yet.
+
+### Phase 2: Plan (The Blueprint)
+* **Input:** User Request + `RESEARCH.md`.
+* **Goal:** Define *how* we will solve it.
+* **Action:** Create a detailed implementation guide.
+* **Output:** `PLAN.md`.
+    * **Must Include:** Exact file paths, new function signatures (pseudo-code), and test cases.
+* **Review:** The user MUST approve `PLAN.md` before coding starts.
+
+### Phase 3: Implement (The Build)
+* **Input:** `PLAN.md`.
+* **Action:** Write code and run tests.
+* **Compaction Rule:** If the session gets too long (e.g., >20 exchanges), summarize progress to `PROGRESS.md`, restart the session, and feed it `PROGRESS.md` to continue.
