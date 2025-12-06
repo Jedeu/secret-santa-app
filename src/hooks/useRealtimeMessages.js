@@ -252,9 +252,13 @@ export function useRealtimeAllMessages(isAuthenticated = false) {
 
 /**
  * Custom hook to get unread message counts using real-time Firestore listeners
- * Calculates unread counts client-side based on lastRead timestamps
+ * with CLIENT-SIDE filtering against the current lastRead timestamp.
  *
- * Uses refs to prevent listener recreation on StrictMode double-mount
+ * KEY OPTIMIZATION: Firestore listeners do NOT include timestamp filters.
+ * Instead, we filter client-side using the latest lastRead from cache.
+ * This allows badges to clear immediately when updateLastReadTimestamp is called.
+ *
+ * Uses refs to prevent listener recreation on StrictMode double-mount.
  *
  * @param {string} userId - Current user's ID
  * @param {string} recipientId - User's recipient ID
@@ -266,6 +270,10 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         recipientUnread: 0,
         santaUnread: 0
     });
+
+    // Store raw messages from listeners (before timestamp filtering)
+    const recipientMessagesRef = useRef([]);
+    const santaMessagesRef = useRef([]);
 
     // Use refs to track listener state and prevent duplicates
     const listenersRef = useRef(null);
@@ -281,6 +289,69 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         return changed;
     }, [userId, recipientId, gifterId]);
 
+    /**
+     * Recalculate ONLY recipient unread count from stored messages using CURRENT lastRead.
+     * Called when:
+     *   1. Recipient Firestore listener receives new messages
+     *   2. updateLastReadTimestamp is called for the recipient conversation (via subscriber)
+     */
+    const recalculateRecipientCount = useMemo(() => {
+        return () => {
+            if (!userId || !recipientId) return;
+
+            const recipientConvId = getLegacyConversationId(userId, recipientId);
+            const recipientLastRead = getLastReadTimestamp(userId, recipientConvId);
+            const expectedConvId = getConversationId(userId, recipientId);
+
+            const recipientUnread = recipientMessagesRef.current.filter(msg => {
+                // Must be newer than lastRead
+                if (msg.timestamp <= recipientLastRead) return false;
+
+                // Must match expected conversationId
+                return msg.conversationId === expectedConvId;
+            }).length;
+
+            setUnreadCounts(prev => ({ ...prev, recipientUnread }));
+        };
+    }, [userId, recipientId]);
+
+    /**
+     * Recalculate ONLY santa unread count from stored messages using CURRENT lastRead.
+     * Called when:
+     *   1. Santa Firestore listener receives new messages
+     *   2. updateLastReadTimestamp is called for the santa conversation (via subscriber)
+     */
+    const recalculateSantaCount = useMemo(() => {
+        return () => {
+            if (!userId || !gifterId) return;
+
+            const santaConvId = getLegacyConversationId(userId, gifterId);
+            const santaLastRead = getLastReadTimestamp(userId, santaConvId);
+            const expectedConvId = getConversationId(gifterId, userId);
+
+            const santaUnread = santaMessagesRef.current.filter(msg => {
+                // Must be newer than lastRead
+                if (msg.timestamp <= santaLastRead) return false;
+
+                // Must match expected conversationId
+                return msg.conversationId === expectedConvId;
+            }).length;
+
+            setUnreadCounts(prev => ({ ...prev, santaUnread }));
+        };
+    }, [userId, gifterId]);
+
+    /**
+     * Recalculate both counts. Called when both listeners need to recalculate
+     * (e.g., on initial mount).
+     */
+    const recalculateBothCounts = useMemo(() => {
+        return () => {
+            recalculateRecipientCount();
+            recalculateSantaCount();
+        };
+    }, [recalculateRecipientCount, recalculateSantaCount]);
+
     useEffect(() => {
         if (!userId || !firestore) return;
 
@@ -291,59 +362,64 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
         // Clean up existing listeners if params changed
         if (listenersRef.current) {
-            listenersRef.current.forEach(unsub => unsub());
+            listenersRef.current.unsubscribers.forEach(unsub => unsub());
         }
-
-        // Use the module-level getLastReadTimestamp function
-        // which checks cache, Firestore client cache, then localStorage
-        const getLastRead = (conversationId) => {
-            return getLastReadTimestamp(userId, conversationId);
-        };
 
         const unsubscribers = [];
 
-        // Set up listener for recipient messages
+        // Compute conversation IDs for comparison in subscriber
+        const recipientConvId = recipientId ? getLegacyConversationId(userId, recipientId) : null;
+        const santaConvId = gifterId ? getLegacyConversationId(userId, gifterId) : null;
+
+        // Subscribe to lastRead changes for recalculation
+        // IMPORTANT: Only recalculate the specific badge whose conversation changed
+        // This prevents cross-contamination where visiting one tab clears both badges
+        const unsubscribeLastRead = subscribeToLastReadChanges((changedUserId, changedConvId, timestamp) => {
+            // Only process if this change affects our user
+            if (changedUserId !== userId) return;
+
+            // Check which conversation changed and only recalculate that badge
+            if (changedConvId === recipientConvId) {
+                recalculateRecipientCount();
+            } else if (changedConvId === santaConvId) {
+                recalculateSantaCount();
+            }
+            // If neither matches, it's a different conversation - no action needed
+        });
+        unsubscribers.push(unsubscribeLastRead);
+
+        // Set up listener for recipient messages (messages FROM recipient TO me)
+        // NOTE: No timestamp filter! We fetch ALL and filter client-side.
         if (recipientId) {
-            const recipientConvId = getLegacyConversationId(userId, recipientId);
-            const recipientLastRead = getLastRead(recipientConvId);
-
-            // Expected conversation ID: I am Santa, they are Recipient
-            const expectedConvId = getConversationId(userId, recipientId);
-
             const messagesRef = collection(firestore, 'messages');
             const q = query(
                 messagesRef,
                 where('fromId', '==', recipientId),
-                where('toId', '==', userId),
-                where('timestamp', '>', recipientLastRead)
+                where('toId', '==', userId)
             );
 
             const listenerName = `unread_recipient_${userId.slice(0, 8)}`;
             logListenerCreated(listenerName, {
                 fromId: recipientId,
                 toId: userId,
-                lastRead: recipientLastRead
+                note: 'No timestamp filter - client-side filtering'
             });
 
             const unsubscribe = onSnapshot(
                 q,
                 { includeMetadataChanges: false },
                 (snapshot) => {
-                    let count = 0;
+                    // Store all messages (will filter by timestamp client-side)
+                    const messages = [];
                     snapshot.forEach(doc => {
-                        const data = doc.data();
-                        // If message has conversationId, it MUST match
-                        if (data.conversationId) {
-                            if (data.conversationId === expectedConvId) {
-                                count++;
-                            }
-                        } else {
-                            // Legacy message - count it
-                            count++;
-                        }
+                        messages.push(doc.data());
                     });
+                    recipientMessagesRef.current = messages;
+
                     logSnapshotReceived(listenerName, snapshot.size, snapshot.metadata.fromCache, snapshot.docChanges().length);
-                    setUnreadCounts(prev => ({ ...prev, recipientUnread: count }));
+
+                    // Recalculate recipient count with current lastRead
+                    recalculateRecipientCount();
                 },
                 (error) => {
                     console.error('Error in recipient unread listener:', error);
@@ -356,48 +432,38 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             });
         }
 
-        // Set up listener for Santa messages
+        // Set up listener for Santa messages (messages FROM santa/gifter TO me)
+        // NOTE: No timestamp filter! We fetch ALL and filter client-side.
         if (gifterId) {
-            const santaConvId = getLegacyConversationId(userId, gifterId);
-            const santaLastRead = getLastRead(santaConvId);
-
-            // Expected conversation ID: They are Santa, I am Recipient
-            const expectedConvId = getConversationId(gifterId, userId);
-
             const messagesRef = collection(firestore, 'messages');
             const q = query(
                 messagesRef,
                 where('fromId', '==', gifterId),
-                where('toId', '==', userId),
-                where('timestamp', '>', santaLastRead)
+                where('toId', '==', userId)
             );
 
             const listenerName = `unread_santa_${userId.slice(0, 8)}`;
             logListenerCreated(listenerName, {
                 fromId: gifterId,
                 toId: userId,
-                lastRead: santaLastRead
+                note: 'No timestamp filter - client-side filtering'
             });
 
             const unsubscribe = onSnapshot(
                 q,
                 { includeMetadataChanges: false },
                 (snapshot) => {
-                    let count = 0;
+                    // Store all messages (will filter by timestamp client-side)
+                    const messages = [];
                     snapshot.forEach(doc => {
-                        const data = doc.data();
-                        // If message has conversationId, it MUST match
-                        if (data.conversationId) {
-                            if (data.conversationId === expectedConvId) {
-                                count++;
-                            }
-                        } else {
-                            // Legacy message - count it
-                            count++;
-                        }
+                        messages.push(doc.data());
                     });
+                    santaMessagesRef.current = messages;
+
                     logSnapshotReceived(listenerName, snapshot.size, snapshot.metadata.fromCache, snapshot.docChanges().length);
-                    setUnreadCounts(prev => ({ ...prev, santaUnread: count }));
+
+                    // Recalculate santa count with current lastRead
+                    recalculateSantaCount();
                 },
                 (error) => {
                     console.error('Error in Santa unread listener:', error);
@@ -411,22 +477,68 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         }
 
         // Store unsubscribers in ref
-        listenersRef.current = unsubscribers;
+        listenersRef.current = { unsubscribers };
 
         // Cleanup all subscriptions on unmount
         return () => {
             if (listenersRef.current) {
-                listenersRef.current.forEach(unsub => unsub());
+                listenersRef.current.unsubscribers.forEach(unsub => unsub());
                 listenersRef.current = null;
             }
+            // Clear message refs
+            recipientMessagesRef.current = [];
+            santaMessagesRef.current = [];
         };
-    }, [userId, recipientId, gifterId, paramsChanged]);
+    }, [userId, recipientId, gifterId, paramsChanged, recalculateRecipientCount, recalculateSantaCount]);
 
     return unreadCounts;
 }
 
 // In-memory cache for lastRead timestamps (synced with lastReadClient)
 const lastReadCache = new Map();
+
+/**
+ * =============================================================================
+ * LASTREAD CHANGE NOTIFICATION
+ * =============================================================================
+ * Subscribers that want to be notified when lastRead timestamps change.
+ * This enables client-side recalculation of unread counts without
+ * recreating Firestore listeners.
+ */
+
+const lastReadSubscribers = new Set();
+
+/**
+ * Subscribe to lastRead timestamp changes.
+ * Called whenever updateLastReadTimestamp updates the cache.
+ *
+ * @param {Function} callback - Called with (userId, conversationId, timestamp)
+ * @returns {Function} - Unsubscribe function
+ */
+function subscribeToLastReadChanges(callback) {
+    lastReadSubscribers.add(callback);
+    return () => {
+        lastReadSubscribers.delete(callback);
+    };
+}
+
+/**
+ * Notify all subscribers that a lastRead timestamp has changed.
+ * Called by updateLastReadTimestamp after updating the cache.
+ *
+ * @param {string} userId - The user whose lastRead changed
+ * @param {string} conversationId - The conversation ID (legacy format)
+ * @param {string} timestamp - The new ISO timestamp
+ */
+function notifyLastReadChange(userId, conversationId, timestamp) {
+    lastReadSubscribers.forEach(callback => {
+        try {
+            callback(userId, conversationId, timestamp);
+        } catch (error) {
+            console.error('Error in lastRead subscriber:', error);
+        }
+    });
+}
 
 /**
  * Get lastRead timestamp from cache or Firestore.
@@ -483,6 +595,10 @@ export function updateLastReadTimestamp(userId, otherUserId) {
         const localStorageKey = `lastRead_${userId}_${conversationId}`;
         localStorage.setItem(localStorageKey, now);
     }
+
+    // Notify subscribers that lastRead has changed
+    // This triggers client-side recalculation of unread counts
+    notifyLastReadChange(userId, conversationId, now);
 
     // Write to Firestore (debounced)
     firestoreUpdateLastRead(userId, conversationId);
