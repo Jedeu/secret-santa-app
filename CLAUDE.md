@@ -165,3 +165,57 @@ The separation between Admin and Client SDKs is strict.
 Be extra careful when modifying message routing logic.
 - **Legacy vs New:** `src/lib/message-utils.js` contains complex logic to handle both legacy messages (no `conversationId`) and new messages.
 - **Consult Tests:** Always run `__tests__/unit/PublicFeed_grouping.test.js` after touching message logic.
+
+### 4. Firestore Listener Management (Read Optimization)
+
+The app uses optimized Firestore listeners to minimize reads on the free tier.
+
+**Singleton Pattern for All Messages:**
+- `useRealtimeAllMessages()` uses a singleton listener shared across all components
+- Only ONE Firestore listener for all messages exists at any time
+- Prevents duplicate listeners during React.StrictMode double-mounts
+
+**Listener Tracking (Dev Mode):**
+- `src/lib/firestore-listener-tracker.js` provides debugging utilities
+- In browser console, use `window.__firestoreDebug.printListenerSummary()` to see active listeners
+- All listener creation/destruction is logged with `[Firestore]` prefix
+
+**Client-Side Caching:**
+- IndexedDB persistence is enabled via `enableIndexedDbPersistence()`
+- Subsequent reads often come from cache (0 Firestore reads)
+- Look for "from CACHE" vs "from SERVER" in snapshot logs
+
+**Key Optimizations Applied:**
+1. `includeMetadataChanges: false` - Reduces unnecessary snapshot callbacks
+2. Singleton pattern for `allMessages` listener - Prevents duplicate reads
+3. Refs to track listener state in StrictMode - Prevents recreation on double-mount
+4. Memoized params comparison in `useRealtimeUnreadCounts` - Only recreates on real changes
+
+**Expected Read Behavior:**
+- Page refresh: ONE initial read of all messages (N reads for N docs)
+- Send message: ONE read (only the new message via listener update)
+- View message tab: ZERO reads (filtered client-side from cached messages)
+
+## The RPI Workflow (Research -> Plan -> Implement)
+
+To avoid the "Dumb Zone" (context saturation), we strictly follow this 3-phase process using our specialized agents.
+
+### Phase 1: Research (The Truth)
+* **Agent:** `codebase-research-analyst`
+* **Goal:** Understand the *current* state of the codebase relevant to the request.
+* **Action:** Read files, check imports, verify assumptions against ground truth (code > docs).
+* **Output:** `RESEARCH.md` (A summary of relevant file paths, existing function signatures, and "gotchas").
+
+### Phase 2: Plan (The Contract)
+* **Agent:** `architect-planner`
+* **Input:** User Request + `RESEARCH.md`.
+* **Goal:** Define *how* we will solve it without ambiguity.
+* **Action:** Create a detailed implementation guide defining **Code Contracts**.
+* **Output:** `PLAN.md` (Must include exact file paths, new function signatures, and test cases).
+* **Review:** The user MUST approve `PLAN.md` before coding starts.
+
+### Phase 3: Implement (The Build)
+* **Agent:** `phase3-implementer`
+* **Input:** `PLAN.md` (and `PROGRESS.md` if resuming).
+* **Action:** Write code and run tests (`test-runner`).
+* **Compaction Rule:** If the session gets too long (e.g., >20 exchanges) or you receive warnings of hitting >90% usage limits, summarize progress to `PROGRESS.md` so that another phase3-implementer agent can pick up where you left off in a new session

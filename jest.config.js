@@ -15,13 +15,15 @@ const customJestConfig = {
     transformIgnorePatterns: [
         'node_modules/(?!(react-markdown|remark-gfm|vfile|unist-util|unified|bail|is-plain-obj|trough|remark|mdast|micromark|decode|character|property|hast|space|comma|pretty|ccount|markdown-table|escape-string-regexp)/)'
     ],
-    // Exclude integration tests from default test runs
+    // Exclude integration tests and E2E tests from default test runs
     // Integration tests require Firebase Emulator to be running
+    // E2E tests use Playwright and should be run with `npm run test:e2e`
     testPathIgnorePatterns: [
         '/node_modules/',
         '/__tests__/integration/',
         '/__tests__/helpers/',
-        '/__tests__/setup.js'
+        '/__tests__/setup.js',
+        '/e2e/'
     ],
 }
 

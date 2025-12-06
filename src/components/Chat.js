@@ -48,11 +48,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const emojiPickerRef = useRef(null);
     const lastReadRef = useRef(0);
 
-    // Mark messages as read when component mounts or messages change
+    // Mark messages as read when component mounts, user changes, OR new messages arrive
+    // This ensures badge clears even when new messages arrive while viewing the tab
     useEffect(() => {
         updateLastReadTimestamp(currentUser.id, otherUser.id);
         lastReadRef.current = Date.now();
-    }, [currentUser.id, otherUser.id]);
+    }, [currentUser.id, otherUser.id, messages]);
 
     const scrollToBottom = (behavior = 'smooth') => {
         bottomRef.current?.scrollIntoView({ behavior });
