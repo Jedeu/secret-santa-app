@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
 import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
 import { firestore } from '../../src/lib/firebase-client';
@@ -40,7 +40,7 @@ jest.mock('../../src/lib/lastReadClient', () => ({
     subscribeToLastRead: jest.fn(() => () => { })
 }));
 
-import { updateLastReadTimestamp as mockUpdateLastRead } from '../../src/lib/lastReadClient';
+import { updateLastReadTimestamp as mockUpdateLastRead, getLastReadTimestamp as mockGetLastRead } from '../../src/lib/lastReadClient';
 
 describe('Unread Count Optimization', () => {
     beforeEach(() => {
@@ -57,7 +57,7 @@ describe('Unread Count Optimization', () => {
         expect(mockUpdateLastRead).toHaveBeenCalled();
     });
 
-    it('should not recreate listeners when lastRead changes', () => {
+    it('should not recreate listeners when lastRead changes', async () => {
         const unsubscribeMock = jest.fn();
         onSnapshot.mockReturnValue(unsubscribeMock);
 
@@ -65,6 +65,11 @@ describe('Unread Count Optimization', () => {
             useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
             { wrapper }
         );
+
+        // Wait for primeCache to settle
+        await waitFor(() => {
+            expect(mockGetLastRead).toHaveBeenCalled();
+        });
 
         // Initial subscription count (1 for allMessages from provider)
         // Note: usage of useRealtimeUnreadCounts doesn't create NEW listeners anymore!
@@ -86,7 +91,7 @@ describe('Unread Count Optimization', () => {
         unmount();
     });
 
-    it('should derive unread counts from context messages', () => {
+    it('should derive unread counts from context messages', async () => {
         // This relies on the Provider's allMessages state.
         // Since we mock onSnapshot, we need to simulate the callback to populate state.
 
@@ -100,6 +105,11 @@ describe('Unread Count Optimization', () => {
             useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
             { wrapper }
         );
+
+        // Wait for primeCache to settle
+        await waitFor(() => {
+            expect(mockGetLastRead).toHaveBeenCalled();
+        });
 
         // Initially 0
         expect(result.current.recipientUnread).toBe(0);

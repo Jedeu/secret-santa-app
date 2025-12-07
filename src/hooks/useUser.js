@@ -147,10 +147,6 @@ export function useUser() {
                         if (!prev) return updatedUser;
                         if (prev.recipientId !== updatedUser.recipientId ||
                             prev.gifterId !== updatedUser.gifterId) {
-                            console.log('[useUser] Assignment update received:', {
-                                recipientId: updatedUser.recipientId,
-                                gifterId: updatedUser.gifterId
-                            });
                             return updatedUser;
                         }
                         return prev; // No change, avoid unnecessary re-renders

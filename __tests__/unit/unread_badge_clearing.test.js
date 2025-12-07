@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
 import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
 import { firestore } from '../../src/lib/firebase-client';
@@ -52,7 +52,7 @@ jest.mock('../../src/lib/lastReadClient', () => ({
     subscribeToLastRead: jest.fn(() => () => { })
 }));
 
-import { updateLastReadTimestamp as mockUpdateLastRead } from '../../src/lib/lastReadClient';
+import { updateLastReadTimestamp as mockUpdateLastRead, getLastReadTimestamp as mockGetLastRead } from '../../src/lib/lastReadClient';
 
 /**
  * Helper to extract the callback from onSnapshot calls
@@ -110,6 +110,11 @@ describe('Unread Badge Clearing', () => {
                 { wrapper }
             );
 
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
+
             // Simulate messages arriving that are newer than lastRead (epoch)
             act(() => {
                 if (providerSnapshotCallback) {
@@ -132,6 +137,11 @@ describe('Unread Badge Clearing', () => {
                 useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
                 { wrapper }
             );
+
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
 
             const now = new Date();
             act(() => {
@@ -170,6 +180,11 @@ describe('Unread Badge Clearing', () => {
                 { wrapper }
             );
 
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
+
             const messageTime = new Date();
 
             // First, simulate a message arriving
@@ -203,6 +218,11 @@ describe('Unread Badge Clearing', () => {
                 useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
                 { wrapper }
             );
+
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
 
             const messageTime = new Date();
 
@@ -238,6 +258,11 @@ describe('Unread Badge Clearing', () => {
                 { wrapper }
             );
 
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
+
             act(() => {
                 if (providerSnapshotCallback) {
                     providerSnapshotCallback(createMockSnapshot([
@@ -262,6 +287,11 @@ describe('Unread Badge Clearing', () => {
                 useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
                 { wrapper }
             );
+
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
 
             const now = new Date();
 
@@ -326,6 +356,11 @@ describe('Unread Badge Clearing', () => {
                 { wrapper }
             );
 
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
+
             // T0: User views the tab (calls updateLastReadTimestamp)
             act(() => {
                 updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
@@ -373,6 +408,11 @@ describe('Unread Badge Clearing', () => {
                 useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
                 { wrapper }
             );
+
+            // Wait for primeCache to settle
+            await waitFor(() => {
+                expect(mockGetLastRead).toHaveBeenCalled();
+            });
 
             // T0: User starts viewing
             act(() => {
