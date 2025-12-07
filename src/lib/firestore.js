@@ -1,36 +1,11 @@
 import { firestore } from './firebase';
 import { v4 as uuidv4 } from 'uuid';
 
-// --- Cache Layer ---
-// Simple in-memory cache to reduce Firestore reads during authentication
-const userCache = new Map();
-const CACHE_TTL = 60000; // 1 minute
-
-// Server-side cache for collections (public feed optimization)
-let allUsersCache = null;
-let allUsersCacheTime = 0;
-let allMessagesCache = null;
-let allMessagesCacheTime = 0;
-const COLLECTION_CACHE_TTL = 5000; // 5 seconds for public feed data
-
-function getCachedUser(key) {
-    const cached = userCache.get(key);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        return cached.data;
-    }
-    return null;
-}
-
-function setCachedUser(key, data) {
-    userCache.set(key, { data, timestamp: Date.now() });
-}
-
-function clearUserCache() {
-    userCache.clear();
-    // Also clear collection caches when users change
-    allUsersCache = null;
-    allUsersCacheTime = 0;
-}
+/**
+ * Server-side Firestore operations for the Secret Santa app.
+ * Relies on Firestore's built-in client-side caching for performance.
+ * No server-side caching in this serverless environment.
+ */
 
 // --- Name Normalization ---
 // Normalize names to Title Case for consistent storage and querying
@@ -46,19 +21,8 @@ function toTitleCase(name) {
 // --- Users ---
 
 export async function getUserByEmail(email) {
-    // Check cache first
-    const cacheKey = `email:${email}`;
-    const cached = getCachedUser(cacheKey);
-    if (cached !== null) {
-        return cached;
-    }
-
     const snapshot = await firestore.collection('users').where('email', '==', email).limit(1).get();
-    const user = snapshot.empty ? null : snapshot.docs[0].data();
-
-    // Cache the result
-    setCachedUser(cacheKey, user);
-    return user;
+    return snapshot.empty ? null : snapshot.docs[0].data();
 }
 
 export async function getUserById(id) {
@@ -68,24 +32,13 @@ export async function getUserById(id) {
 }
 
 export async function getUsersByName(name) {
-    // Check cache first
-    const cacheKey = `name:${name}`;
-    const cached = getCachedUser(cacheKey);
-    if (cached !== null) {
-        return cached;
-    }
-
     // Simple exact match - names are normalized to Title Case
     const snapshot = await firestore.collection('users')
         .where('name', '==', name)
         .limit(1)
         .get();
 
-    const user = snapshot.empty ? null : snapshot.docs[0].data();
-
-    // Cache the result
-    setCachedUser(cacheKey, user);
-    return user;
+    return snapshot.empty ? null : snapshot.docs[0].data();
 }
 
 // Get placeholder user by name (user without email)
@@ -117,10 +70,6 @@ export async function createUser(user) {
     };
 
     await firestore.collection('users').doc(normalizedUser.id).set(normalizedUser);
-
-    // Clear cache since we added a new user
-    clearUserCache();
-
     return normalizedUser;
 }
 
@@ -132,9 +81,6 @@ export async function updateUser(userId, data) {
     }
 
     await firestore.collection('users').doc(userId).update(updateData);
-
-    // Clear cache since user data changed
-    clearUserCache();
 }
 
 export async function getAllUsers() {
@@ -144,17 +90,10 @@ export async function getAllUsers() {
     return users;
 }
 
-// Cached version for public feed (reduces reads when multiple users view feed simultaneously)
+// Alias for getAllUsers - kept for backward compatibility
+// Firestore's built-in caching handles read optimization
 export async function getAllUsersWithCache() {
-    const now = Date.now();
-    if (allUsersCache && (now - allUsersCacheTime) < COLLECTION_CACHE_TTL) {
-        return allUsersCache;
-    }
-
-    const users = await getAllUsers();
-    allUsersCache = users;
-    allUsersCacheTime = now;
-    return users;
+    return getAllUsers();
 }
 
 // --- Messages ---
@@ -188,17 +127,10 @@ export async function getAllMessages() {
     return messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 }
 
-// Cached version for public feed (reduces reads when multiple users view feed simultaneously)
+// Alias for getAllMessages - kept for backward compatibility
+// Firestore's built-in caching handles read optimization
 export async function getAllMessagesWithCache() {
-    const now = Date.now();
-    if (allMessagesCache && (now - allMessagesCacheTime) < COLLECTION_CACHE_TTL) {
-        return allMessagesCache;
-    }
-
-    const messages = await getAllMessages();
-    allMessagesCache = messages;
-    allMessagesCacheTime = now;
-    return messages;
+    return getAllMessages();
 }
 
 // Get all messages for a specific user (sent or received)
@@ -222,11 +154,6 @@ export async function getUserMessages(userId) {
 export async function sendMessage(message) {
     // message: { id, fromId, toId, content, timestamp }
     await firestore.collection('messages').doc(message.id).set(message);
-
-    // Clear message cache so public feed shows new message immediately
-    allMessagesCache = null;
-    allMessagesCacheTime = 0;
-
     return message;
 }
 

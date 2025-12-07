@@ -1,10 +1,11 @@
 /** @jest-environment jsdom */
 import { renderHook, act } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
+import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
 import { firestore } from '../../src/lib/firebase-client';
 import { onSnapshot } from 'firebase/firestore';
 
-// Mock Firebase
+// Mock dependencies
 jest.mock('../../src/lib/firebase-client', () => ({
     firestore: {}
 }));
@@ -13,62 +14,114 @@ jest.mock('firebase/firestore', () => ({
     collection: jest.fn(),
     query: jest.fn(),
     where: jest.fn(),
-    onSnapshot: jest.fn()
+    onSnapshot: jest.fn(),
+    orderBy: jest.fn()
 }));
 
-const localStorageMock = (() => {
-    let store = {};
-    return {
-        getItem: jest.fn(key => store[key] || null),
-        setItem: jest.fn((key, value) => {
-            store[key] = value.toString();
-        }),
-        clear: jest.fn(() => {
-            store = {};
-        })
-    };
-})();
+jest.mock('../../src/lib/firestore-listener-tracker', () => ({
+    logListenerCreated: jest.fn(),
+    logListenerDestroyed: jest.fn(),
+    logSnapshotReceived: jest.fn(),
+}));
 
-Object.defineProperty(window, 'localStorage', {
-    value: localStorageMock
-});
+// Mock useUser
+jest.mock('../../src/hooks/useUser', () => ({
+    useUser: jest.fn(() => ({
+        user: { id: 'user1', name: 'Test User' },
+        loading: false
+    }))
+}));
 
-describe('Unread Refresh Logic', () => {
+// Mock lastReadClient
+jest.mock('../../src/lib/lastReadClient', () => ({
+    updateLastReadTimestamp: jest.fn(),
+    getLastReadTimestamp: jest.fn(() => Promise.resolve(new Date(0).toISOString())),
+    getCachedTimestamp: jest.fn(() => new Date(0).toISOString()),
+    subscribeToLastRead: jest.fn(() => () => { })
+}));
+
+import { updateLastReadTimestamp as mockUpdateLastRead } from '../../src/lib/lastReadClient';
+
+describe('Unread Count Optimization', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        localStorage.clear();
     });
 
-    it('should dispatch unread-refresh event when updating last read timestamp', () => {
-        const dispatchSpy = jest.spyOn(window, 'dispatchEvent');
+    const wrapper = ({ children }) => (
+        <RealtimeMessagesProvider>{children}</RealtimeMessagesProvider>
+    );
+
+    it('should update lastRead timestamp without triggering full listener recreation', () => {
+        // This verify that updating lastRead calls the client utility
         updateLastReadTimestamp('user1', 'user2');
-
-        expect(dispatchSpy).toHaveBeenCalledWith(expect.any(Event));
-        expect(dispatchSpy.mock.calls[0][0].type).toBe('unread-refresh');
+        expect(mockUpdateLastRead).toHaveBeenCalled();
     });
 
-    it('should re-subscribe when unread-refresh event is dispatched', () => {
-        // Setup mock for onSnapshot
+    it('should not recreate listeners when lastRead changes', () => {
         const unsubscribeMock = jest.fn();
         onSnapshot.mockReturnValue(unsubscribeMock);
 
-        const { result, unmount } = renderHook(() =>
-            useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+        const { unmount } = renderHook(() =>
+            useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+            { wrapper }
         );
 
-        // Initial subscription count (1 for recipient, 1 for santa)
-        expect(onSnapshot).toHaveBeenCalledTimes(2);
+        // Initial subscription count (1 for allMessages from provider)
+        // Note: usage of useRealtimeUnreadCounts doesn't create NEW listeners anymore!
+        // It uses the Context's allMessages listener.
+        // So strict listener count check on the Hook is irrelevant if the Hook doesn't create listeners.
+        // But the Provider creates ONE.
+        expect(onSnapshot).toHaveBeenCalledTimes(1);
+        const initialCallCount = onSnapshot.mock.calls.length;
 
-        // Trigger refresh
+        // Simulate user marking messages as read
         act(() => {
-            window.dispatchEvent(new Event('unread-refresh'));
+            updateLastReadTimestamp('user1', 'recipient1');
         });
 
-        // Should have unsubscribed and re-subscribed
-        // The exact number depends on how React handles the effect re-run, 
-        // but we expect new calls to onSnapshot
-        expect(onSnapshot.mock.calls.length).toBeGreaterThan(2);
+        // Listeners should NOT be recreated
+        expect(onSnapshot.mock.calls.length).toBe(initialCallCount);
+        expect(unsubscribeMock).not.toHaveBeenCalled();
 
         unmount();
+    });
+
+    it('should derive unread counts from context messages', () => {
+        // This relies on the Provider's allMessages state.
+        // Since we mock onSnapshot, we need to simulate the callback to populate state.
+
+        let snapshotCallback;
+        onSnapshot.mockImplementation((query, options, cb) => {
+            snapshotCallback = cb; // Capture callback
+            return jest.fn();
+        });
+
+        const { result } = renderHook(() =>
+            useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+            { wrapper }
+        );
+
+        // Initially 0
+        expect(result.current.recipientUnread).toBe(0);
+
+        // Inject messages via the captured Provider listener callback
+        act(() => {
+            if (snapshotCallback) {
+                const mockMessages = [
+                    { id: '1', fromId: 'recipient1', toId: 'user1', timestamp: new Date().toISOString() },
+                    { id: '2', fromId: 'recipient1', toId: 'user1', timestamp: new Date().toISOString() }
+                ];
+
+                snapshotCallback({
+                    forEach: (fn) => mockMessages.forEach(msg => fn({ data: () => msg })),
+                    size: 2,
+                    metadata: { fromCache: false },
+                    docChanges: () => []
+                });
+            }
+        });
+
+        // Now should have 2 unread
+        expect(result.current.recipientUnread).toBe(2);
     });
 });

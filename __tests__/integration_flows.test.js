@@ -10,9 +10,17 @@ import * as realtimeHooks from '@/hooks/useRealtimeMessages';
 jest.mock('@/hooks/useUser');
 
 // Mock ESM dependencies
-jest.mock('react-markdown', () => ({ children }) => <div data-testid="markdown">{children}</div>);
+jest.mock('react-markdown', () => {
+    const MockReactMarkdown = ({ children }) => <div data-testid="markdown">{children}</div>;
+    MockReactMarkdown.displayName = 'MockReactMarkdown';
+    return MockReactMarkdown;
+});
 jest.mock('remark-gfm', () => () => { });
-jest.mock('emoji-picker-react', () => () => <div data-testid="emoji-picker">Emoji Picker</div>);
+jest.mock('emoji-picker-react', () => {
+    const MockEmojiPicker = () => <div data-testid="emoji-picker">Emoji Picker</div>;
+    MockEmojiPicker.displayName = 'MockEmojiPicker';
+    return MockEmojiPicker;
+});
 
 // Mock the realtime hooks
 jest.mock('@/hooks/useRealtimeMessages', () => ({

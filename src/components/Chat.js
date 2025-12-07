@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
-import { useRealtimeMessages, updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
+import { updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
 import { firestore } from '@/lib/firebase-client';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,11 +48,14 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const emojiPickerRef = useRef(null);
     const lastReadRef = useRef(0);
 
-    // Mark messages as read when component mounts or messages change
+    // Mark messages as read when component mounts, user changes, OR new messages arrive
+    // This ensures badge clears even when new messages arrive while viewing the tab
     useEffect(() => {
-        updateLastReadTimestamp(currentUser.id, otherUser.id);
+        // IMPORTANT: Use the conversationId passed from parent (new format)
+        // NOT getLegacyConversationId which would cause format mismatch
+        updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
         lastReadRef.current = Date.now();
-    }, [currentUser.id, otherUser.id]);
+    }, [currentUser.id, otherUser.id, messages, conversationId]);
 
     const scrollToBottom = (behavior = 'smooth') => {
         bottomRef.current?.scrollIntoView({ behavior });
@@ -66,7 +69,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
                 if (now - lastReadRef.current > 2000) {
-                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
                     lastReadRef.current = now;
                 }
             }
@@ -81,12 +84,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
                 if (now - lastReadRef.current > 2000) {
-                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
                     lastReadRef.current = now;
                 }
             }
         }
-    }, [messages, currentUser.id, otherUser.id]);
+    }, [messages, currentUser.id, otherUser.id, conversationId]);
 
     useEffect(() => {
         // Auto-scroll logic for *my* messages

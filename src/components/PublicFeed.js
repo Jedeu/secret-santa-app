@@ -1,17 +1,23 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { updateLastReadTimestamp, getCachedTimestamp } from '@/lib/lastReadClient';
 
-export default function PublicFeed({ messages = [], allUsers = [] }) {
+export default function PublicFeed({ messages = [], allUsers = [], userId }) {
     const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
-    const [lastViewed, setLastViewed] = useState({}); // Track when each thread was last viewed
-
-    useEffect(() => {
-        // Load last viewed times from localStorage
-        const saved = localStorage.getItem('publicFeedLastViewed');
-        if (saved) {
-            setLastViewed(JSON.parse(saved));
+    const [lastViewed, setLastViewed] = useState(() => {
+        // Lazy initialization: Load from localStorage for backwards compatibility
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('publicFeedLastViewed');
+            if (saved) {
+                try {
+                    return JSON.parse(saved);
+                } catch {
+                    return {};
+                }
+            }
         }
-    }, []);
+        return {};
+    });
 
     // Group messages by conversationId to ensure threads are consolidated correctly.
     const threads = {};
@@ -128,7 +134,15 @@ export default function PublicFeed({ messages = [], allUsers = [] }) {
         const now = new Date().toISOString();
         const newLastViewed = { ...lastViewed, [threadId]: now };
         setLastViewed(newLastViewed);
+
+        // Update localStorage for backwards compatibility
         localStorage.setItem('publicFeedLastViewed', JSON.stringify(newLastViewed));
+
+        // Write to Firestore (debounced) if user is authenticated
+        if (userId) {
+            updateLastReadTimestamp(userId, `publicFeed_${threadId}`);
+        }
+
         setSelectedThread(threadId);
     };
 

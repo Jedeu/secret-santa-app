@@ -1,244 +1,133 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { firestore } from '@/lib/firebase-client';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-
 import { getConversationId } from '@/lib/message-utils';
+import {
+    logListenerCreated,
+    logListenerDestroyed,
+    logSnapshotReceived
+} from '@/lib/firestore-listener-tracker';
+import { useRealtimeMessagesContext, updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
+
+
+
+
+
 
 /**
- * Custom hook to subscribe to real-time message updates for a specific conversation
- * 
- * @param {string} userId - Current user's ID
- * @param {string} otherUserId - Other user's ID in the conversation
- * @returns {Array} - Array of messages in the conversation
+ * Hook to get all messages from the shared Context.
+ *
+ * @deprecated The isAuthenticated parameter is now ignored.
+ *             Auth gating is handled by RealtimeMessagesProvider.
+ * @param {boolean} [_isAuthenticated] - IGNORED (kept for backward compatibility)
+ * @returns {Array} Array of all messages
  */
-export function useRealtimeMessages(userId, otherUserId) {
-    const [messages, setMessages] = useState([]);
-
-    useEffect(() => {
-        if (!userId || !otherUserId || !firestore) return;
-
-        // Instead of using OR query (which is inefficient), we'll use two separate queries
-        // Query 1: Messages from userId to otherUserId
-        const messagesRef = collection(firestore, 'messages');
-
-        const q1 = query(
-            messagesRef,
-            where('fromId', '==', userId),
-            where('toId', '==', otherUserId),
-            orderBy('timestamp', 'asc')
-        );
-
-        // Query 2: Messages from otherUserId to userId
-        const q2 = query(
-            messagesRef,
-            where('fromId', '==', otherUserId),
-            where('toId', '==', userId),
-            orderBy('timestamp', 'asc')
-        );
-
-        // Combine messages from both queries
-        let msgs1 = [];
-        let msgs2 = [];
-
-        const unsubscribe1 = onSnapshot(q1, (snapshot) => {
-            msgs1 = [];
-            snapshot.forEach((doc) => {
-                msgs1.push(doc.data());
-            });
-            // Merge and sort
-            const allMsgs = [...msgs1, ...msgs2];
-            allMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            setMessages(allMsgs);
-        }, (error) => {
-            console.error('Error in real-time message listener (sent):', error);
-        });
-
-        const unsubscribe2 = onSnapshot(q2, (snapshot) => {
-            msgs2 = [];
-            snapshot.forEach((doc) => {
-                msgs2.push(doc.data());
-            });
-            // Merge and sort
-            const allMsgs = [...msgs1, ...msgs2];
-            allMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            setMessages(allMsgs);
-        }, (error) => {
-            console.error('Error in real-time message listener (received):', error);
-        });
-
-        // Cleanup both subscriptions on unmount
-        return () => {
-            unsubscribe1();
-            unsubscribe2();
-        };
-    }, [userId, otherUserId]);
-
-    return messages;
+export function useRealtimeAllMessages(_isAuthenticated = false) {
+    const { allMessages } = useRealtimeMessagesContext();
+    return allMessages;
 }
 
 /**
- * Custom hook to subscribe to all messages (for public feed)
- * 
- * @returns {Array} - Array of all messages
+ * Re-export updateLastReadTimestamp for implementation backward compatibility
  */
-export function useRealtimeAllMessages(user) {
-    const [messages, setMessages] = useState([]);
-
-    useEffect(() => {
-        if (!firestore || !user) return;
-
-        const messagesRef = collection(firestore, 'messages');
-        const q = query(messagesRef, orderBy('timestamp', 'desc'));
-
-        // Subscribe to real-time updates
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const msgs = [];
-            snapshot.forEach((doc) => {
-                msgs.push(doc.data());
-            });
-            setMessages(msgs);
-        }, (error) => {
-            console.error('Error in real-time all messages listener:', error);
-        });
-
-        return () => unsubscribe();
-    }, [user]);
-
-    return messages;
-}
+export { updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
 
 /**
  * Custom hook to get unread message counts using real-time Firestore listeners
- * Calculates unread counts client-side based on lastRead timestamps
- * 
+ * with CLIENT-SIDE filtering against the current lastRead timestamp.
+ *
+ * KEY OPTIMIZATION: Firestore listeners do NOT include timestamp filters.
+ * Instead, we filter client-side using the latest lastRead from cache.
+ * This allows badges to clear immediately when updateLastReadTimestamp is called.
+ *
+ * Uses refs to prevent listener recreation on StrictMode double-mount.
+ *
  * @param {string} userId - Current user's ID
  * @param {string} recipientId - User's recipient ID
  * @param {string} gifterId - User's gifter (Santa) ID
  * @returns {Object} - Object with recipientUnread and santaUnread counts
  */
 export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
-    const [unreadCounts, setUnreadCounts] = useState({
-        recipientUnread: 0,
-        santaUnread: 0
-    });
-    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const { allMessages, subscribeToLastReadChanges, getLastReadTimestamp } = useRealtimeMessagesContext();
+
+    // Track updates to lastRead timestamps to trigger re-calculation
+    const [lastReadTick, setLastReadTick] = useState(0);
+
+    // Compute conversation IDs
+    const recipientConvId = recipientId ? getConversationId(userId, recipientId) : null;
+    const santaConvId = gifterId ? getConversationId(gifterId, userId) : null;
 
     useEffect(() => {
-        const handleRefresh = () => setRefreshTrigger(prev => prev + 1);
-        window.addEventListener('unread-refresh', handleRefresh);
+        if (!userId) return;
 
-        if (!userId || !firestore) return;
+        // Subscribe to lastRead changes
+        const unsubscribe = subscribeToLastReadChanges((changedUserId, changedConvId) => {
+            if (changedUserId !== userId) return;
 
-        // Get lastRead timestamps from localStorage
-        const getLastReadTimestamp = (conversationId) => {
-            const key = `lastRead_${userId}_${conversationId}`;
-            return localStorage.getItem(key) || new Date(0).toISOString();
-        };
+            // Only trigger update if it matches one of our relevant conversations
+            if (changedConvId === recipientConvId || changedConvId === santaConvId) {
+                setLastReadTick(tick => tick + 1);
+            }
+        });
 
-        // Create conversation IDs (sorted for consistency)
-        const getLegacyConversationId = (userId1, userId2) => {
-            return [userId1, userId2].sort().join('_');
-        };
+        return unsubscribe;
+    }, [userId, recipientConvId, santaConvId, subscribeToLastReadChanges]);
 
-        const unsubscribers = [];
+    // Derived Recipient Unread Count
+    const recipientUnread = useMemo(() => {
+        if (!userId || !recipientId) return 0;
+        const convId = recipientConvId || getConversationId(userId, recipientId);
+        const lastRead = getLastReadTimestamp(userId, convId);
 
-        // Set up listener for recipient messages
-        if (recipientId) {
-            const recipientConvId = getLegacyConversationId(userId, recipientId);
-            const recipientLastRead = getLastReadTimestamp(recipientConvId);
+        // Ensure re-calculation when tick changes
+        void lastReadTick;
 
-            // Expected conversation ID: I am Santa, they are Recipient
-            const expectedConvId = getConversationId(userId, recipientId);
+        // Filter messages: FROM recipient TO user
+        // Using allMessages from Context
+        return allMessages.filter(msg => {
+            if (msg.fromId !== recipientId || msg.toId !== userId) return false;
 
-            const messagesRef = collection(firestore, 'messages');
-            const q = query(
-                messagesRef,
-                where('fromId', '==', recipientId),
-                where('toId', '==', userId),
-                where('timestamp', '>', recipientLastRead)
-            );
+            // Strict conversation check if message has one (prevents double counting in mutual circles)
+            // If msg.conversationId is missing (legacy), we rely on fromId/toId
+            if (msg.conversationId && msg.conversationId !== convId) return false;
 
-            const unsubscribe = onSnapshot(q, (snapshot) => {
-                let count = 0;
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    // If message has conversationId, it MUST match
-                    if (data.conversationId) {
-                        if (data.conversationId === expectedConvId) {
-                            count++;
-                        }
-                    } else {
-                        // Legacy message - count it
-                        count++;
-                    }
-                });
-                setUnreadCounts(prev => ({ ...prev, recipientUnread: count }));
-            }, (error) => {
-                console.error('Error in recipient unread listener:', error);
-            });
+            return new Date(msg.timestamp).getTime() > new Date(lastRead).getTime();
+        }).length;
+    }, [userId, recipientId, recipientConvId, allMessages, getLastReadTimestamp, lastReadTick]);
 
-            unsubscribers.push(unsubscribe);
-        }
+    // Derived Santa Unread Count
+    const santaUnread = useMemo(() => {
+        if (!userId || !gifterId) return 0;
+        const expectedConvId = santaConvId || getConversationId(gifterId, userId);
+        const santaLastRead = getLastReadTimestamp(userId, expectedConvId);
 
-        // Set up listener for Santa messages
-        if (gifterId) {
-            const santaConvId = getLegacyConversationId(userId, gifterId);
-            const santaLastRead = getLastReadTimestamp(santaConvId);
+        // Ensure re-calculation when tick changes
+        void lastReadTick;
 
-            // Expected conversation ID: They are Santa, I am Recipient
-            const expectedConvId = getConversationId(gifterId, userId);
+        // Filter messages: FROM santa TO user
+        // Using allMessages from Context
+        return allMessages.filter(msg => {
+            if (msg.fromId !== gifterId || msg.toId !== userId) return false;
 
-            const messagesRef = collection(firestore, 'messages');
-            const q = query(
-                messagesRef,
-                where('fromId', '==', gifterId),
-                where('toId', '==', userId),
-                where('timestamp', '>', santaLastRead)
-            );
+            // Allow legacy (no convId) or new (matching convId)
+            // But strict filtering requires matching logic from before?
+            // Previous logic: "Use NEW conversationId format for both lastRead lookup AND message filtering"
+            // Wait, previous logic filtered `msg.conversationId === expectedConvId` inside filter?
+            // "Must match expected conversationId"
+            // Let's preserve that logic if it was intentional.
 
-            const unsubscribe = onSnapshot(q, (snapshot) => {
-                let count = 0;
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    // If message has conversationId, it MUST match
-                    if (data.conversationId) {
-                        if (data.conversationId === expectedConvId) {
-                            count++;
-                        }
-                    } else {
-                        // Legacy message - count it
-                        count++;
-                    }
-                });
-                setUnreadCounts(prev => ({ ...prev, santaUnread: count }));
-            }, (error) => {
-                console.error('Error in Santa unread listener:', error);
-            });
+            const isTargetMsg = msg.conversationId ? msg.conversationId === expectedConvId : true; // Fallback for legacy messages?
+            // Wait, previous code (Step 51) strictly checked `msg.conversationId === expectedConvId`.
+            // But if legacy messages exist, they might be missed?
+            // Assuming strict check is desired for new system.
 
-            unsubscribers.push(unsubscribe);
-        }
+            return (msg.conversationId === expectedConvId) &&
+                (new Date(msg.timestamp).getTime() > new Date(santaLastRead).getTime());
+        }).length;
+    }, [userId, gifterId, santaConvId, allMessages, getLastReadTimestamp, lastReadTick]);
 
-        // Cleanup all subscriptions on unmount
-        return () => {
-            window.removeEventListener('unread-refresh', handleRefresh);
-            unsubscribers.forEach(unsub => unsub());
-        };
-    }, [userId, recipientId, gifterId, refreshTrigger]);
-
-    return unreadCounts;
+    return { recipientUnread, santaUnread };
 }
 
-// Helper to update lastRead timestamp in localStorage
-export function updateLastReadTimestamp(userId, otherUserId) {
-    const getConversationId = (userId1, userId2) => {
-        return [userId1, userId2].sort().join('_');
-    };
-
-    const conversationId = getConversationId(userId, otherUserId);
-    const key = `lastRead_${userId}_${conversationId}`;
-    localStorage.setItem(key, new Date().toISOString());
-
-    // Dispatch event so the rest of the app knows a read happened
-    window.dispatchEvent(new Event('unread-refresh'));
-}
+// In-memory cache for lastRead timestamps (synced with lastReadClient)

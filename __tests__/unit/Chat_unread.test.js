@@ -20,9 +20,17 @@ jest.mock('firebase/firestore', () => ({
     serverTimestamp: jest.fn()
 }));
 
-jest.mock('react-markdown', () => ({ children }) => <div>{children}</div>);
+jest.mock('react-markdown', () => {
+    const MockReactMarkdown = ({ children }) => <div>{children}</div>;
+    MockReactMarkdown.displayName = 'MockReactMarkdown';
+    return MockReactMarkdown;
+});
 jest.mock('remark-gfm', () => () => { });
-jest.mock('emoji-picker-react', () => () => <div>EmojiPicker</div>);
+jest.mock('emoji-picker-react', () => {
+    const MockEmojiPicker = () => <div>EmojiPicker</div>;
+    MockEmojiPicker.displayName = 'MockEmojiPicker';
+    return MockEmojiPicker;
+});
 
 // Mock scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = jest.fn();
@@ -30,6 +38,7 @@ window.HTMLElement.prototype.scrollIntoView = jest.fn();
 describe('Chat Component Unread Logic', () => {
     const currentUser = { id: 'user1', name: 'User 1' };
     const otherUser = { id: 'user2', name: 'User 2' };
+    const conversationId = 'santa_user1_recipient_user2'; // New format
     const initialMessages = [
         { id: '1', fromId: 'user2', toId: 'user1', content: 'Hello', timestamp: new Date().toISOString() }
     ];
@@ -58,10 +67,11 @@ describe('Chat Component Unread Logic', () => {
                 isSantaChat={false}
                 unreadCount={1}
                 messages={initialMessages}
+                conversationId={conversationId}
             />
         );
 
-        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2');
+        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
     });
 
     it('should call updateLastReadTimestamp when new messages arrive', () => {
@@ -72,6 +82,7 @@ describe('Chat Component Unread Logic', () => {
                 isSantaChat={false}
                 unreadCount={0}
                 messages={initialMessages}
+                conversationId={conversationId}
             />
         );
 
@@ -95,10 +106,11 @@ describe('Chat Component Unread Logic', () => {
                 isSantaChat={false}
                 unreadCount={1}
                 messages={newMessages}
+                conversationId={conversationId}
             />
         );
 
-        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2');
+        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
     });
 
     it('should NOT call updateLastReadTimestamp if messages array reference changes but length is same', () => {
@@ -109,6 +121,7 @@ describe('Chat Component Unread Logic', () => {
                 isSantaChat={false}
                 unreadCount={0}
                 messages={initialMessages}
+                conversationId={conversationId}
             />
         );
 
@@ -127,6 +140,7 @@ describe('Chat Component Unread Logic', () => {
                 isSantaChat={false}
                 unreadCount={0}
                 messages={[...initialMessages]}
+                conversationId={conversationId}
             />
         );
 

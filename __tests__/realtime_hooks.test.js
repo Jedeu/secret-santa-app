@@ -3,7 +3,9 @@
  */
 
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useRealtimeMessages, useRealtimeAllMessages, useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
+import { useRealtimeAllMessages, useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
+import { RealtimeMessagesProvider } from '@/context/RealtimeMessagesContext';
+import { useUser } from '@/hooks/useUser';
 
 // Mock fetch for unread counts (still uses API polling)
 global.fetch = jest.fn();
@@ -28,7 +30,34 @@ jest.mock('@/lib/firebase-client', () => ({
     firestore: { _isMock: true }
 }));
 
-describe('useRealtimeMessages Hook', () => {
+// Mock useUser hook
+jest.mock('@/hooks/useUser', () => ({
+    useUser: jest.fn()
+}));
+
+// Mock the listener tracker to avoid console noise
+jest.mock('@/lib/firestore-listener-tracker', () => ({
+    logListenerCreated: jest.fn(),
+    logListenerDestroyed: jest.fn(),
+    logSnapshotReceived: jest.fn(),
+}));
+
+/**
+ * Helper to extract the callback from onSnapshot calls
+ */
+function extractSnapshotCallback(callArgs) {
+    if (typeof callArgs[1] === 'object' && typeof callArgs[2] === 'function') {
+        return { callback: callArgs[2], errorCallback: callArgs[3] };
+    }
+    if (typeof callArgs[1] === 'function') {
+        return { callback: callArgs[1], errorCallback: callArgs[2] };
+    }
+    return { callback: null, errorCallback: null };
+}
+
+describe('Realtime Hooks with Context', () => {
+    let mockUser = { id: 'user1', name: 'Test User' };
+
     beforeEach(() => {
         jest.clearAllMocks();
         fetch.mockClear();
@@ -38,252 +67,169 @@ describe('useRealtimeMessages Hook', () => {
         mockWhere.mockReturnValue('mockWhere');
         mockOrderBy.mockReturnValue('mockOrderBy');
         mockQuery.mockReturnValue('mockQuery');
+        mockOnSnapshot.mockReturnValue(jest.fn()); // Unsubscribe mock
+
+        // Default useUser to return authenticated user
+        useUser.mockReturnValue({
+            user: mockUser,
+            loading: false,
+            error: null
+        });
     });
 
     afterEach(() => {
         jest.useRealTimers();
     });
 
-    test('should subscribe to Firestore real-time updates', async () => {
-        const mockMessages1 = [
-            { id: '1', fromId: 'user1', toId: 'user2', content: 'Hello', timestamp: '2025-11-20T10:00:00Z' }
-        ];
-        const mockMessages2 = [
-            { id: '2', fromId: 'user2', toId: 'user1', content: 'Hi', timestamp: '2025-11-20T10:01:00Z' }
-        ];
+    // Wrapper component to provide Context
+    const wrapper = ({ children }) => (
+        <RealtimeMessagesProvider>
+            {children}
+        </RealtimeMessagesProvider>
+    );
 
-        let snapshot1Callback;
-        let snapshot2Callback;
-
-        mockOnSnapshot.mockImplementation((query, callback) => {
-            if (mockOnSnapshot.mock.calls.length === 1) {
-                snapshot1Callback = callback;
-            } else {
-                snapshot2Callback = callback;
-            }
-            return jest.fn(); // Return unsubscribe function
-        });
-
-        const { result } = renderHook(() => useRealtimeMessages('user1', 'user2'));
-
-        // Initially empty
-        expect(result.current).toEqual([]);
-
-        // Simulate Firestore snapshot updates
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
-        });
-
-        // Trigger snapshot callbacks wrapped in act()
-        await act(async () => {
-            snapshot1Callback({
-                forEach: (cb) => mockMessages1.forEach(msg => cb({ data: () => msg }))
-            });
-
-            snapshot2Callback({
-                forEach: (cb) => mockMessages2.forEach(msg => cb({ data: () => msg }))
-            });
-        });
-
-        await waitFor(() => {
-            expect(result.current.length).toBe(2);
-        });
-    });
-
-    test('should unsubscribe from Firestore on unmount', async () => {
-        const mockUnsubscribe1 = jest.fn();
-        const mockUnsubscribe2 = jest.fn();
-
-        mockOnSnapshot
-            .mockReturnValueOnce(mockUnsubscribe1)
-            .mockReturnValueOnce(mockUnsubscribe2);
-
-        const { unmount } = renderHook(() => useRealtimeMessages('user1', 'user2'));
-
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
-        });
-
-        unmount();
-
-        expect(mockUnsubscribe1).toHaveBeenCalled();
-        expect(mockUnsubscribe2).toHaveBeenCalled();
-    });
-
-    test('should handle Firestore errors gracefully', async () => {
-        const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
-
-        let errorCallback;
-        mockOnSnapshot.mockImplementation((query, successCb, errorCb) => {
-            errorCallback = errorCb;
-            return jest.fn();
-        });
-
-        const { result } = renderHook(() => useRealtimeMessages('user1', 'user2'));
-
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalled();
-        });
-
-        // Trigger error callback
-        errorCallback(new Error('Firestore connection error'));
-
-        expect(consoleErrorSpy).toHaveBeenCalled();
-        expect(result.current).toEqual([]);
-
-        consoleErrorSpy.mockRestore();
-    });
-});
-
-describe('useRealtimeAllMessages Hook', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        mockCollection.mockReturnValue('mockCollection');
-        mockOrderBy.mockReturnValue('mockOrderBy');
-        mockQuery.mockReturnValue('mockQuery');
-    });
-
-    test('should subscribe to all messages via Firestore', async () => {
-        const mockMessages = [
-            { id: '1', fromId: 'user1', toId: 'user2', content: 'Hello', timestamp: '2025-11-20T10:00:00Z' },
-            { id: '2', fromId: 'user2', toId: 'user1', content: 'Hi', timestamp: '2025-11-20T10:01:00Z' }
-        ];
-
-        let snapshotCallback;
-        mockOnSnapshot.mockImplementation((query, callback) => {
-            snapshotCallback = callback;
-            return jest.fn();
-        });
-
-        const { result } = renderHook(() => useRealtimeAllMessages({ id: 'user1' }));
-
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalled();
-        });
-
-        // Trigger snapshot callback wrapped in act()
-        await act(async () => {
-            snapshotCallback({
-                forEach: (cb) => mockMessages.forEach(msg => cb({ data: () => msg }))
-            });
-        });
-
-        await waitFor(() => {
-            expect(result.current.length).toBe(2);
-        });
-        expect(result.current).toEqual(mockMessages);
-    });
-
-    test('should unsubscribe on unmount', async () => {
-        const mockUnsubscribe = jest.fn();
-        mockOnSnapshot.mockReturnValue(mockUnsubscribe);
-
-        const { unmount } = renderHook(() => useRealtimeAllMessages({ id: 'user1' }));
-
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalled();
-        });
-
-        unmount();
-
-        expect(mockUnsubscribe).toHaveBeenCalled();
-    });
-});
-
-describe('useRealtimeUnreadCounts Hook', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        mockCollection.mockReturnValue('mockCollection');
-        mockWhere.mockReturnValue('mockWhere');
-        mockQuery.mockReturnValue('mockQuery');
-    });
-
-    test('should subscribe to unread counts for recipient and santa', async () => {
-        const userId = 'user1';
-        const recipientId = 'recipient1';
-        const gifterId = 'santa1';
-
-        let recipientCallback;
-        let santaCallback;
-
-        mockOnSnapshot.mockImplementation((query, callback) => {
-            // We can distinguish based on call order or arguments if needed
-            // For simplicity, let's assume first call is recipient, second is santa
-            if (!recipientCallback) {
-                recipientCallback = callback;
-            } else {
-                santaCallback = callback;
-            }
-            return jest.fn();
-        });
-
-        const { result } = renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId));
-
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
-        });
-
-        // Trigger recipient snapshot (e.g., 3 unread messages)
-        await act(async () => {
-            const recipientDocs = [
-                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) },
-                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) },
-                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) }
+    describe('useRealtimeAllMessages', () => {
+        test('should return messages from Context', async () => {
+            const mockMessages = [
+                { id: '1', fromId: 'user1', toId: 'user2', content: 'Hello', timestamp: '2025-11-20T10:00:00Z' }
             ];
-            recipientCallback({
-                size: 3,
-                docs: recipientDocs,
-                forEach: (cb) => recipientDocs.forEach(cb)
+
+            let snapshotCallback;
+            mockOnSnapshot.mockImplementation((...args) => {
+                const { callback } = extractSnapshotCallback(args);
+                snapshotCallback = callback;
+                return jest.fn();
+            });
+
+            const { result } = renderHook(() => useRealtimeAllMessages(), { wrapper });
+
+            await waitFor(() => {
+                expect(mockOnSnapshot).toHaveBeenCalled();
+            });
+
+            // Simulate update
+            await act(async () => {
+                snapshotCallback({
+                    forEach: (cb) => mockMessages.forEach(msg => cb({ data: () => msg })),
+                    size: mockMessages.length,
+                    metadata: { fromCache: false },
+                    docChanges: () => mockMessages.map(() => ({}))
+                });
+            });
+
+            await waitFor(() => {
+                expect(result.current).toEqual(mockMessages);
             });
         });
+    });
 
-        // Trigger santa snapshot (e.g., 1 unread message)
-        await act(async () => {
-            const santaDocs = [
-                { data: () => ({ timestamp: { toMillis: () => Date.now() } }) }
+    describe('useRealtimeUnreadCounts', () => {
+        test('should filter unread counts correctly client-side', async () => {
+            const userId = 'user1';
+            const recipientId = 'user2';
+            const gifterId = 'user3'; // Santa
+
+            // Mock messages:
+            // 1. From recipient (new)
+            // 2. From Santa (new)
+            // 3. From someone else (ignored)
+            // 4. From recipient (old - read)
+            const now = new Date();
+            const past = new Date(now.getTime() - 10000);
+            const future = new Date(now.getTime() + 10000);
+
+            const mockMessages = [
+                { id: '1', fromId: recipientId, toId: userId, timestamp: future.toISOString(), conversationId: `santa_${userId}_recipient_${recipientId}` },
+                { id: '2', fromId: gifterId, toId: userId, timestamp: future.toISOString(), conversationId: `santa_${gifterId}_recipient_${userId}` },
+                { id: '3', fromId: 'other', toId: userId, timestamp: future.toISOString() },
+                { id: '4', fromId: recipientId, toId: userId, timestamp: new Date(0).toISOString(), conversationId: `santa_${userId}_recipient_${recipientId}` }
             ];
-            santaCallback({
-                size: 1,
-                docs: santaDocs,
-                forEach: (cb) => santaDocs.forEach(cb)
+
+            // Mock query to return distinct identifiers
+            mockCollection.mockReturnValue({ path: 'messages' });
+            mockQuery.mockImplementation((collectionRef, ...constraints) => {
+                // Constraints are mocked as 'mockWhere', 'mockOrderBy' strings in defaults
+                // We need more info.
+                // Let's rely on the number of arguments or types?
+                // Provider query: collection, orderBy -> 2 args
+                // Recipient/Santa query: collection, where, where -> 3 args
+
+                return {
+                    type: 'query',
+                    constraintsCount: constraints.length,
+                    constraints
+                };
+            });
+
+            mockWhere.mockImplementation((field, op, value) => ({ type: 'where', field, value }));
+            mockOrderBy.mockImplementation((field, dir) => ({ type: 'orderBy', field, dir }));
+
+
+            // Capture callbacks for different listeners
+            let allMessagesCallback;
+            let recipientCallback;
+            let santaCallback;
+
+            mockOnSnapshot.mockImplementation((queryObj, ...args) => {
+                const { callback } = extractSnapshotCallback([queryObj, ...args]);
+
+                // Identify based on query structure (mocked above)
+                if (queryObj && queryObj.constraints && queryObj.constraints.some(c => c.type === 'orderBy')) {
+                    // This is the provider's 'allMessages' listener (has orderBy)
+                    allMessagesCallback = callback;
+                } else if (queryObj && queryObj.constraints && queryObj.constraints.some(c => c.type === 'where' && c.value === recipientId)) {
+                    // Recipient listener
+                    recipientCallback = callback;
+                } else if (queryObj && queryObj.constraints && queryObj.constraints.some(c => c.type === 'where' && c.value === gifterId)) {
+                    // Santa listener
+                    santaCallback = callback;
+                }
+
+                return jest.fn();
+            });
+
+            const { result } = renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId), { wrapper });
+
+            // Trigger ALL MESSAGES (Provider)
+            await act(async () => {
+                if (allMessagesCallback) {
+                    allMessagesCallback({
+                        forEach: (cb) => mockMessages.forEach(msg => cb({ data: () => msg })),
+                        size: mockMessages.length,
+                        metadata: { fromCache: false },
+                        docChanges: () => mockMessages.map(() => ({}))
+                    });
+                }
+            });
+
+            // Trigger RECIPIENT listener (to update recipientMessagesRef - although logic actually uses allMessages for recipient!)
+            // Wait, previous logic for recipient used allMessages? 
+            // Let's check implementation:
+            // Recipient count uses `allMessages` filter.
+            // Santa count uses `santaMessagesRef` (from its own listener).
+
+            // So we need to trigger santaCallback to update santaMessagesRef.
+            // And we need to trigger allMessagesCallback to update allMessages for recipient count.
+
+            // Trigger SANTA listener
+            await act(async () => {
+                const santaDocs = mockMessages.filter(m => m.fromId === gifterId);
+                if (santaCallback) {
+                    santaCallback({
+                        forEach: (cb) => santaDocs.forEach(msg => cb({ data: () => msg })),
+                        size: santaDocs.length,
+                        metadata: { fromCache: false },
+                        docChanges: () => santaDocs.map(() => ({}))
+                    });
+                }
+            });
+
+            // Wait for internal state update
+            await waitFor(() => {
+                // Should see 1 unread from recipient and 1 from santa
+                expect(result.current.recipientUnread).toBe(1);
+                expect(result.current.santaUnread).toBe(1);
             });
         });
-
-        // Since the hook logic might depend on localStorage for lastReadTime, 
-        // and we haven't mocked localStorage or the exact logic, 
-        // we might need to adjust expectations based on the actual hook code.
-        // However, assuming the hook sets state based on snapshot:
-
-        // Note: The actual hook implementation details matter here. 
-        // If it filters based on lastReadTimestamp, we need to ensure the messages are "newer".
-        // For now, let's assume the mock returns "unread" messages.
-
-        // Actually, let's just verify it updates the state
-        // The exact count depends on the filtering logic in the hook.
-        // If the hook uses snapshot.size directly (as per my earlier view), then 3 and 1 are expected.
-    });
-
-    test('should unsubscribe on unmount', async () => {
-        const mockUnsubscribe = jest.fn();
-        mockOnSnapshot.mockReturnValue(mockUnsubscribe);
-
-        const { unmount } = renderHook(() => useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'));
-
-        await waitFor(() => {
-            expect(mockOnSnapshot).toHaveBeenCalled();
-        });
-
-        unmount();
-
-        expect(mockUnsubscribe).toHaveBeenCalled();
-    });
-
-    test('should not subscribe if IDs are missing', async () => {
-        renderHook(() => useRealtimeUnreadCounts('user1', null, null));
-
-        // Wait a bit
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        expect(mockOnSnapshot).not.toHaveBeenCalled();
     });
 });
