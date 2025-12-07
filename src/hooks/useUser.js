@@ -165,6 +165,19 @@ export function useUser() {
         return () => unsubscribe();
     }, [user?.id]);
 
+    // Expose user data on window for E2E testing in development mode
+    useEffect(() => {
+        if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+            window.__e2eUserData__ = user;
+        }
+
+        return () => {
+            if (typeof window !== 'undefined') {
+                delete window.__e2eUserData__;
+            }
+        };
+    }, [user]);
+
     return { user, loading, error, refreshUser };
 }
 

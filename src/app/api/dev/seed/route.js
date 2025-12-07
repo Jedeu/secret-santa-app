@@ -16,10 +16,6 @@ export async function POST() {
         const adminApp = (await import('firebase-admin')).apps[0];
         const projectId = adminApp ? adminApp.options.projectId : 'unknown';
 
-        console.log('Seeding - Using Firestore:', usingFirestore);
-        console.log('Seeding - Project ID:', projectId);
-        console.log('Seeding - Env Project ID:', process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
-
         await ensureAllParticipants(PARTICIPANTS);
 
         // Verify by reading back one user
