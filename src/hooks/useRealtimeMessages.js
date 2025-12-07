@@ -9,7 +9,7 @@ import {
     logSnapshotReceived
 } from '@/lib/firestore-listener-tracker';
 import { useRealtimeMessagesContext, updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
-import { getLastReadTimestamp as fetchLastRead } from '@/lib/lastReadClient';
+import { getLastReadTimestamp as fetchLastRead, getCachedTimestamp } from '@/lib/lastReadClient';
 
 
 
@@ -97,7 +97,12 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
     const recipientUnread = useMemo(() => {
         if (!userId || !recipientId) return 0;
         const convId = recipientConvId || getConversationId(userId, recipientId);
-        const lastRead = getLastReadTimestamp(userId, convId);
+
+        // Check cache directly. If missing (undefined), return 0 to prevent flash.
+        const cachedLastRead = getCachedTimestamp(userId, convId);
+        if (cachedLastRead === undefined) return 0;
+
+        const lastRead = cachedLastRead;
 
         // Ensure re-calculation when tick changes
         void lastReadTick;
@@ -113,13 +118,18 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
             return new Date(msg.timestamp).getTime() > new Date(lastRead).getTime();
         }).length;
-    }, [userId, recipientId, recipientConvId, allMessages, getLastReadTimestamp, lastReadTick]);
+    }, [userId, recipientId, recipientConvId, allMessages, lastReadTick]);
 
     // Derived Santa Unread Count
     const santaUnread = useMemo(() => {
         if (!userId || !gifterId) return 0;
         const expectedConvId = santaConvId || getConversationId(gifterId, userId);
-        const santaLastRead = getLastReadTimestamp(userId, expectedConvId);
+
+        // Check cache directly. If missing (undefined), return 0 to prevent flash.
+        const cachedLastRead = getCachedTimestamp(userId, expectedConvId);
+        if (cachedLastRead === undefined) return 0;
+
+        const santaLastRead = cachedLastRead;
 
         // Ensure re-calculation when tick changes
         void lastReadTick;
@@ -129,22 +139,10 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         return allMessages.filter(msg => {
             if (msg.fromId !== gifterId || msg.toId !== userId) return false;
 
-            // Allow legacy (no convId) or new (matching convId)
-            // But strict filtering requires matching logic from before?
-            // Previous logic: "Use NEW conversationId format for both lastRead lookup AND message filtering"
-            // Wait, previous logic filtered `msg.conversationId === expectedConvId` inside filter?
-            // "Must match expected conversationId"
-            // Let's preserve that logic if it was intentional.
-
-            const isTargetMsg = msg.conversationId ? msg.conversationId === expectedConvId : true; // Fallback for legacy messages?
-            // Wait, previous code (Step 51) strictly checked `msg.conversationId === expectedConvId`.
-            // But if legacy messages exist, they might be missed?
-            // Assuming strict check is desired for new system.
-
             return (msg.conversationId === expectedConvId) &&
                 (new Date(msg.timestamp).getTime() > new Date(santaLastRead).getTime());
         }).length;
-    }, [userId, gifterId, santaConvId, allMessages, getLastReadTimestamp, lastReadTick]);
+    }, [userId, gifterId, santaConvId, allMessages, lastReadTick]);
 
     return { recipientUnread, santaUnread };
 }
