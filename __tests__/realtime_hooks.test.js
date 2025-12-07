@@ -162,6 +162,10 @@ describe('Realtime Hooks with Context', () => {
                 { id: '4', fromId: recipientId, toId: userId, timestamp: new Date(0).toISOString(), conversationId: `santa_${userId}_recipient_${recipientId}` }
             ];
 
+            // [FIX] Mock getCachedTimestamp to return epoch (valid cache value, not undefined)
+            // This simulates the cache being primed with a "no previous reads" state.
+            mockGetCachedTimestamp.mockReturnValue(new Date(0).toISOString());
+
             // Mock query to return distinct identifiers
             mockCollection.mockReturnValue({ path: 'messages' });
             mockQuery.mockImplementation((collectionRef, ...constraints) => {
