@@ -7,6 +7,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
+import { getConversationId } from '../../src/lib/message-utils';
 
 // Mock Firebase
 jest.mock('../../src/lib/firebase-client', () => ({
@@ -46,6 +47,10 @@ function createMockSnapshot(messages) {
 describe('Unread Badge Clearing', () => {
     let recipientSnapshotCallback;
     let santaSnapshotCallback;
+
+    // Conversation IDs in new format
+    const recipientConvId = getConversationId('user1', 'recipient1'); // santa_user1_recipient_recipient1
+    const santaConvId = getConversationId('santa1', 'user1'); // santa_santa1_recipient_user1
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -161,7 +166,7 @@ describe('Unread Badge Clearing', () => {
             // Now simulate user visiting the tab (calls updateLastReadTimestamp)
             // This should trigger recalculation with updated lastRead
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1');
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
             });
 
             // Badge should be cleared because lastRead is now >= message timestamp
@@ -193,7 +198,7 @@ describe('Unread Badge Clearing', () => {
 
             // User visits santa tab
             act(() => {
-                updateLastReadTimestamp('user1', 'santa1');
+                updateLastReadTimestamp('user1', 'santa1', santaConvId);
             });
 
             expect(result.current.santaUnread).toBe(0);
@@ -271,7 +276,7 @@ describe('Unread Badge Clearing', () => {
 
             // Clear only recipient badge
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1');
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
             });
 
             expect(result.current.recipientUnread).toBe(0);
@@ -279,7 +284,7 @@ describe('Unread Badge Clearing', () => {
 
             // Clear santa badge
             act(() => {
-                updateLastReadTimestamp('user1', 'santa1');
+                updateLastReadTimestamp('user1', 'santa1', santaConvId);
             });
 
             expect(result.current.recipientUnread).toBe(0);
@@ -300,7 +305,7 @@ describe('Unread Badge Clearing', () => {
 
             // T0: User views the tab (calls updateLastReadTimestamp)
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1');
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
             });
 
             // T1: Advance time by 1 second, then a message arrives
@@ -326,7 +331,7 @@ describe('Unread Badge Clearing', () => {
             // T2: Advance time by another second, simulate Chat's useEffect re-running
             jest.setSystemTime(new Date(baseTime.getTime() + 2000));
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1');
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
             });
 
             // Badge should now be cleared because lastRead (T2) >= message timestamp (T1)
@@ -347,7 +352,7 @@ describe('Unread Badge Clearing', () => {
 
             // T0: User starts viewing
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1');
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
             });
 
             // Simulate 3 rapid messages at T1, T2, T3
@@ -375,7 +380,7 @@ describe('Unread Badge Clearing', () => {
                 // Advance time slightly to ensure lastRead > message timestamp
                 jest.setSystemTime(new Date(baseTime.getTime() + i * 100 + 1));
                 act(() => {
-                    updateLastReadTimestamp('user1', 'recipient1');
+                    updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
                 });
 
                 // Badge should be 0 because we just called updateLastReadTimestamp

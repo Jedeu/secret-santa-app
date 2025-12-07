@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { signOut as firebaseSignOut } from 'firebase/auth';
 import { collection, getDocs } from 'firebase/firestore';
 import { clientAuth, firestore } from '@/lib/firebase-client';
@@ -37,9 +37,10 @@ export default function Home() {
     };
 
     // Helper to filter messages for specific conversation
-    const getConversationMessages = (userId, otherId, conversationId) => {
+    // IMPORTANT: Memoized with useCallback to ensure useMemo dependencies are correct
+    const getConversationMessages = useCallback((userId, otherId, conversationId) => {
         return filterMessages(allMessages, userId, otherId, conversationId);
-    };
+    }, [allMessages]);
 
     // Memoize conversation IDs
     const recipientConversationId = useMemo(() =>
@@ -55,12 +56,12 @@ export default function Home() {
     // Memoize messages
     const recipientMessages = useMemo(() =>
         getConversationMessages(currentUser?.id, currentUser?.recipientId, recipientConversationId),
-        [allMessages, currentUser?.id, currentUser?.recipientId, recipientConversationId]
+        [getConversationMessages, currentUser?.id, currentUser?.recipientId, recipientConversationId]
     );
 
     const santaMessages = useMemo(() =>
         getConversationMessages(currentUser?.id, currentUser?.gifterId, santaConversationId),
-        [allMessages, currentUser?.id, currentUser?.gifterId, santaConversationId]
+        [getConversationMessages, currentUser?.id, currentUser?.gifterId, santaConversationId]
     );
 
     // Fetch all users when authenticated
@@ -108,7 +109,7 @@ export default function Home() {
                 <main className="container">
                     {/* Header with sign out */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h1 className="title" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' \ud83d\udc4b'}</h1>
+                        <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' \ud83d\udc4b'}</h1>
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                             <AdminPanel userEmail={currentUser?.email} variant="compact" onResetComplete={refreshUser} />
                             <button

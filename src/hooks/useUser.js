@@ -102,7 +102,10 @@ export function useUser() {
 
     useEffect(() => {
         if (!clientAuth || !firestore) {
-            setLoading(false);
+            // Defer state update to avoid synchronous setState in effect
+            queueMicrotask(() => {
+                setLoading(false);
+            });
             return;
         }
 

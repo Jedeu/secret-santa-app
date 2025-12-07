@@ -25,16 +25,19 @@ function TabButton({ active, onClick, children, unreadCount }) {
         >
             {children}
             {unreadCount > 0 && (
-                <span style={{
-                    background: 'var(--primary)',
-                    color: 'white',
-                    fontSize: '10px',
-                    fontWeight: 'bold',
-                    padding: '2px 6px',
-                    borderRadius: '10px',
-                    minWidth: '18px',
-                    textAlign: 'center'
-                }}>
+                <span
+                    data-testid="unread-badge"
+                    style={{
+                        background: 'var(--primary)',
+                        color: 'white',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        padding: '2px 6px',
+                        borderRadius: '10px',
+                        minWidth: '18px',
+                        textAlign: 'center'
+                    }}
+                >
                     {unreadCount}
                 </span>
             )}

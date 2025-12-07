@@ -18,8 +18,16 @@ jest.mock('@/lib/firebase-client', () => ({
 import Home from '@/app/page';
 
 // Mock child components to simplify testing
-jest.mock('@/components/Chat', () => () => <div data-testid="chat-component">Chat</div>);
-jest.mock('@/components/PublicFeed', () => () => <div data-testid="feed-component">Feed</div>);
+jest.mock('@/components/Chat', () => {
+    const MockChat = () => <div data-testid="chat-component">Chat</div>;
+    MockChat.displayName = 'MockChat';
+    return MockChat;
+});
+jest.mock('@/components/PublicFeed', () => {
+    const MockPublicFeed = () => <div data-testid="feed-component">Feed</div>;
+    MockPublicFeed.displayName = 'MockPublicFeed';
+    return MockPublicFeed;
+});
 
 describe('Admin UI Visibility', () => {
     beforeEach(() => {

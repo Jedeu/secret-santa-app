@@ -277,17 +277,6 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
     // Use refs to track listener state and prevent duplicates
     const listenersRef = useRef(null);
-    const paramsRef = useRef({ userId, recipientId, gifterId });
-
-    // Memoize the listener setup params to detect real changes
-    const paramsChanged = useMemo(() => {
-        const prev = paramsRef.current;
-        const changed = prev.userId !== userId ||
-            prev.recipientId !== recipientId ||
-            prev.gifterId !== gifterId;
-        paramsRef.current = { userId, recipientId, gifterId };
-        return changed;
-    }, [userId, recipientId, gifterId]);
 
     /**
      * Recalculate ONLY recipient unread count from stored messages using CURRENT lastRead.
@@ -299,9 +288,17 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         return () => {
             if (!userId || !recipientId) return;
 
-            const recipientConvId = getLegacyConversationId(userId, recipientId);
-            const recipientLastRead = getLastReadTimestamp(userId, recipientConvId);
+            // Use NEW conversationId format for both lastRead lookup AND message filtering
             const expectedConvId = getConversationId(userId, recipientId);
+            const recipientLastRead = getLastReadTimestamp(userId, expectedConvId);
+
+            console.log('[BADGE-DEBUG] recalculateRecipientCount:', {
+                userId: userId.slice(0, 8),
+                recipientId: recipientId.slice(0, 8),
+                expectedConvId,
+                recipientLastRead,
+                totalMessages: recipientMessagesRef.current.length
+            });
 
             const recipientUnread = recipientMessagesRef.current.filter(msg => {
                 // Must be newer than lastRead
@@ -311,6 +308,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
                 return msg.conversationId === expectedConvId;
             }).length;
 
+            console.log('[BADGE-DEBUG] Recipient unread count:', recipientUnread);
             setUnreadCounts(prev => ({ ...prev, recipientUnread }));
         };
     }, [userId, recipientId]);
@@ -325,9 +323,17 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         return () => {
             if (!userId || !gifterId) return;
 
-            const santaConvId = getLegacyConversationId(userId, gifterId);
-            const santaLastRead = getLastReadTimestamp(userId, santaConvId);
+            // Use NEW conversationId format for both lastRead lookup AND message filtering
             const expectedConvId = getConversationId(gifterId, userId);
+            const santaLastRead = getLastReadTimestamp(userId, expectedConvId);
+
+            console.log('[BADGE-DEBUG] recalculateSantaCount:', {
+                userId: userId.slice(0, 8),
+                gifterId: gifterId.slice(0, 8),
+                expectedConvId,
+                santaLastRead,
+                totalMessages: santaMessagesRef.current.length
+            });
 
             const santaUnread = santaMessagesRef.current.filter(msg => {
                 // Must be newer than lastRead
@@ -337,6 +343,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
                 return msg.conversationId === expectedConvId;
             }).length;
 
+            console.log('[BADGE-DEBUG] Santa unread count:', santaUnread);
             setUnreadCounts(prev => ({ ...prev, santaUnread }));
         };
     }, [userId, gifterId]);
@@ -355,21 +362,17 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
     useEffect(() => {
         if (!userId || !firestore) return;
 
-        // If listeners exist and params haven't changed, skip recreation
-        if (listenersRef.current && !paramsChanged) {
-            return;
-        }
-
-        // Clean up existing listeners if params changed
+        // If listeners exist, skip recreation (effect deps handle recreation)
         if (listenersRef.current) {
-            listenersRef.current.unsubscribers.forEach(unsub => unsub());
+            return;
         }
 
         const unsubscribers = [];
 
         // Compute conversation IDs for comparison in subscriber
-        const recipientConvId = recipientId ? getLegacyConversationId(userId, recipientId) : null;
-        const santaConvId = gifterId ? getLegacyConversationId(userId, gifterId) : null;
+        // Use NEW format to match how messages are stored
+        const recipientConvId = recipientId ? getConversationId(userId, recipientId) : null;
+        const santaConvId = gifterId ? getConversationId(gifterId, userId) : null;
 
         // Subscribe to lastRead changes for recalculation
         // IMPORTANT: Only recalculate the specific badge whose conversation changed
@@ -378,11 +381,24 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             // Only process if this change affects our user
             if (changedUserId !== userId) return;
 
+            // DEBUG: Log conversation ID comparison
+            console.log('[BADGE-DEBUG] lastRead changed:', {
+                changedConvId,
+                recipientConvId,
+                santaConvId,
+                matchesRecipient: changedConvId === recipientConvId,
+                matchesSanta: changedConvId === santaConvId
+            });
+
             // Check which conversation changed and only recalculate that badge
             if (changedConvId === recipientConvId) {
+                console.log('[BADGE-DEBUG] Recalculating RECIPIENT badge only');
                 recalculateRecipientCount();
             } else if (changedConvId === santaConvId) {
+                console.log('[BADGE-DEBUG] Recalculating SANTA badge only');
                 recalculateSantaCount();
+            } else {
+                console.log('[BADGE-DEBUG] No match - skipping recalculation');
             }
             // If neither matches, it's a different conversation - no action needed
         });
@@ -489,7 +505,7 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
             recipientMessagesRef.current = [];
             santaMessagesRef.current = [];
         };
-    }, [userId, recipientId, gifterId, paramsChanged, recalculateRecipientCount, recalculateSantaCount]);
+    }, [userId, recipientId, gifterId, recalculateRecipientCount, recalculateSantaCount]);
 
     return unreadCounts;
 }
@@ -580,26 +596,37 @@ function getLastReadTimestamp(userId, conversationId) {
  * Writes to Firestore (debounced) and updates local cache immediately.
  *
  * @param {string} userId - Current user's ID
- * @param {string} otherUserId - The other user's ID in the conversation
+ * @param {string} otherUserId - The other user's ID in the conversation (DEPRECATED - kept for backwards compat)
+ * @param {string} conversationId - The conversation ID (NEW format: santa_X_recipient_Y)
  */
-export function updateLastReadTimestamp(userId, otherUserId) {
-    const conversationId = getLegacyConversationId(userId, otherUserId);
+export function updateLastReadTimestamp(userId, otherUserId, conversationId = null) {
+    // If conversationId is not provided, fall back to legacy format
+    // This maintains backwards compatibility with old call sites
+    const convId = conversationId || getLegacyConversationId(userId, otherUserId);
     const now = new Date().toISOString();
 
+    console.log('[BADGE-DEBUG] updateLastReadTimestamp called:', {
+        userId: userId.slice(0, 8),
+        otherUserId: otherUserId ? otherUserId.slice(0, 8) : 'N/A',
+        conversationId: convId,
+        timestamp: now,
+        isNewFormat: !!conversationId
+    });
+
     // Update local cache immediately for responsive UI
-    const key = `${userId}_${conversationId}`;
+    const key = `${userId}_${convId}`;
     lastReadCache.set(key, now);
 
     // Also update localStorage for backwards compatibility
     if (typeof window !== 'undefined') {
-        const localStorageKey = `lastRead_${userId}_${conversationId}`;
+        const localStorageKey = `lastRead_${userId}_${convId}`;
         localStorage.setItem(localStorageKey, now);
     }
 
     // Notify subscribers that lastRead has changed
     // This triggers client-side recalculation of unread counts
-    notifyLastReadChange(userId, conversationId, now);
+    notifyLastReadChange(userId, convId, now);
 
     // Write to Firestore (debounced)
-    firestoreUpdateLastRead(userId, conversationId);
+    firestoreUpdateLastRead(userId, convId);
 }

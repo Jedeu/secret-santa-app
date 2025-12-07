@@ -51,9 +51,11 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     // Mark messages as read when component mounts, user changes, OR new messages arrive
     // This ensures badge clears even when new messages arrive while viewing the tab
     useEffect(() => {
-        updateLastReadTimestamp(currentUser.id, otherUser.id);
+        // IMPORTANT: Use the conversationId passed from parent (new format)
+        // NOT getLegacyConversationId which would cause format mismatch
+        updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
         lastReadRef.current = Date.now();
-    }, [currentUser.id, otherUser.id, messages]);
+    }, [currentUser.id, otherUser.id, messages, conversationId]);
 
     const scrollToBottom = (behavior = 'smooth') => {
         bottomRef.current?.scrollIntoView({ behavior });
@@ -67,7 +69,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
                 if (now - lastReadRef.current > 2000) {
-                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
                     lastReadRef.current = now;
                 }
             }
@@ -82,12 +84,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
                 if (now - lastReadRef.current > 2000) {
-                    updateLastReadTimestamp(currentUser.id, otherUser.id);
+                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
                     lastReadRef.current = now;
                 }
             }
         }
-    }, [messages, currentUser.id, otherUser.id]);
+    }, [messages, currentUser.id, otherUser.id, conversationId]);
 
     useEffect(() => {
         // Auto-scroll logic for *my* messages
