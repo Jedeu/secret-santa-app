@@ -9,6 +9,7 @@ import {
     logSnapshotReceived
 } from '@/lib/firestore-listener-tracker';
 import { useRealtimeMessagesContext, updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
+import { getLastReadTimestamp as fetchLastRead } from '@/lib/lastReadClient';
 
 
 
@@ -57,6 +58,24 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
     // Compute conversation IDs
     const recipientConvId = recipientId ? getConversationId(userId, recipientId) : null;
     const santaConvId = gifterId ? getConversationId(gifterId, userId) : null;
+
+    // [NEW] Effect to prime the cache from Firestore on mount
+    useEffect(() => {
+        if (!userId) return;
+
+        const primeCache = async () => {
+            // Fetch both concurrently
+            const promises = [];
+            if (recipientConvId) promises.push(fetchLastRead(userId, recipientConvId));
+            if (santaConvId) promises.push(fetchLastRead(userId, santaConvId));
+
+            await Promise.all(promises);
+            // Force re-calculation after cache update
+            setLastReadTick(tick => tick + 1);
+        };
+
+        primeCache();
+    }, [userId, recipientConvId, santaConvId]);
 
     useEffect(() => {
         if (!userId) return;

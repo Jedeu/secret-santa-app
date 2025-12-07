@@ -55,12 +55,29 @@ function extractSnapshotCallback(callArgs) {
     return { callback: null, errorCallback: null };
 }
 
+// Mock lastReadClient for cache priming tests
+const mockFetchLastRead = jest.fn();
+const mockGetCachedTimestamp = jest.fn();
+jest.mock('@/lib/lastReadClient', () => ({
+    getLastReadTimestamp: (...args) => mockFetchLastRead(...args),
+    getCachedTimestamp: (...args) => mockGetCachedTimestamp(...args),
+}));
+
+
 describe('Realtime Hooks with Context', () => {
     let mockUser = { id: 'user1', name: 'Test User' };
 
     beforeEach(() => {
         jest.clearAllMocks();
         fetch.mockClear();
+        mockFetchLastRead.mockClear();
+        mockGetCachedTimestamp.mockClear();
+
+        // Default mock for fetchLastRead - returns epoch
+        mockFetchLastRead.mockResolvedValue(new Date(0).toISOString());
+        // Default mock for getCachedTimestamp - returns undefined (no cache)
+        mockGetCachedTimestamp.mockReturnValue(undefined);
+
 
         // Setup default mock implementations
         mockCollection.mockReturnValue('mockCollection');
@@ -230,6 +247,56 @@ describe('Realtime Hooks with Context', () => {
                 expect(result.current.recipientUnread).toBe(1);
                 expect(result.current.santaUnread).toBe(1);
             });
+        });
+
+        test('should fetch initial lastRead timestamps on mount', async () => {
+            const userId = 'user1';
+            const recipientId = 'user2';
+            const gifterId = 'user3';
+
+            // Expected conversation IDs (based on getConversationId logic)
+            // santa_[santaId]_recipient_[recipientId] where sender is santa
+            const expectedRecipientConvId = `santa_${userId}_recipient_${recipientId}`;
+            const expectedSantaConvId = `santa_${gifterId}_recipient_${userId}`;
+
+            // Configure mock to return specific timestamps
+            const recipientLastRead = new Date('2025-01-01T12:00:00Z').toISOString();
+            const santaLastRead = new Date('2025-01-01T13:00:00Z').toISOString();
+
+            mockFetchLastRead.mockImplementation((uid, convId) => {
+                if (convId === expectedRecipientConvId) return Promise.resolve(recipientLastRead);
+                if (convId === expectedSantaConvId) return Promise.resolve(santaLastRead);
+                return Promise.resolve(new Date(0).toISOString());
+            });
+
+            // Setup basic query mocks
+            mockCollection.mockReturnValue({ path: 'messages' });
+            mockQuery.mockReturnValue({ type: 'query', constraints: [{ type: 'orderBy' }] });
+            mockOnSnapshot.mockImplementation((...args) => {
+                const { callback } = extractSnapshotCallback(args);
+                // Immediately fire with empty messages
+                if (callback) {
+                    callback({
+                        forEach: () => { },
+                        size: 0,
+                        metadata: { fromCache: false },
+                        docChanges: () => []
+                    });
+                }
+                return jest.fn();
+            });
+
+            const { result } = renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId), { wrapper });
+
+            // Wait for the primeCache effect to complete
+            await waitFor(() => {
+                // fetchLastRead should be called for both conversations
+                expect(mockFetchLastRead).toHaveBeenCalledWith(userId, expectedRecipientConvId);
+                expect(mockFetchLastRead).toHaveBeenCalledWith(userId, expectedSantaConvId);
+            });
+
+            // Verify it was called exactly twice (once per conversation)
+            expect(mockFetchLastRead).toHaveBeenCalledTimes(2);
         });
     });
 });
