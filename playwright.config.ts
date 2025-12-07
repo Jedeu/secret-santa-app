@@ -12,10 +12,12 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
     testDir: './e2e',
-    fullyParallel: true,
+    // Serial execution for E2E tests - safer given shared database state with fixed users
+    fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
-    workers: process.env.CI ? 1 : undefined,
+    // Use single worker for serial execution per E2E testing strategy
+    workers: 1,
     reporter: 'html',
     use: {
         baseURL: 'http://localhost:3000',

@@ -105,3 +105,34 @@ test.describe('Authentication Guard States', () => {
         await expect(heading).toContainText(/secret santa/i);
     });
 });
+
+test.describe('Dev Login Flow', () => {
+    test('should login successfully using Dev Login', async ({ page }) => {
+        // 1. Go to /dev/login
+        await page.goto('/dev/login');
+
+        // Verify we're on the dev login page
+        await expect(page.getByRole('heading', { name: /dev login/i })).toBeVisible();
+
+        // 2. Click "Jed"
+        await page.getByRole('button', { name: 'Jed' }).click();
+
+        // Wait for redirect to complete
+        await page.waitForURL('/');
+
+        // 3. Assert URL is / (dashboard)
+        expect(page.url()).toContain('/');
+
+        // 4. Assert "Jed" is visible in header (via greeting or profile)
+        // Wait for DOM to settle (don't use networkidle - Firebase realtime keeps connections open)
+        await page.waitForLoadState('domcontentloaded');
+
+        // Give auth state time to propagate
+        await page.waitForTimeout(2000);
+
+        // Look for authenticated state indicators
+        const jedText = page.getByText(/jed/i);
+        await expect(jedText.first()).toBeVisible({ timeout: 10000 });
+    });
+});
+
