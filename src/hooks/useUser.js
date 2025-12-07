@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { clientAuth, firestore } from '@/lib/firebase-client';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, limit, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import { getParticipantName } from '@/lib/participants';
 
@@ -128,5 +128,43 @@ export function useUser() {
         return () => unsubscribe();
     }, [fetchUserData]);
 
+    // Set up realtime listener for user document to receive assignment changes
+    // This is critical for receiving recipientId/gifterId updates from assignments
+    useEffect(() => {
+        if (!user?.id || !firestore) {
+            return;
+        }
+
+        const userDocRef = doc(firestore, 'users', user.id);
+
+        const unsubscribe = onSnapshot(
+            userDocRef,
+            (docSnapshot) => {
+                if (docSnapshot.exists()) {
+                    const updatedUser = docSnapshot.data();
+                    // Only update if there are actual changes to recipient/gifter assignments
+                    setUser(prev => {
+                        if (!prev) return updatedUser;
+                        if (prev.recipientId !== updatedUser.recipientId ||
+                            prev.gifterId !== updatedUser.gifterId) {
+                            console.log('[useUser] Assignment update received:', {
+                                recipientId: updatedUser.recipientId,
+                                gifterId: updatedUser.gifterId
+                            });
+                            return updatedUser;
+                        }
+                        return prev; // No change, avoid unnecessary re-renders
+                    });
+                }
+            },
+            (error) => {
+                console.error('[useUser] Error listening to user document:', error);
+            }
+        );
+
+        return () => unsubscribe();
+    }, [user?.id]);
+
     return { user, loading, error, refreshUser };
 }
+

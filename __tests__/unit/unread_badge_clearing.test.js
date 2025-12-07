@@ -1,15 +1,12 @@
 /** @jest-environment jsdom */
-
-/**
- * Tests for the unread badge clearing behavior.
- * Verifies that badges clear immediately when updateLastReadTimestamp is called.
- */
-
 import { renderHook, act } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
+import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
+import { firestore } from '../../src/lib/firebase-client';
+import { onSnapshot } from 'firebase/firestore';
 import { getConversationId } from '../../src/lib/message-utils';
 
-// Mock Firebase
+// Mock dependencies
 jest.mock('../../src/lib/firebase-client', () => ({
     firestore: {}
 }));
@@ -18,7 +15,8 @@ jest.mock('firebase/firestore', () => ({
     collection: jest.fn(),
     query: jest.fn(),
     where: jest.fn(),
-    onSnapshot: jest.fn()
+    onSnapshot: jest.fn(),
+    orderBy: jest.fn()
 }));
 
 jest.mock('../../src/lib/firestore-listener-tracker', () => ({
@@ -27,12 +25,47 @@ jest.mock('../../src/lib/firestore-listener-tracker', () => ({
     logSnapshotReceived: jest.fn(),
 }));
 
-jest.mock('../../src/lib/lastReadClient', () => ({
-    updateLastReadTimestamp: jest.fn(),
-    getCachedTimestamp: jest.fn()
+// Mock useUser
+jest.mock('../../src/hooks/useUser', () => ({
+    useUser: jest.fn(() => ({
+        user: { id: 'user1', name: 'Test User' },
+        loading: false
+    }))
 }));
 
-import { onSnapshot } from 'firebase/firestore';
+// Mock lastReadClient (Stateful)
+const mockLastReadStore = new Map();
+
+jest.mock('../../src/lib/lastReadClient', () => ({
+    updateLastReadTimestamp: jest.fn((userId, conversationId) => {
+        const key = `${userId}_${conversationId}`;
+        mockLastReadStore.set(key, new Date().toISOString());
+    }),
+    getLastReadTimestamp: jest.fn((userId, conversationId) => {
+        const key = `${userId}_${conversationId}`;
+        return Promise.resolve(mockLastReadStore.get(key) || new Date(0).toISOString());
+    }),
+    getCachedTimestamp: jest.fn((userId, conversationId) => {
+        const key = `${userId}_${conversationId}`;
+        return mockLastReadStore.get(key) || new Date(0).toISOString();
+    }),
+    subscribeToLastRead: jest.fn(() => () => { })
+}));
+
+import { updateLastReadTimestamp as mockUpdateLastRead } from '../../src/lib/lastReadClient';
+
+/**
+ * Helper to extract the callback from onSnapshot calls
+ */
+function extractSnapshotCallback(callArgs) {
+    if (typeof callArgs[1] === 'object' && typeof callArgs[2] === 'function') {
+        return { callback: callArgs[2] };
+    }
+    if (typeof callArgs[1] === 'function') {
+        return { callback: callArgs[1] };
+    }
+    return { callback: null };
+}
 
 // Helper to create mock snapshot
 function createMockSnapshot(messages) {
@@ -45,57 +78,47 @@ function createMockSnapshot(messages) {
 }
 
 describe('Unread Badge Clearing', () => {
-    let recipientSnapshotCallback;
-    let santaSnapshotCallback;
+    let providerSnapshotCallback;
 
     // Conversation IDs in new format
-    const recipientConvId = getConversationId('user1', 'recipient1'); // santa_user1_recipient_recipient1
-    const santaConvId = getConversationId('santa1', 'user1'); // santa_santa1_recipient_user1
+    const recipientConvId = getConversationId('user1', 'recipient1');
+    const santaConvId = getConversationId('santa1', 'user1');
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockLastReadStore.clear(); // Reset simple store
 
         // Reset snapshot callbacks
-        recipientSnapshotCallback = null;
-        santaSnapshotCallback = null;
+        providerSnapshotCallback = null;
 
         // Mock onSnapshot to capture callbacks
-        let callCount = 0;
         onSnapshot.mockImplementation((query, options, callback) => {
-            callCount++;
-            // First call is for recipient, second for santa
-            if (callCount === 1) {
-                recipientSnapshotCallback = callback;
-            } else if (callCount === 2) {
-                santaSnapshotCallback = callback;
-            }
+            // The provider creates the only listener we care about
+            providerSnapshotCallback = callback;
             return jest.fn(); // unsubscribe function
         });
-
-        // Mock localStorage
-        const store = {};
-        global.localStorage = {
-            getItem: (key) => store[key] || null,
-            setItem: (key, value) => { store[key] = value; },
-            clear: () => Object.keys(store).forEach(k => delete store[k])
-        };
     });
+
+    const wrapper = ({ children }) => (
+        <RealtimeMessagesProvider>{children}</RealtimeMessagesProvider>
+    );
 
     describe('Badge appears when new message arrives', () => {
         it('should show unread count when messages arrive after lastRead', async () => {
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             // Simulate messages arriving that are newer than lastRead (epoch)
             act(() => {
-                if (recipientSnapshotCallback) {
-                    recipientSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: new Date().toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
+                            conversationId: recipientConvId
                         }
                     ]));
                 }
@@ -106,30 +129,31 @@ describe('Unread Badge Clearing', () => {
 
         it('should show correct count for multiple unread messages', async () => {
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             const now = new Date();
             act(() => {
-                if (recipientSnapshotCallback) {
-                    recipientSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: new Date(now.getTime() - 1000).toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
+                            conversationId: recipientConvId
                         },
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: new Date(now.getTime() - 500).toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
+                            conversationId: recipientConvId
                         },
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: now.toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
+                            conversationId: recipientConvId
                         }
                     ]));
                 }
@@ -142,20 +166,21 @@ describe('Unread Badge Clearing', () => {
     describe('Badge clears when user visits tab', () => {
         it('should clear badge immediately when updateLastReadTimestamp is called', async () => {
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             const messageTime = new Date();
 
             // First, simulate a message arriving
             act(() => {
-                if (recipientSnapshotCallback) {
-                    recipientSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: messageTime.toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
+                            conversationId: recipientConvId
                         }
                     ]));
                 }
@@ -175,20 +200,21 @@ describe('Unread Badge Clearing', () => {
 
         it('should clear santa badge when visiting santa tab', async () => {
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             const messageTime = new Date();
 
             // Simulate santa message arriving
             act(() => {
-                if (santaSnapshotCallback) {
-                    santaSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
                         {
                             fromId: 'santa1',
                             toId: 'user1',
                             timestamp: messageTime.toISOString(),
-                            conversationId: 'santa_santa1_recipient_user1'
+                            conversationId: santaConvId
                         }
                     ]));
                 }
@@ -208,12 +234,13 @@ describe('Unread Badge Clearing', () => {
     describe('Badge respects conversation ID matching', () => {
         it('should not count messages with wrong conversationId', async () => {
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             act(() => {
-                if (recipientSnapshotCallback) {
-                    recipientSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
@@ -232,40 +259,35 @@ describe('Unread Badge Clearing', () => {
     describe('Works for both Santa and Recipient tabs', () => {
         it('should track both counts independently', async () => {
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             const now = new Date();
 
-            // Recipient message
+            // Simulate both messages arriving via single provider stream
             act(() => {
-                if (recipientSnapshotCallback) {
-                    recipientSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
+                        // Recipient message
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: now.toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
-                        }
-                    ]));
-                }
-            });
-
-            // Santa message
-            act(() => {
-                if (santaSnapshotCallback) {
-                    santaSnapshotCallback(createMockSnapshot([
+                            conversationId: recipientConvId
+                        },
+                        // Santa messages
                         {
                             fromId: 'santa1',
                             toId: 'user1',
                             timestamp: now.toISOString(),
-                            conversationId: 'santa_santa1_recipient_user1'
+                            conversationId: santaConvId
                         },
                         {
                             fromId: 'santa1',
                             toId: 'user1',
                             timestamp: now.toISOString(),
-                            conversationId: 'santa_santa1_recipient_user1'
+                            conversationId: santaConvId
                         }
                     ]));
                 }
@@ -300,7 +322,8 @@ describe('Unread Badge Clearing', () => {
             jest.setSystemTime(baseTime);
 
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             // T0: User views the tab (calls updateLastReadTimestamp)
@@ -313,13 +336,13 @@ describe('Unread Badge Clearing', () => {
             const messageTime = new Date(); // This is T0 + 1 second
 
             act(() => {
-                if (recipientSnapshotCallback) {
-                    recipientSnapshotCallback(createMockSnapshot([
+                if (providerSnapshotCallback) {
+                    providerSnapshotCallback(createMockSnapshot([
                         {
                             fromId: 'recipient1',
                             toId: 'user1',
                             timestamp: messageTime.toISOString(),
-                            conversationId: 'santa_user1_recipient_recipient1'
+                            conversationId: recipientConvId
                         }
                     ]));
                 }
@@ -347,7 +370,8 @@ describe('Unread Badge Clearing', () => {
             jest.setSystemTime(baseTime);
 
             const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1')
+                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
+                { wrapper }
             );
 
             // T0: User starts viewing
@@ -363,13 +387,13 @@ describe('Unread Badge Clearing', () => {
                 const messageTime = new Date();
 
                 act(() => {
-                    if (recipientSnapshotCallback) {
-                        recipientSnapshotCallback(createMockSnapshot([
+                    if (providerSnapshotCallback) {
+                        providerSnapshotCallback(createMockSnapshot([
                             {
                                 fromId: 'recipient1',
                                 toId: 'user1',
                                 timestamp: messageTime.toISOString(),
-                                conversationId: 'santa_user1_recipient_recipient1'
+                                conversationId: recipientConvId
                             }
                         ]));
                     }

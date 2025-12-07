@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
-import { useRealtimeMessages, updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
+import { updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
 import { firestore } from '@/lib/firebase-client';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';

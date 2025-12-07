@@ -73,6 +73,20 @@ if (typeof window !== 'undefined') {
         db = getFirestore(app);
         auth = getAuth(app);
     }
+
+    // Expose auth helpers for E2E testing (only in development)
+    if (process.env.NODE_ENV === 'development' && auth) {
+        window.__e2eAuth__ = {
+            signInWithEmailAndPassword: async (email, password) => {
+                const { signInWithEmailAndPassword } = await import('firebase/auth');
+                return signInWithEmailAndPassword(auth, email, password);
+            },
+            signOut: async () => {
+                const { signOut } = await import('firebase/auth');
+                return signOut(auth);
+            }
+        };
+    }
 }
 
 export const firestore = db;
