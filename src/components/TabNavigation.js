@@ -63,6 +63,7 @@ export default function TabNavigation({ activeTab, onTabChange, unreadCounts }) 
             marginBottom: '20px',
             gap: '8px',
             overflowX: 'auto',
+            overflowY: 'hidden',
             whiteSpace: 'nowrap'
         }}>
             <TabButton
