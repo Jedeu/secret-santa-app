@@ -77,7 +77,7 @@ export default function Sidebar({
             position: 'relative'
         }}>
             {/* Header with Reset Button */}
-            <div style={{
+            < div style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -116,10 +116,10 @@ export default function Sidebar({
                         </button>
                     )
                 }
-            </div>
+            </div >
 
             {/* Navigation Items */}
-            <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            < nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <SidebarItem
                     active={activeTab === 'recipient'}
                     onClick={() => onTabChange('recipient')}
@@ -143,10 +143,10 @@ export default function Sidebar({
                 >
                     Public Feed
                 </SidebarItem>
-            </nav>
+            </nav >
 
             {/* Footer - pushed to bottom with marginTop:auto */}
-            <div style={{
+            < div style={{
                 marginTop: 'auto',
                 borderTop: '1px solid var(--border)',
                 padding: '8px 24px 40px', // Bottom padding matches chat card padding + Tip text height
@@ -190,7 +190,7 @@ export default function Sidebar({
                 >
                     Sign out
                 </button>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 }
