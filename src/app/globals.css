@@ -139,3 +139,85 @@ button {
     flex-direction: column;
   }
 }
+
+/* Desktop layout overrides */
+@media (min-width: 800px) {
+  .container {
+    max-width: none;
+    flex-direction: row;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Make chat window straight-edged on desktop */
+  .main-content .card {
+    border-radius: 0;
+    border: none;
+  }
+}
+
+/* Responsive utility classes */
+.mobile-only {
+  display: block;
+}
+
+.desktop-only {
+  display: none;
+}
+
+/* Mobile header layout */
+.mobile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+@media (min-width: 800px) {
+  .mobile-only {
+    display: none !important;
+  }
+
+  .desktop-only {
+    display: flex;
+  }
+}
+
+/* Main content area - responsive padding */
+.main-content {
+  padding: 20px;
+}
+
+@media (min-width: 800px) {
+  .main-content {
+    padding: 0;
+  }
+}
+
+/* Login card - wider on desktop */
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 40px 32px;
+}
+
+@media (min-width: 800px) {
+  .login-card {
+    max-width: 480px;
+    padding: 48px 40px;
+  }
+}
+
+.login-title {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.login-subtitle {
+  color: var(--text-muted);
+  font-size: 16px;
+  margin-bottom: 32px;
+  text-align: center;
+}

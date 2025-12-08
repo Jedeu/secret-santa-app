@@ -14,6 +14,7 @@ import RecipientSelector from '@/components/RecipientSelector';
 import AdminPanel from '@/components/AdminPanel';
 import TabNavigation from '@/components/TabNavigation';
 import ChatTabs from '@/components/ChatTabs';
+import Sidebar from '@/components/Sidebar';
 
 export default function Home() {
     // Authentication state
@@ -107,45 +108,63 @@ export default function Home() {
                 />
             ) : (
                 <main className="container">
-                    {/* Header with sign out */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' \ud83d\udc4b'}</h1>
-                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                            <AdminPanel userEmail={currentUser?.email} variant="compact" onResetComplete={refreshUser} />
-                            <button
-                                onClick={() => firebaseSignOut(clientAuth)}
-                                style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}
-                            >
-                                Sign out
-                            </button>
-                        </div>
+                    {/* Desktop Sidebar */}
+                    <div className="desktop-only" style={{ width: '280px', flexShrink: 0 }}>
+                        <Sidebar
+                            currentUser={currentUser}
+                            activeTab={activeTab}
+                            onTabChange={setActiveTab}
+                            unreadCounts={unreadCounts}
+                            onSignOut={() => firebaseSignOut(clientAuth)}
+                            onReset={refreshUser}
+                        />
                     </div>
 
-                    {!currentUser?.recipientId ? (
-                        <div className="card" style={{ textAlign: 'center' }}>
-                            <p style={{ marginBottom: '10px' }}>Waiting for assignments...</p>
-                            <AdminPanel userEmail={currentUser?.email} variant="full" onAssignComplete={refreshUser} onResetComplete={refreshUser} />
+                    {/* Main Content Area */}
+                    <div className="main-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                        {/* Mobile Header */}
+                        <div className="mobile-only mobile-header">
+                            <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' 👋'}</h1>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <AdminPanel userEmail={currentUser?.email} variant="compact" onResetComplete={refreshUser} />
+                                <button
+                                    onClick={() => firebaseSignOut(clientAuth)}
+                                    style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}
+                                >
+                                    Sign out
+                                </button>
+                            </div>
                         </div>
-                    ) : (
-                        <>
-                            <TabNavigation
-                                activeTab={activeTab}
-                                onTabChange={setActiveTab}
-                                unreadCounts={unreadCounts}
-                            />
-                            <ChatTabs
-                                activeTab={activeTab}
-                                currentUser={currentUser}
-                                allUsers={allUsers}
-                                allMessages={allMessages}
-                                recipientMessages={recipientMessages}
-                                santaMessages={santaMessages}
-                                unreadCounts={unreadCounts}
-                                recipientConversationId={recipientConversationId}
-                                santaConversationId={santaConversationId}
-                            />
-                        </>
-                    )}
+
+                        {!currentUser?.recipientId ? (
+                            <div className="card" style={{ textAlign: 'center' }}>
+                                <p style={{ marginBottom: '10px' }}>Waiting for assignments...</p>
+                                <AdminPanel userEmail={currentUser?.email} variant="full" onAssignComplete={refreshUser} onResetComplete={refreshUser} />
+                            </div>
+                        ) : (
+                            <>
+                                {/* Mobile Tabs */}
+                                <div className="mobile-only">
+                                    <TabNavigation
+                                        activeTab={activeTab}
+                                        onTabChange={setActiveTab}
+                                        unreadCounts={unreadCounts}
+                                    />
+                                </div>
+                                <ChatTabs
+                                    activeTab={activeTab}
+                                    currentUser={currentUser}
+                                    allUsers={allUsers}
+                                    allMessages={allMessages}
+                                    recipientMessages={recipientMessages}
+                                    santaMessages={santaMessages}
+                                    unreadCounts={unreadCounts}
+                                    recipientConversationId={recipientConversationId}
+                                    santaConversationId={santaConversationId}
+                                />
+                            </>
+                        )}
+                    </div>
                 </main>
             )}
         </AuthGuard>
