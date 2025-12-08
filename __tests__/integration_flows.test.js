@@ -90,7 +90,7 @@ describe('UI Interaction Flows', () => {
         render(<Home />);
 
         // Wait for users to load
-        await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User A 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Recipient Tab (default, but good to be explicit or check existence)
         const recipientTab = screen.getAllByText('🎁 Recipient')[0];
@@ -126,7 +126,7 @@ describe('UI Interaction Flows', () => {
         realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
 
         render(<Home />);
-        await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User A 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Santa Tab
         const santaTab = screen.getAllByText('🎅 Santa')[0];
@@ -177,7 +177,7 @@ describe('UI Interaction Flows', () => {
         // realtimeHooks.useRealtimeMessages.mockReturnValue([]); // No longer needed
 
         render(<Home />);
-        await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User A 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Public Feed
         const feedTab = screen.getByText('🎄 Public Feed');
@@ -215,7 +215,7 @@ describe('UI Interaction Flows', () => {
         realtimeHooks.useRealtimeAllMessages.mockReturnValue(santaMessages);
 
         render(<Home />);
-        await waitFor(() => expect(screen.getByText('Hi, User B 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User B 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Santa Tab
         const santaTab = screen.getAllByText('🎅 Santa')[0]; // Select the first one (Desktop)
@@ -236,7 +236,7 @@ describe('UI Interaction Flows', () => {
         realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
 
         render(<Home />);
-        await waitFor(() => expect(screen.getByText('Hi, User B 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User B 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Santa Tab
         const santaTab = screen.getAllByText('🎅 Santa')[0];
@@ -284,7 +284,7 @@ describe('UI Interaction Flows', () => {
         // realtimeHooks.useRealtimeMessages.mockReturnValue([]); // No longer needed
 
         render(<Home />);
-        await waitFor(() => expect(screen.getByText('Hi, User C 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User C 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Feed
         const feedTab = screen.getAllByText('🎄 Public Feed')[0];
@@ -332,7 +332,7 @@ describe('UI Interaction Flows', () => {
         realtimeHooks.useRealtimeAllMessages.mockReturnValue(recipientMessages);
 
         render(<Home />);
-        await waitFor(() => expect(screen.getByText('Hi, User A 👋')).toBeInTheDocument());
+        await waitFor(() => expect(screen.getAllByText('Hi, User A 👋')[0]).toBeInTheDocument());
 
         // 1. Navigate to Recipient Tab
         const recipientTab = screen.getAllByText('🎁 Recipient')[0];

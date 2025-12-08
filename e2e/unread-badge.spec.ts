@@ -177,8 +177,8 @@ async function getBadgeCount(
 ): Promise<number> {
     const tabButton = page.getByRole('button', { name: new RegExp(tabName, 'i') });
 
-    // Look for the badge span inside the tab button
-    const badge = tabButton.locator('[data-testid="unread-badge"]');
+    // Look for the badge using data-testid (supports both 'unread-badge' and 'sidebar-unread-badge')
+    const badge = tabButton.locator('[data-testid*="unread-badge"]');
 
     if (await badge.isVisible()) {
         const text = await badge.textContent();
@@ -258,6 +258,13 @@ test.describe('Unread Badge Functionality', () => {
             // Smart wait: Wait for the Recipient tab to be visible
             // This proves: 1) User is authenticated 2) User has assignments
             await page.getByRole('button', { name: /recipient/i }).waitFor({ state: 'visible', timeout: 15000 });
+
+            // [PLAN.md Contract] Wait for gifterId to be present in window.__e2eUserData__
+            // This ensures primeCache in useRealtimeUnreadCounts has the data it needs
+            await expect.poll(async () => {
+                const data = await page.evaluate(() => (window as any).__e2eUserData__);
+                return data?.gifterId;
+            }, { timeout: 10000 }).toBeTruthy();
         });
 
 
@@ -333,6 +340,10 @@ test.describe('Unread Badge Functionality', () => {
             }
 
             const result = await injectResponse.json();
+
+            // Wait for Firestore real-time listener to receive the injected message
+            await page.waitForTimeout(1000);
+
             return result.messageId;
         }
 

@@ -98,11 +98,10 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         if (!userId || !recipientId) return 0;
         const convId = recipientConvId || getConversationId(userId, recipientId);
 
-        // Check cache directly. If missing (undefined), return 0 to prevent flash.
+        // Check cache directly. If missing (undefined), use epoch (treat "never read") to show badges.
+        // This allows badges to appear even if cache priming is slow.
         const cachedLastRead = getCachedTimestamp(userId, convId);
-        if (cachedLastRead === undefined) return 0;
-
-        const lastRead = cachedLastRead;
+        const lastRead = cachedLastRead !== undefined ? cachedLastRead : new Date(0).toISOString();
 
         // Ensure re-calculation when tick changes
         void lastReadTick;
@@ -125,11 +124,10 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         if (!userId || !gifterId) return 0;
         const expectedConvId = santaConvId || getConversationId(gifterId, userId);
 
-        // Check cache directly. If missing (undefined), return 0 to prevent flash.
+        // Check cache directly. If missing (undefined), use epoch (treat "never read") to show badges.
+        // This allows badges to appear even if cache priming is slow.
         const cachedLastRead = getCachedTimestamp(userId, expectedConvId);
-        if (cachedLastRead === undefined) return 0;
-
-        const santaLastRead = cachedLastRead;
+        const santaLastRead = cachedLastRead !== undefined ? cachedLastRead : new Date(0).toISOString();
 
         // Ensure re-calculation when tick changes
         void lastReadTick;

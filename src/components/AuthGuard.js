@@ -79,12 +79,11 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
     // Not authenticated state
     if (!currentUser) {
         return (
-            <main className="container" style={{ justifyContent: 'center' }}>
-                <div className="card">
-                    <h1 className="title">Secret Santa</h1>
-
-                    <p className="text-muted" style={{ textAlign: 'center', marginBottom: '20px' }}>
-                        Sign in to join the Secret Santa exchange.
+            <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                <div className="card login-card">
+                    <h1 className="title login-title">🎄 Secret Santa</h1>
+                    <p className="login-subtitle">
+                        Sign in to join the gift exchange!
                     </p>
 
                     <button
