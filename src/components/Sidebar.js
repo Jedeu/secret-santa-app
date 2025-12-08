@@ -149,7 +149,7 @@ export default function Sidebar({
             <div style={{
                 marginTop: 'auto',
                 borderTop: '1px solid var(--border)',
-                padding: '20px 24px 38px 24px', // Bottom padding matches chat card padding + Tip text height
+                padding: '8px 24px 40px', // Bottom padding matches chat card padding + Tip text height
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between'
