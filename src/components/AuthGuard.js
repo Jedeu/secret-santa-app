@@ -55,8 +55,8 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
     // Access denied state
     if (authError?.code === 'ACCESS_DENIED') {
         return (
-            <main className="container" style={{ justifyContent: 'center' }}>
-                <div className="card">
+            <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                <div className="card login-card">
                     <h1 className="title">Access Denied</h1>
                     <p className="text-muted" style={{ textAlign: 'center', marginBottom: '20px' }}>
                         {authError.message}

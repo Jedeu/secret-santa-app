@@ -123,8 +123,8 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
     };
 
     return (
-        <main className="container" style={{ justifyContent: 'center' }}>
-            <div className="card">
+        <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+            <div className="card login-card">
                 <h1 className="title">Welcome, {currentUser.name}!</h1>
                 <p className="text-muted" style={{ textAlign: 'center', marginBottom: '20px' }}>
                     Who are you buying a gift for?

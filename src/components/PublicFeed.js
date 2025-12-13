@@ -192,7 +192,7 @@ export default function PublicFeed({ messages = [], allUsers = [], userId }) {
                                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-highlight)'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                             >
-                                <div style={{ flex: 1 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{thread.name}</div>
                                     <div className="text-muted" style={{ fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                         {thread.lastMessage.content}
