@@ -44,8 +44,8 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
     // Loading state
     if (isLoading) {
         return (
-            <main className="container" style={{ justifyContent: 'center' }}>
-                <div className="card">
+            <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                <div className="card login-card">
                     <p style={{ textAlign: 'center' }}>Loading...</p>
                 </div>
             </main>
