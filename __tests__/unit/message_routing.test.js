@@ -35,23 +35,36 @@ describe('Message Routing Logic', () => {
         expect(conv2Messages.map(m => m.id)).toEqual(['3']);
     });
 
-    test('filterMessages handles legacy messages (ambiguous)', () => {
+    test('filterMessages assigns legacy messages to one canonical conversation', () => {
         const messages = [
             { id: 'legacy1', fromId: JED_ID, toId: LOUIS_ID, timestamp: '2023-01-01' },
             { id: 'new1', fromId: JED_ID, toId: LOUIS_ID, conversationId: CONV_JED_SANTA, timestamp: '2023-01-02' },
         ];
 
-        // Legacy message should appear in BOTH conversations because we can't distinguish
-
-        // Conv 1
+        // Conv 1 (canonical for this pair when sorted ascending: jed_id, louis_id)
         const conv1Messages = filterMessages(messages, JED_ID, LOUIS_ID, CONV_JED_SANTA);
         expect(conv1Messages).toContainEqual(expect.objectContaining({ id: 'legacy1' }));
         expect(conv1Messages).toContainEqual(expect.objectContaining({ id: 'new1' }));
 
-        // Conv 2
+        // Conv 2 should not duplicate legacy messages
         const conv2Messages = filterMessages(messages, JED_ID, LOUIS_ID, CONV_LOUIS_SANTA);
-        expect(conv2Messages).toContainEqual(expect.objectContaining({ id: 'legacy1' }));
+        expect(conv2Messages).not.toContainEqual(expect.objectContaining({ id: 'legacy1' }));
         expect(conv2Messages).not.toContainEqual(expect.objectContaining({ id: 'new1' })); // New message shouldn't leak
+    });
+
+    test('filterMessages uses isSantaMsg metadata for legacy routing when available', () => {
+        const messages = [
+            // Louis is Santa to Jed in this legacy message
+            { id: 'legacy-santa', fromId: LOUIS_ID, toId: JED_ID, isSantaMsg: true, timestamp: '2023-01-01' },
+            // Jed replying to Santa (still conversation where Louis is Santa)
+            { id: 'legacy-reply', fromId: JED_ID, toId: LOUIS_ID, isSantaMsg: false, timestamp: '2023-01-02' }
+        ];
+
+        const convLouisSantaMessages = filterMessages(messages, JED_ID, LOUIS_ID, CONV_LOUIS_SANTA);
+        expect(convLouisSantaMessages.map(m => m.id)).toEqual(['legacy-santa', 'legacy-reply']);
+
+        const convJedSantaMessages = filterMessages(messages, JED_ID, LOUIS_ID, CONV_JED_SANTA);
+        expect(convJedSantaMessages).toHaveLength(0);
     });
 
     test('filterMessages excludes unrelated messages', () => {
