@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { collection, query, where, getDocs, limit, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, runTransaction } from 'firebase/firestore';
 import { firestore } from '@/lib/firebase-client';
 import { signOut as firebaseSignOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase-client';
@@ -59,31 +59,36 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
 
             const recipientDoc = recipientSnapshot.docs[0];
             const recipient = recipientDoc.data();
+            const recipientId = recipient.id || recipientDoc.id;
+            const currentUserRef = doc(firestore, 'users', currentUser.id);
+            const recipientRef = recipientDoc.ref;
 
-            // Check if recipient is already taken
-            if (recipient.gifterId) {
-                alert('This recipient has already been selected by someone else.');
-                setLoading(false);
-                return;
-            }
+            // Atomic recipient claim: prevents check-then-act race condition.
+            await runTransaction(firestore, async (transaction) => {
+                const currentUserSnapshot = await transaction.get(currentUserRef);
+                if (!currentUserSnapshot.exists()) {
+                    throw new Error('CURRENT_USER_NOT_FOUND');
+                }
 
-            // Update both users - find current user's document
-            const currentUserQuery = query(usersCollection, where('id', '==', currentUser.id), limit(1));
-            const currentUserSnapshot = await getDocs(currentUserQuery);
+                const recipientSnapshot = await transaction.get(recipientRef);
+                if (!recipientSnapshot.exists()) {
+                    throw new Error('RECIPIENT_NOT_FOUND');
+                }
 
-            if (currentUserSnapshot.empty) {
-                alert('Current user not found in database.');
-                setLoading(false);
-                return;
-            }
+                const currentUserData = currentUserSnapshot.data();
+                const recipientData = recipientSnapshot.data();
 
-            const currentUserDoc = currentUserSnapshot.docs[0];
+                if (currentUserData.recipientId) {
+                    throw new Error('RECIPIENT_ALREADY_SELECTED');
+                }
 
-            // Perform batch update
-            const batch = writeBatch(firestore);
-            batch.update(currentUserDoc.ref, { recipientId: recipient.id });
-            batch.update(recipientDoc.ref, { gifterId: currentUser.id });
-            await batch.commit();
+                if (recipientData.gifterId) {
+                    throw new Error('RECIPIENT_TAKEN');
+                }
+
+                transaction.update(currentUserRef, { recipientId });
+                transaction.update(recipientRef, { gifterId: currentUser.id });
+            });
 
             // Notify parent that selection is complete
             if (onComplete) {
@@ -91,7 +96,13 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             }
         } catch (err) {
             console.error('Failed to set recipient:', err);
-            alert('Failed to set recipient: ' + err.message);
+            if (err?.message === 'RECIPIENT_TAKEN') {
+                alert('This recipient has already been selected by someone else.');
+            } else if (err?.message === 'RECIPIENT_ALREADY_SELECTED') {
+                alert('You already selected a recipient.');
+            } else {
+                alert('Failed to set recipient: ' + err.message);
+            }
         } finally {
             setLoading(false);
         }
