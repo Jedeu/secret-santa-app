@@ -56,14 +56,34 @@ describe('PublicFeed Grouping Logic', () => {
 
     test('handles legacy messages (fallback logic)', () => {
         const messages = [
-            // Legacy: Louis -> Jed (Louis is Santa)
-            // isSantaMsg derived as true because Louis is Santa to Jed
-            { id: 'legacy1', fromId: 'louis', toId: 'jed', content: 'Legacy Santa', timestamp: '2023-01-01' },
+            // Legacy: explicit metadata should still route this to Jed's exchange.
+            { id: 'legacy1', fromId: 'louis', toId: 'jed', content: 'Legacy Santa', timestamp: '2023-01-01', isSantaMsg: true },
         ];
 
         render(<PublicFeed messages={messages} allUsers={allUsers} />);
 
         // Should group by Recipient (Jed)
         expect(screen.getByText("🎁 Jed's Gift Exchange")).toBeInTheDocument();
+    });
+
+    test('uses deterministic routing for ambiguous legacy cycles without Santa mislabeling', () => {
+        const messages = [
+            // In a mutual cycle, both directions are ambiguous without metadata.
+            { id: 'legacy1', fromId: 'louis', toId: 'jed', content: 'Legacy one', timestamp: '2023-01-01' },
+            { id: 'legacy2', fromId: 'jed', toId: 'louis', content: 'Legacy two', timestamp: '2023-01-02' },
+        ];
+
+        render(<PublicFeed messages={messages} allUsers={allUsers} />);
+
+        // Deterministic canonical fallback creates one thread for this pair.
+        expect(screen.getByText("🎁 Louis's Gift Exchange")).toBeInTheDocument();
+        expect(screen.queryByText("🎁 Jed's Gift Exchange")).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByText("🎁 Louis's Gift Exchange"));
+
+        // Ambiguous legacy rows keep real sender names, never forced "Santa".
+        expect(screen.queryByText('🎅 Santa')).not.toBeInTheDocument();
+        expect(screen.getByText('Louis')).toBeInTheDocument();
+        expect(screen.getByText('Jed')).toBeInTheDocument();
     });
 });
