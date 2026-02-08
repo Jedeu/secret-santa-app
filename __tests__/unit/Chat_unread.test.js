@@ -195,4 +195,19 @@ describe('Chat Component Unread Logic', () => {
 
         expect(getByRole('button', { name: 'Add emoji' })).toBeInTheDocument();
     });
+
+    it('exposes unread badge updates via aria-live', () => {
+        const { getByLabelText } = render(
+            <Chat
+                currentUser={currentUser}
+                otherUser={otherUser}
+                isSantaChat={false}
+                unreadCount={4}
+                messages={initialMessages}
+                conversationId={conversationId}
+            />
+        );
+
+        expect(getByLabelText('4 unread messages')).toHaveAttribute('aria-live', 'polite');
+    });
 });
