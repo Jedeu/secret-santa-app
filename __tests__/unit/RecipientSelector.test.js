@@ -7,6 +7,7 @@ import RecipientSelector from '@/components/RecipientSelector';
 const mockGetDocs = jest.fn();
 const mockRunTransaction = jest.fn();
 const mockDoc = jest.fn();
+const mockShowToast = jest.fn();
 
 jest.mock('@/lib/firebase-client', () => ({
     firestore: {},
@@ -27,6 +28,10 @@ jest.mock('firebase/firestore', () => ({
     runTransaction: (...args) => mockRunTransaction(...args)
 }));
 
+jest.mock('@/components/ClientProviders', () => ({
+    useToast: () => ({ showToast: mockShowToast })
+}));
+
 describe('RecipientSelector transactional claim', () => {
     const currentUser = {
         id: 'user-1',
@@ -36,7 +41,6 @@ describe('RecipientSelector transactional claim', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        global.alert = jest.fn();
         global.confirm = jest.fn(() => true);
 
         mockDoc.mockImplementation((firestore, collectionName, id) => ({
@@ -138,7 +142,7 @@ describe('RecipientSelector transactional claim', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
         await waitFor(() => {
-            expect(global.alert).toHaveBeenCalledWith('This recipient has already been selected by someone else.');
+            expect(mockShowToast).toHaveBeenCalledWith('This recipient has already been selected by someone else.');
         });
     });
 
