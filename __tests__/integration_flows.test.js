@@ -43,10 +43,14 @@ import { getDocs } from 'firebase/firestore';
 jest.mock('firebase/firestore', () => ({
     collection: jest.fn(),
     getDocs: jest.fn(),
+    getDoc: jest.fn(() => Promise.resolve({ exists: () => false })),
+    setDoc: jest.fn(() => Promise.resolve()),
     query: jest.fn(),
+    doc: jest.fn(),
     where: jest.fn(),
     limit: jest.fn(),
     writeBatch: jest.fn(),
+    onSnapshot: jest.fn(() => jest.fn()),
     serverTimestamp: jest.fn(),
     addDoc: jest.fn()
 }));
