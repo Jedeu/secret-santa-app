@@ -27,6 +27,23 @@ export function getLegacyConversationId(userId1, userId2) {
 }
 
 /**
+ * Parses a conversationId in format santa_{santaId}_recipient_{recipientId}.
+ *
+ * @param {string} conversationId
+ * @returns {{santaId: string, recipientId: string} | null}
+ */
+function parseConversationId(conversationId) {
+    if (!conversationId || typeof conversationId !== 'string') return null;
+    const parts = conversationId.split('_recipient_');
+    if (parts.length !== 2 || !parts[0].startsWith('santa_')) return null;
+
+    return {
+        santaId: parts[0].replace('santa_', ''),
+        recipientId: parts[1]
+    };
+}
+
+/**
  * Filters messages for a specific conversation, handling both new (with conversationId)
  * and legacy (without conversationId) messages.
  * 
@@ -38,6 +55,7 @@ export function getLegacyConversationId(userId1, userId2) {
  */
 export function filterMessages(messages, currentUserId, otherUserId, targetConversationId) {
     if (!messages || !currentUserId || !otherUserId) return [];
+    const parsedTargetConversation = parseConversationId(targetConversationId);
 
     return messages.filter(msg => {
         // Basic check: must involve both users
@@ -51,9 +69,19 @@ export function filterMessages(messages, currentUserId, otherUserId, targetConve
             return msg.conversationId === targetConversationId;
         }
 
-        // Legacy messages (no conversationId): include them
-        // This means legacy messages will appear in BOTH tabs if there is ambiguity,
-        // but this is the best we can do without migrating data.
-        return true;
+        // Legacy messages (no conversationId):
+        // 1) If legacy role metadata exists, route by santa role.
+        if (parsedTargetConversation && typeof msg.isSantaMsg === 'boolean') {
+            return msg.isSantaMsg
+                ? msg.fromId === parsedTargetConversation.santaId
+                : msg.toId === parsedTargetConversation.santaId;
+        }
+
+        // 2) Otherwise, assign to one deterministic canonical conversation to avoid
+        //    duplicate rendering in mutual cycles (A<->B santa assignments).
+        //    Canonical conversation: santa=min(userId), recipient=max(userId).
+        const [firstId, secondId] = [currentUserId, otherUserId].sort();
+        const canonicalConversationId = getConversationId(firstId, secondId);
+        return targetConversationId === canonicalConversationId;
     }).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 }
