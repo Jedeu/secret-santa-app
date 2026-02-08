@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { updateLastReadTimestamp, getCachedTimestamp } from '@/lib/lastReadClient';
+import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
 
 function parseConversationId(conversationId) {
     if (!conversationId || typeof conversationId !== 'string') return null;
@@ -151,6 +151,61 @@ export default function PublicFeed({ messages = [], allUsers = [], userId }) {
     const threadList = Object.values(threads).sort((a, b) =>
         new Date(b.lastMessage.timestamp) - new Date(a.lastMessage.timestamp)
     );
+    const threadIdsKey = threadList.map(thread => thread.id).join('|');
+
+    // Hydrate lastViewed from Firestore-backed lastRead documents on first load.
+    useEffect(() => {
+        const threadIds = threadIdsKey ? threadIdsKey.split('|') : [];
+        if (!userId || threadIds.length === 0) return;
+
+        let cancelled = false;
+
+        const hydrateLastViewed = async () => {
+            const remoteLastViewed = {};
+
+            await Promise.all(threadIds.map(async (threadId) => {
+                const publicFeedConversationId = `publicFeed_${threadId}`;
+
+                let timestamp = getCachedTimestamp(userId, publicFeedConversationId);
+                if (timestamp === undefined) {
+                    timestamp = await getLastReadTimestamp(userId, publicFeedConversationId);
+                }
+
+                if (timestamp) {
+                    remoteLastViewed[threadId] = timestamp;
+                }
+            }));
+
+            if (cancelled || Object.keys(remoteLastViewed).length === 0) {
+                return;
+            }
+
+            setLastViewed(prev => {
+                let changed = false;
+                const merged = { ...prev };
+
+                Object.entries(remoteLastViewed).forEach(([threadId, remoteTimestamp]) => {
+                    const localTimestamp = merged[threadId];
+                    if (!localTimestamp || new Date(remoteTimestamp) > new Date(localTimestamp)) {
+                        merged[threadId] = remoteTimestamp;
+                        changed = true;
+                    }
+                });
+
+                if (changed && typeof window !== 'undefined') {
+                    localStorage.setItem('publicFeedLastViewed', JSON.stringify(merged));
+                }
+
+                return changed ? merged : prev;
+            });
+        };
+
+        hydrateLastViewed();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [userId, threadIdsKey]);
 
     // Calculate unread count for each thread
     threadList.forEach(thread => {
