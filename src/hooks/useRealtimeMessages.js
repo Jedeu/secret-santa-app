@@ -137,8 +137,11 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         return allMessages.filter(msg => {
             if (msg.fromId !== gifterId || msg.toId !== userId) return false;
 
-            return (msg.conversationId === expectedConvId) &&
-                (new Date(msg.timestamp).getTime() > new Date(santaLastRead).getTime());
+            // Match recipient logic: enforce conversationId only when present.
+            // Legacy messages without conversationId should still count.
+            if (msg.conversationId && msg.conversationId !== expectedConvId) return false;
+
+            return new Date(msg.timestamp).getTime() > new Date(santaLastRead).getTime();
         }).length;
     }, [userId, gifterId, santaConvId, allMessages, lastReadTick]);
 

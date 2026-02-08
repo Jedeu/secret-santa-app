@@ -253,6 +253,54 @@ describe('Realtime Hooks with Context', () => {
             });
         });
 
+        test('should count legacy santa messages without conversationId as unread', async () => {
+            const userId = 'user1';
+            const recipientId = 'user2';
+            const gifterId = 'user3';
+            const future = new Date(Date.now() + 10000).toISOString();
+
+            const mockMessages = [
+                // Legacy santa message: should count
+                { id: 'legacy-santa', fromId: gifterId, toId: userId, timestamp: future },
+                // Wrong explicit conversation: should NOT count
+                { id: 'wrong-conv', fromId: gifterId, toId: userId, timestamp: future, conversationId: `santa_${gifterId}_recipient_other` }
+            ];
+
+            mockGetCachedTimestamp.mockReturnValue(new Date(0).toISOString());
+            mockCollection.mockReturnValue({ path: 'messages' });
+            mockQuery.mockImplementation((collectionRef, ...constraints) => ({
+                type: 'query',
+                constraints
+            }));
+            mockOrderBy.mockImplementation((field, dir) => ({ type: 'orderBy', field, dir }));
+
+            let allMessagesCallback;
+            mockOnSnapshot.mockImplementation((queryObj, ...args) => {
+                const { callback } = extractSnapshotCallback([queryObj, ...args]);
+                if (queryObj?.constraints?.some(c => c.type === 'orderBy')) {
+                    allMessagesCallback = callback;
+                }
+                return jest.fn();
+            });
+
+            const { result } = renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId), { wrapper });
+
+            await act(async () => {
+                if (allMessagesCallback) {
+                    allMessagesCallback({
+                        forEach: (cb) => mockMessages.forEach(msg => cb({ data: () => msg })),
+                        size: mockMessages.length,
+                        metadata: { fromCache: false },
+                        docChanges: () => mockMessages.map(() => ({}))
+                    });
+                }
+            });
+
+            await waitFor(() => {
+                expect(result.current.santaUnread).toBe(1);
+            });
+        });
+
         test('should fetch initial lastRead timestamps on mount', async () => {
             const userId = 'user1';
             const recipientId = 'user2';
