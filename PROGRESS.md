@@ -31,10 +31,9 @@ Last updated: 2026-02-08
 
 ## Security Notes (Context-Aware)
 
-- Current trust model (8 known users via Firebase Auth) reduces practical risk, but `firestore.rules` are still technically permissive for any authenticated user.
-- Easy hardening opportunity (low effort): restrict access to known user IDs/emails in rules and lock admin-only operations by admin identity checks.
+- `firestore.rules` were hardened under BUG-4 to remove global authenticated read/write and enforce scoped rules for `users`, `messages`, and `lastRead`.
+- Message writes now flow through server-validated API (`/api/messages/send`) under BUG-7, reducing client-side sender-forgery risk.
 
 ## Operational Notes
 
-- Git/PR flow from this agent session has had intermittent permission/escalation interruptions.
-- `gh` CLI was installed, but this runtime reports an invalid token in `gh auth status`; PR creation has been handled via branch push + user-side PR creation when needed.
+- Part 1 has been implemented as chained PRs from BUG-3 through BUG-12.
