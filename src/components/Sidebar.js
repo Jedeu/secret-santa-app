@@ -30,6 +30,10 @@ function SidebarItem({ active, onClick, children, unreadCount, icon }) {
             {unreadCount > 0 && (
                 <span
                     data-testid="sidebar-unread-badge"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    aria-label={`${children}: ${unreadCount} unread messages`}
                     style={{
                         background: 'var(--primary)',
                         color: 'white',
