@@ -45,6 +45,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const inputRef = useRef(null);
     const emojiPickerRef = useRef(null);
     const lastReadRef = useRef(0);
+    const wasNearBottomRef = useRef(true);
 
     // Mark messages as read when component mounts, user changes, OR new messages arrive
     // This ensures badge clears even when new messages arrive while viewing the tab
@@ -59,10 +60,17 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         bottomRef.current?.scrollIntoView({ behavior });
     };
 
+    const isNearBottom = (chatContainer) => {
+        if (!chatContainer) return true;
+        const thresholdPx = 40;
+        return chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < thresholdPx;
+    };
+
     const checkIfRead = () => {
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
-            const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 20;
+            const isAtBottom = isNearBottom(chatContainer);
+            wasNearBottomRef.current = isAtBottom;
             if (isAtBottom) {
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
@@ -90,15 +98,16 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     }, [messages, currentUser.id, otherUser.id, conversationId]);
 
     useEffect(() => {
-        // Auto-scroll logic for *my* messages
+        // Auto-scroll if I sent the latest message OR if user was already near bottom.
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
             const lastMessage = messages[messages.length - 1];
             const isMyMessage = lastMessage?.fromId === currentUser.id;
+            const shouldStickToBottom = isMyMessage || wasNearBottomRef.current;
 
-            if (isMyMessage) {
-                // Use 'auto' for instant scroll if it's my message to avoid lag perception
-                scrollToBottom('auto');
+            if (shouldStickToBottom) {
+                scrollToBottom(isMyMessage ? 'auto' : 'smooth');
+                wasNearBottomRef.current = true;
             }
         }
     }, [messages, currentUser.id]);
