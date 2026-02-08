@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import Home from '@/app/page';
 import { useUser } from '@/hooks/useUser';
 import * as realtimeHooks from '@/hooks/useRealtimeMessages';
+import { clientAuth } from '@/lib/firebase-client';
 
 // Mock useUser hook
 jest.mock('@/hooks/useUser');
@@ -60,6 +61,13 @@ describe('UI Interaction Flows', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        clientAuth.currentUser = {
+            getIdToken: jest.fn().mockResolvedValue('fake-token')
+        };
+        global.fetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ success: true })
+        });
 
         // Mock getDocs to return users
         getDocs.mockResolvedValue({
