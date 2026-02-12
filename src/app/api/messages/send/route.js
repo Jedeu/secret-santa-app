@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { auth as adminAuth, firestore } from '@/lib/firebase';
+import { sendIncomingMessagePush } from '@/lib/push-server';
 
 function getBearerToken(request) {
     const authHeader = request.headers.get('Authorization');
@@ -71,6 +72,16 @@ export async function POST(request) {
         };
 
         await firestore.collection('messages').add(messageData);
+
+        // Fail-open push strategy: message delivery succeeds even if push dispatch fails.
+        try {
+            await sendIncomingMessagePush({
+                toUserId: toId,
+                conversationId,
+            });
+        } catch (pushError) {
+            console.error('Push dispatch failed:', pushError);
+        }
 
         return NextResponse.json({ success: true, message: messageData });
     } catch (error) {
