@@ -23,8 +23,8 @@ Last updated: 2026-02-08
 
 | Step | Status | Notes |
 |---|---|---|
-| Step 1: `public/manifest.json` | Not started | No manifest added yet. |
-| Step 2: Icons in `public/icons/` | Not started | Icon assets not created yet. |
+| Step 1: `public/manifest.json` | Completed | Added `/Users/jed.piezas/Desktop/secret-santa-app/public/manifest.json` with standalone display config, app colors, and required PWA icon entries. |
+| Step 2: Icons in `public/icons/` | Completed | Added `/Users/jed.piezas/Desktop/secret-santa-app/public/icons/icon-192x192.png`, `/Users/jed.piezas/Desktop/secret-santa-app/public/icons/icon-512x512.png`, `/Users/jed.piezas/Desktop/secret-santa-app/public/icons/icon-180x180.png`, and `/Users/jed.piezas/Desktop/secret-santa-app/public/icons/icon-maskable-512x512.png`. Added regression coverage in `/Users/jed.piezas/Desktop/secret-santa-app/__tests__/unit/pwa_manifest_assets.test.js`. Verified with `npx jest __tests__/unit/pwa_manifest_assets.test.js --runInBand`. |
 | Step 3: `src/app/layout.js` metadata | Not started | PWA metadata/manifest links not added yet. |
 | Step 4: `next-pwa` integration | Not started | `@ducanh2912/next-pwa` not wired in yet. |
 | Step 5: Push notifications (future) | Not started | Still out-of-scope. |
