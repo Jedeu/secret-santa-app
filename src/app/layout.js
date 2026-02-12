@@ -8,6 +8,20 @@ export const viewport = {
     userScalable: false,
 };
 
+export const metadata = {
+    title: 'Secret Santa',
+    description: 'Secret Santa gift exchange with your friends',
+    manifest: '/manifest.json',
+    appleWebApp: {
+        capable: true,
+        statusBarStyle: 'black-translucent',
+        title: 'Secret Santa',
+    },
+    icons: {
+        icon: '/icons/icon-192x192.png',
+        apple: '/icons/icon-180x180.png',
+    },
+};
 
 export default function RootLayout({ children }) {
     return (
