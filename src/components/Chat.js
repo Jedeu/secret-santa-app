@@ -4,8 +4,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
 import { updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
-import { clientAuth } from '@/lib/firebase-client';
 import { useToast } from '@/components/ClientProviders';
+import {
+    enqueueMessage,
+    getConversationOutboxMessages,
+    subscribeOutbox,
+    drainOutboxForUser,
+    retryOutboxMessage
+} from '@/lib/message-outbox';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -42,12 +48,27 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [outboxMessages, setOutboxMessages] = useState([]);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
     const emojiPickerRef = useRef(null);
     const lastReadRef = useRef(0);
     const wasNearBottomRef = useRef(true);
     const { showToast } = useToast();
+
+    useEffect(() => {
+        const syncOutbox = () => {
+            setOutboxMessages(getConversationOutboxMessages({
+                fromUserId: currentUser.id,
+                conversationId
+            }));
+        };
+
+        syncOutbox();
+        const unsubscribe = subscribeOutbox(syncOutbox);
+
+        return unsubscribe;
+    }, [currentUser.id, conversationId]);
 
     // Mark messages as read when component mounts, user changes, OR new messages arrive
     // This ensures badge clears even when new messages arrive while viewing the tab
@@ -105,14 +126,14 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         if (chatContainer) {
             const lastMessage = messages[messages.length - 1];
             const isMyMessage = lastMessage?.fromId === currentUser.id;
-            const shouldStickToBottom = isMyMessage || wasNearBottomRef.current;
+            const shouldStickToBottom = isMyMessage || wasNearBottomRef.current || outboxMessages.length > 0;
 
             if (shouldStickToBottom) {
                 scrollToBottom(isMyMessage ? 'auto' : 'smooth');
                 wasNearBottomRef.current = true;
             }
         }
-    }, [messages, currentUser.id]);
+    }, [messages, currentUser.id, outboxMessages.length]);
 
     const handleScroll = (e) => {
         checkIfRead();
@@ -120,47 +141,41 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
 
     const sendMessage = async (e) => {
         e.preventDefault();
-        if (!newMessage.trim()) return;
+        const content = newMessage.trim();
+        if (!content) return;
 
         try {
-            const token = await clientAuth?.currentUser?.getIdToken?.();
-            if (!token) {
-                throw new Error('Not authenticated. Please sign in again.');
-            }
-
-            const response = await fetch('/api/messages/send', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    toId: otherUser.id,
-                    content: newMessage.trim(),
-                    conversationId,
-                }),
+            enqueueMessage({
+                fromUserId: currentUser.id,
+                toId: otherUser.id,
+                conversationId,
+                content
             });
-
-            if (!response.ok) {
-                let errorMessage = 'Failed to send message. Please try again.';
-                try {
-                    const errorData = await response.json();
-                    if (errorData?.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch {
-                    // Ignore parse error and keep default message
-                }
-                throw new Error(errorMessage);
-            }
-
             setNewMessage('');
-            // Force scroll to bottom immediately after sending
             scrollToBottom('auto');
+            drainOutboxForUser({ fromUserId: currentUser.id }).catch((error) => {
+                console.error('Outbox drain failed after enqueue:', error);
+            });
         } catch (error) {
-            console.error('Error sending message:', error);
-            showToast('Failed to send message. Please try again.');
+            console.error('Error enqueuing message:', error);
+            showToast('Failed to queue message. Please try again.');
         }
+    };
+
+    const retryFailedMessage = (clientMessageId) => {
+        const didSchedule = retryOutboxMessage({
+            fromUserId: currentUser.id,
+            clientMessageId,
+        });
+
+        if (!didSchedule) {
+            showToast('Message is no longer available to retry.');
+            return;
+        }
+
+        drainOutboxForUser({ fromUserId: currentUser.id }).catch((error) => {
+            console.error('Outbox drain failed after manual retry:', error);
+        });
     };
 
     // Handle emoji selection
@@ -303,6 +318,56 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                     opacity: 0.8
                                 }}>
                                     {formatRelativeTime(msg.timestamp)}
+                                </span>
+                            </div>
+                        </div>
+                    );
+                })}
+                {outboxMessages.map((msg) => {
+                    const isFailed = msg.status === 'failed';
+                    return (
+                        <div key={msg.clientMessageId} style={{
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            marginBottom: '12px'
+                        }}>
+                            <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'flex-end',
+                                maxWidth: '75%'
+                            }}>
+                                <div style={{
+                                    background: isFailed ? '#7f1d1d' : 'rgba(58, 134, 255, 0.25)',
+                                    color: 'white',
+                                    padding: '8px 12px',
+                                    borderRadius: '18px 18px 4px 18px',
+                                    fontSize: '14px',
+                                    border: isFailed ? '1px solid #dc2626' : '1px dashed rgba(255, 255, 255, 0.45)'
+                                }}>
+                                    {msg.content}
+                                </div>
+                                <span style={{
+                                    fontSize: '10px',
+                                    color: 'var(--text-muted)',
+                                    marginTop: '2px',
+                                    paddingRight: '4px',
+                                    opacity: 0.85,
+                                    display: 'inline-flex',
+                                    gap: '8px',
+                                    alignItems: 'center'
+                                }}>
+                                    {isFailed ? 'Failed to send' : 'Sending...'}
+                                    {isFailed && (
+                                        <button
+                                            type="button"
+                                            onClick={() => retryFailedMessage(msg.clientMessageId)}
+                                            className="btn"
+                                            style={{ width: 'auto', padding: '2px 8px', fontSize: '10px' }}
+                                        >
+                                            Retry
+                                        </button>
+                                    )}
                                 </span>
                             </div>
                         </div>
