@@ -232,6 +232,48 @@ describe('POST /api/messages/send', () => {
         expect(sendIncomingMessagePush).not.toHaveBeenCalled();
     });
 
+    test('second idempotent POST replays and does not send duplicate push', async () => {
+        adminAuth.verifyIdToken.mockResolvedValue({ email: 'jed.piezas@gmail.com' });
+
+        let storedMessage = null;
+        const messageDoc = {
+            create: jest.fn().mockImplementation(async (incoming) => {
+                if (storedMessage) {
+                    const error = new Error('already exists');
+                    error.code = 'already-exists';
+                    throw error;
+                }
+                storedMessage = incoming;
+            }),
+            get: jest.fn().mockImplementation(async () => ({
+                exists: !!storedMessage,
+                data: () => storedMessage
+            }))
+        };
+        createFirestoreMocks({ messageDoc });
+
+        const body = {
+            toId: 'user-2',
+            content: 'Hello from server route',
+            conversationId: 'santa_real-user-id_recipient_user-2',
+            clientMessageId: '4fa2bcc4-35df-4cd2-ac69-7632f6fd2472',
+            clientCreatedAt: '2026-02-12T20:00:00.000Z'
+        };
+
+        const firstResponse = await POST(createRequest({ token: 'token', body }));
+        const firstData = await firstResponse.json();
+        expect(firstResponse.status).toBe(200);
+        expect(firstData.replayed).toBeUndefined();
+
+        const replayResponse = await POST(createRequest({ token: 'token', body }));
+        const replayData = await replayResponse.json();
+        expect(replayResponse.status).toBe(200);
+        expect(replayData.replayed).toBe(true);
+
+        expect(messageDoc.create).toHaveBeenCalledTimes(2);
+        expect(sendIncomingMessagePush).toHaveBeenCalledTimes(1);
+    });
+
     test('returns 409 when existing message with same id conflicts', async () => {
         adminAuth.verifyIdToken.mockResolvedValue({ email: 'jed.piezas@gmail.com' });
 

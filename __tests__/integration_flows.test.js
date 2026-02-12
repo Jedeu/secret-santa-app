@@ -6,6 +6,7 @@ import Home from '@/app/page';
 import { useUser } from '@/hooks/useUser';
 import * as realtimeHooks from '@/hooks/useRealtimeMessages';
 import { clientAuth } from '@/lib/firebase-client';
+import * as messageOutbox from '@/lib/message-outbox';
 
 // Mock useUser hook
 jest.mock('@/hooks/useUser');
@@ -29,6 +30,15 @@ jest.mock('@/hooks/useRealtimeMessages', () => ({
     useRealtimeAllMessages: jest.fn(),
     useRealtimeUnreadCounts: jest.fn(),
     updateLastReadTimestamp: jest.fn()
+}));
+
+jest.mock('@/lib/message-outbox', () => ({
+    enqueueMessage: jest.fn(),
+    getConversationOutboxMessages: jest.fn(() => []),
+    subscribeOutbox: jest.fn(() => jest.fn()),
+    drainOutboxForUser: jest.fn(() => Promise.resolve({ delivered: 0, retried: 0, failed: 0, skipped: 0 })),
+    retryOutboxMessage: jest.fn(() => true),
+    clearDeliveredOrExpired: jest.fn(),
 }));
 
 // Mock fetch
@@ -86,6 +96,8 @@ describe('UI Interaction Flows', () => {
 
         // Default messages
         realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
+        messageOutbox.getConversationOutboxMessages.mockReturnValue([]);
+        messageOutbox.subscribeOutbox.mockReturnValue(jest.fn());
     });
 
     test('1. User A can send a message to recipient (User B)', async () => {
@@ -352,5 +364,39 @@ describe('UI Interaction Flows', () => {
 
         // 2. Verify reply is visible
         expect(screen.getAllByText('Thanks Santa!')[0]).toBeInTheDocument();
+    });
+
+    test('8. Pending outbox messages do not appear in Public Feed before persistence', async () => {
+        useUser.mockReturnValue({
+            user: userA,
+            loading: false,
+            error: null
+        });
+
+        realtimeHooks.useRealtimeAllMessages.mockReturnValue([]);
+        messageOutbox.getConversationOutboxMessages.mockImplementation(({ conversationId }) => {
+            if (conversationId === 'santa_user-a_recipient_user-b') {
+                return [{
+                    clientMessageId: 'pending-1',
+                    fromUserId: 'user-a',
+                    toId: 'user-b',
+                    conversationId: 'santa_user-a_recipient_user-b',
+                    content: 'Queued only locally',
+                    status: 'pending'
+                }];
+            }
+            return [];
+        });
+
+        render(<Home />);
+        await waitFor(() => expect(screen.getAllByText('Hi, User A 👋')[0]).toBeInTheDocument());
+
+        expect(screen.getAllByText('Queued only locally')[0]).toBeInTheDocument();
+
+        const feedTab = screen.getAllByText('🎄 Public Feed')[0];
+        fireEvent.click(feedTab);
+
+        expect(screen.queryByText('Queued only locally')).not.toBeInTheDocument();
+        expect(screen.getByText('No active conversations yet...')).toBeInTheDocument();
     });
 });
