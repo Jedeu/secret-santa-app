@@ -9,7 +9,11 @@ import {
     logSnapshotReceived
 } from '@/lib/firestore-listener-tracker';
 import { useRealtimeMessagesContext, updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
-import { getLastReadTimestamp as fetchLastRead, getCachedTimestamp } from '@/lib/lastReadClient';
+import {
+    getLastReadTimestamp as fetchLastRead,
+    getCachedTimestamp,
+    subscribeToLastRead
+} from '@/lib/lastReadClient';
 
 
 
@@ -33,6 +37,54 @@ export function useRealtimeAllMessages(_isAuthenticated = false) {
  * Re-export updateLastReadTimestamp for implementation backward compatibility
  */
 export { updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
+
+/**
+ * Subscribe to another user's last-read marker for a conversation.
+ * Returns ISO timestamp string normalized by lastReadClient, or null if unavailable.
+ *
+ * @param {string} otherUserId
+ * @param {string} conversationId
+ * @returns {string | null}
+ */
+export function useOtherUserLastRead(otherUserId, conversationId) {
+    const [otherLastReadAt, setOtherLastReadAt] = useState(null);
+
+    useEffect(() => {
+        if (!otherUserId || !conversationId) {
+            setOtherLastReadAt(null);
+            return undefined;
+        }
+
+        let isMounted = true;
+        const cached = getCachedTimestamp(otherUserId, conversationId);
+        if (cached !== undefined) {
+            setOtherLastReadAt(cached);
+        }
+
+        fetchLastRead(otherUserId, conversationId)
+            .then((value) => {
+                if (isMounted) {
+                    setOtherLastReadAt(value);
+                }
+            })
+            .catch((error) => {
+                console.error('Failed to fetch other user lastRead:', error);
+            });
+
+        const unsubscribe = subscribeToLastRead(otherUserId, conversationId, (value) => {
+            if (isMounted) {
+                setOtherLastReadAt(value);
+            }
+        });
+
+        return () => {
+            isMounted = false;
+            unsubscribe();
+        };
+    }, [otherUserId, conversationId]);
+
+    return otherLastReadAt;
+}
 
 /**
  * Custom hook to get unread message counts using real-time Firestore listeners

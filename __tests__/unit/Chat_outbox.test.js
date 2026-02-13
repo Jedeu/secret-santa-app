@@ -14,7 +14,8 @@ import {
 const mockShowToast = jest.fn();
 
 jest.mock('@/hooks/useRealtimeMessages', () => ({
-    updateLastReadTimestamp: jest.fn()
+    updateLastReadTimestamp: jest.fn(),
+    useOtherUserLastRead: jest.fn(() => null)
 }));
 
 jest.mock('@/components/ClientProviders', () => ({

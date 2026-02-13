@@ -29,7 +29,8 @@ jest.mock('@/hooks/useRealtimeMessages', () => ({
     useRealtimeMessages: jest.fn(),
     useRealtimeAllMessages: jest.fn(),
     useRealtimeUnreadCounts: jest.fn(),
-    updateLastReadTimestamp: jest.fn()
+    updateLastReadTimestamp: jest.fn(),
+    useOtherUserLastRead: jest.fn(() => null)
 }));
 
 jest.mock('@/lib/message-outbox', () => ({

@@ -1,6 +1,6 @@
 'use client';
 import { firestore } from '@/lib/firebase-client';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 /**
  * Client-side Firestore operations for lastRead tracking.
@@ -12,7 +12,7 @@ import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
  * Fields:
  *   - userId: string
  *   - conversationId: string (legacy format or new format, or "publicFeed_threadId")
- *   - lastReadAt: string (ISO 8601 timestamp)
+ *   - lastReadAt: Firestore server timestamp (normalized to ISO string in client reads)
  */
 
 // Debounce map to batch rapid updates
@@ -21,6 +21,19 @@ const DEBOUNCE_MS = 2000;  // Wait 2 seconds before writing
 
 // In-memory cache for lastRead timestamps
 const lastReadCache = new Map();
+const EPOCH_ISO = new Date(0).toISOString();
+
+function normalizeLastReadValue(rawValue, fallback = EPOCH_ISO) {
+    if (rawValue && typeof rawValue.toDate === 'function') {
+        return rawValue.toDate().toISOString();
+    }
+
+    if (typeof rawValue === 'string' && rawValue) {
+        return rawValue;
+    }
+
+    return fallback;
+}
 
 /**
  * Get the last read timestamp for a conversation.
@@ -32,7 +45,7 @@ const lastReadCache = new Map();
  */
 export async function getLastReadTimestamp(userId, conversationId) {
     if (!firestore || !userId || !conversationId) {
-        return new Date(0).toISOString();
+        return EPOCH_ISO;
     }
 
     const key = `${userId}_${conversationId}`;
@@ -47,17 +60,18 @@ export async function getLastReadTimestamp(userId, conversationId) {
         const snapshot = await getDoc(docRef);
 
         if (!snapshot.exists()) {
-            const defaultTime = new Date(0).toISOString();
+            const defaultTime = EPOCH_ISO;
             lastReadCache.set(key, defaultTime);
             return defaultTime;
         }
 
-        const timestamp = snapshot.data().lastReadAt;
+        const fallback = lastReadCache.get(key) || EPOCH_ISO;
+        const timestamp = normalizeLastReadValue(snapshot.data()?.lastReadAt, fallback);
         lastReadCache.set(key, timestamp);
         return timestamp;
     } catch (error) {
         console.error('Error fetching lastRead timestamp:', error);
-        return new Date(0).toISOString();
+        return lastReadCache.get(key) || EPOCH_ISO;
     }
 }
 
@@ -90,7 +104,7 @@ export function updateLastReadTimestamp(userId, conversationId) {
             await setDoc(docRef, {
                 userId,
                 conversationId,
-                lastReadAt: now
+                lastReadAt: serverTimestamp()
             });
             pendingWrites.delete(key);
         } catch (error) {
@@ -121,11 +135,14 @@ export function subscribeToLastRead(userId, conversationId, callback) {
 
     return onSnapshot(docRef, (snapshot) => {
         if (snapshot.exists()) {
-            const timestamp = snapshot.data().lastReadAt;
-            lastReadCache.set(key, timestamp);
-            callback(timestamp);
+            const fallback = lastReadCache.get(key) || EPOCH_ISO;
+            const normalized = normalizeLastReadValue(snapshot.data()?.lastReadAt, fallback);
+            lastReadCache.set(key, normalized);
+            callback(normalized);
         } else {
-            callback(new Date(0).toISOString());
+            const defaultValue = lastReadCache.get(key) || EPOCH_ISO;
+            lastReadCache.set(key, defaultValue);
+            callback(defaultValue);
         }
     }, (error) => {
         console.error('Error in lastRead listener:', error);
@@ -141,7 +158,7 @@ export function subscribeToLastRead(userId, conversationId, callback) {
 export async function flushPendingWrites() {
     const promises = [];
 
-    for (const [key, { timeout, data }] of pendingWrites) {
+    for (const [key, { timeout }] of pendingWrites) {
         clearTimeout(timeout);
         const [userId, ...rest] = key.split('_');
         const conversationId = rest.join('_'); // Handle underscore in conversationId
@@ -151,7 +168,7 @@ export async function flushPendingWrites() {
             setDoc(docRef, {
                 userId,
                 conversationId,
-                lastReadAt: data
+                lastReadAt: serverTimestamp()
             }).catch(error => {
                 console.error('Error flushing lastRead:', error);
             })

@@ -10,12 +10,14 @@ const mockGetDoc = jest.fn();
 const mockSetDoc = jest.fn();
 const mockDoc = jest.fn();
 const mockOnSnapshot = jest.fn();
+const mockServerTimestamp = jest.fn(() => ({ __type: 'serverTimestamp' }));
 
 jest.mock('firebase/firestore', () => ({
     doc: (...args) => mockDoc(...args),
     getDoc: (...args) => mockGetDoc(...args),
     setDoc: (...args) => mockSetDoc(...args),
     onSnapshot: (...args) => mockOnSnapshot(...args),
+    serverTimestamp: (...args) => mockServerTimestamp(...args),
 }));
 
 // Mock firebase-client
