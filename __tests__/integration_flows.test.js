@@ -28,6 +28,7 @@ jest.mock('emoji-picker-react', () => {
 jest.mock('@/hooks/useRealtimeMessages', () => ({
     useRealtimeMessages: jest.fn(),
     useRealtimeAllMessages: jest.fn(),
+    useRealtimeAllMessagesLoading: jest.fn(() => false),
     useRealtimeUnreadCounts: jest.fn(),
     updateLastReadTimestamp: jest.fn(),
     useOtherUserLastRead: jest.fn(() => null)
