@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
-import { updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
+import { updateLastReadTimestamp, useOtherUserLastRead } from '@/hooks/useRealtimeMessages';
 import { useToast } from '@/components/ClientProviders';
 import {
     enqueueMessage,
@@ -54,6 +54,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const emojiPickerRef = useRef(null);
     const lastReadRef = useRef(0);
     const wasNearBottomRef = useRef(true);
+    const otherLastReadAt = useOtherUserLastRead(otherUser.id, conversationId);
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -257,6 +258,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
             >
                 {messages.map(msg => {
                     const isMe = msg.fromId === currentUser.id;
+                    const isReadReceipt = Boolean(isMe && otherLastReadAt && msg.timestamp && otherLastReadAt >= msg.timestamp);
                     return (
                         <div key={msg.id} style={{
                             display: 'flex',
@@ -318,6 +320,19 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                     opacity: 0.8
                                 }}>
                                     {formatRelativeTime(msg.timestamp)}
+                                    {isMe && (
+                                        <span
+                                            aria-label={isReadReceipt ? 'Read' : 'Delivered'}
+                                            title={isReadReceipt ? 'Read' : 'Delivered'}
+                                            style={{
+                                                marginLeft: '6px',
+                                                color: isReadReceipt ? 'var(--accent)' : 'var(--text-muted)',
+                                                fontWeight: '600'
+                                            }}
+                                        >
+                                            {isReadReceipt ? '✓✓' : '✓'}
+                                        </span>
+                                    )}
                                 </span>
                             </div>
                         </div>

@@ -84,7 +84,7 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly(['userId', 'conversationId', 'lastReadAt'])
         && request.resource.data.userId is string
         && request.resource.data.conversationId is string
-        && request.resource.data.lastReadAt is string
+        && request.resource.data.lastReadAt is timestamp
         && lastReadId.matches('^' + request.resource.data.userId + '_.*$')
         && authMatchesUser(request.resource.data.userId);
     }
@@ -96,7 +96,12 @@ service cloud.firestore {
     }
 
     match /lastRead/{lastReadId} {
-      allow read: if isAllowedLastReadRead(lastReadId);
+      // Owner reads remain strict. DM lastRead docs are cross-readable for read receipts.
+      // publicFeed_* docs stay owner-only to avoid leaking view timestamps.
+      // Path-based check works even when the lastRead document does not exist yet.
+      allow read: if isAllowedLastReadRead(lastReadId)
+        || (isSignedIn() && lastReadId.matches('^[^_]+_.+$')
+            && !lastReadId.matches('^[^_]+_publicFeed_.*$'));
       allow create, update: if isAllowedLastReadWrite(lastReadId);
       allow delete: if false;
     }
