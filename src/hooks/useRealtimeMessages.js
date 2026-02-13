@@ -34,6 +34,16 @@ export function useRealtimeAllMessages(_isAuthenticated = false) {
 }
 
 /**
+ * Hook to read all-messages listener loading state from Context.
+ *
+ * @returns {boolean}
+ */
+export function useRealtimeAllMessagesLoading() {
+    const { allMessagesLoading } = useRealtimeMessagesContext();
+    return allMessagesLoading;
+}
+
+/**
  * Re-export updateLastReadTimestamp for implementation backward compatibility
  */
 export { updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
