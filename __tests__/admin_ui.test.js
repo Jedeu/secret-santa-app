@@ -29,6 +29,7 @@ jest.mock('../src/components/PublicFeed', () => {
 jest.mock('../src/hooks/useRealtimeMessages', () => ({
     useRealtimeAllMessages: jest.fn(() => []), // Return empty array by default
     useRealtimeAllMessagesLoading: jest.fn(() => false),
+    useRealtimeAllReactions: jest.fn(() => []),
     useRealtimeUnreadCounts: jest.fn(() => ({ recipientUnread: 0, santaUnread: 0 }))
 }));
 

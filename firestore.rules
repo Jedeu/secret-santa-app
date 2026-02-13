@@ -120,6 +120,24 @@ service cloud.firestore {
         && authMatchesUser(resource.data.userId);
     }
 
+    match /reactions/{reactionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['messageId', 'userId', 'emoji', 'createdAt'])
+        && request.resource.data.messageId is string
+        && request.resource.data.userId is string
+        && request.resource.data.emoji is string
+        && request.resource.data.emoji.size() <= 4
+        && request.resource.data.createdAt is string
+        && authMatchesUser(request.resource.data.userId)
+        && reactionId == (request.resource.data.messageId + '_' + request.resource.data.userId + '_' + request.resource.data.emoji)
+        && exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId));
+      allow delete: if isSignedIn()
+        && resource.data.userId is string
+        && authMatchesUser(resource.data.userId);
+      allow update: if false;
+    }
+
     // Deny any other collections by default.
     match /{document=**} {
       allow read, write: if false;

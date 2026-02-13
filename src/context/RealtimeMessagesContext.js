@@ -98,10 +98,13 @@ export function RealtimeMessagesProvider({ children }) {
     const [allMessages, setAllMessages] = useState([]);
     const [allMessagesLoading, setAllMessagesLoading] = useState(true);
     const [allMessagesError, setAllMessagesError] = useState(null);
+    const [allReactions, setAllReactions] = useState([]);
 
     // Refs for StrictMode protection and listener management
     const listenerRef = useRef(null);           // Firestore unsubscribe function
     const listenerCreatedRef = useRef(false);   // Boolean flag to prevent double-creation
+    const reactionsListenerRef = useRef(null);
+    const reactionsListenerCreatedRef = useRef(false);
     const [authRetry, setAuthRetry] = useState(0); // Force effect re-run on error
 
     useEffect(() => {
@@ -199,10 +202,75 @@ export function RealtimeMessagesProvider({ children }) {
         };
     }, [user, authLoading, authRetry]);
 
+    useEffect(() => {
+        if (authLoading) {
+            return;
+        }
+
+        if (!user) {
+            if (reactionsListenerRef.current) {
+                logListenerDestroyed('allReactions');
+                reactionsListenerRef.current();
+                reactionsListenerRef.current = null;
+            }
+            reactionsListenerCreatedRef.current = false;
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setAllReactions([]);
+            return;
+        }
+
+        if (reactionsListenerCreatedRef.current) {
+            return;
+        }
+
+        reactionsListenerCreatedRef.current = true;
+
+        const reactionsRef = collection(firestore, 'reactions');
+        const q = query(reactionsRef, orderBy('createdAt', 'asc'));
+        logListenerCreated('allReactions', { query: 'orderBy(createdAt, asc)' });
+
+        reactionsListenerRef.current = onSnapshot(
+            q,
+            { includeMetadataChanges: false },
+            (snapshot) => {
+                const reactions = [];
+                snapshot.forEach((reactionDoc) => reactions.push(reactionDoc.data()));
+                logSnapshotReceived(
+                    'allReactions',
+                    snapshot.size,
+                    snapshot.metadata.fromCache,
+                    snapshot.docChanges().length
+                );
+                setAllReactions(reactions);
+            },
+            (error) => {
+                console.error('Error in all-reactions listener:', error);
+                if (error.code === 'permission-denied') {
+                    console.warn('[Firestore] Reactions permission denied - retrying in 2 seconds...');
+                    reactionsListenerCreatedRef.current = false;
+                    reactionsListenerRef.current = null;
+                    setTimeout(() => {
+                        setAuthRetry(prev => prev + 1);
+                    }, 2000);
+                }
+            }
+        );
+
+        return () => {
+            if (reactionsListenerRef.current) {
+                logListenerDestroyed('allReactions');
+                reactionsListenerRef.current();
+                reactionsListenerRef.current = null;
+            }
+            reactionsListenerCreatedRef.current = false;
+        };
+    }, [user, authLoading, authRetry]);
+
     const value = {
         allMessages,
         allMessagesLoading,
         allMessagesError,
+        allReactions,
         currentUser: user,
         updateLastReadTimestamp,
         subscribeToLastReadChanges,

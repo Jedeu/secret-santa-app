@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
+import ReactionChips from '@/components/ReactionChips';
 
 function parseConversationId(conversationId) {
     if (!conversationId || typeof conversationId !== 'string') return null;
@@ -65,7 +66,7 @@ function resolveLegacyConversation(message, role) {
     };
 }
 
-export default function PublicFeed({ messages = [], allUsers = [], userId }) {
+export default function PublicFeed({ messages = [], allReactions = [], allUsers = [], userId }) {
     const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
     const [lastViewed, setLastViewed] = useState(() => {
         // Lazy initialization: Load from localStorage for backwards compatibility
@@ -351,19 +352,27 @@ export default function PublicFeed({ messages = [], allUsers = [], userId }) {
                                         maxWidth: '85%',
                                         alignItems: group.isSanta ? 'flex-end' : 'flex-start'
                                     }}>
-                                        {group.messages.map((msg, idx) => (
-                                            <div key={msg.id} style={{
-                                                padding: '8px 12px',
-                                                background: 'var(--surface-highlight)',
-                                                color: 'var(--foreground)',
-                                                borderRadius: '4px',
-                                                fontSize: '14px',
-                                                borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
-                                                borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
-                                                marginBottom: '2px',
-                                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}>
-                                                {msg.content}
+                                        {group.messages.map((msg) => (
+                                            <div key={msg.id} style={{ width: '100%' }}>
+                                                <div style={{
+                                                    padding: '8px 12px',
+                                                    background: 'var(--surface-highlight)',
+                                                    color: 'var(--foreground)',
+                                                    borderRadius: '4px',
+                                                    fontSize: '14px',
+                                                    borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
+                                                    borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
+                                                    marginBottom: '2px',
+                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                                }}>
+                                                    {msg.content}
+                                                </div>
+                                                <ReactionChips
+                                                    messageId={msg.id}
+                                                    allReactions={allReactions}
+                                                    currentUserId={userId}
+                                                    onToggle={null}
+                                                />
                                             </div>
                                         ))}
                                     </div>
