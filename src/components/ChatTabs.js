@@ -12,6 +12,7 @@ import PublicFeed from '@/components/PublicFeed';
  * @param {Object[]} props.allMessages - All messages (for public feed)
  * @param {Object[]} props.recipientMessages - Messages for recipient conversation
  * @param {Object[]} props.santaMessages - Messages for santa conversation
+ * @param {Object[]} props.allReactions - Reactions for all messages
  * @param {Object} props.unreadCounts - Unread counts for each tab
  * @param {number} props.unreadCounts.recipient - Unread count for recipient tab
  * @param {number} props.unreadCounts.santa - Unread count for santa tab
@@ -23,6 +24,7 @@ export default function ChatTabs({
     currentUser,
     allUsers,
     allMessages,
+    allReactions,
     recipientMessages,
     santaMessages,
     unreadCounts,
@@ -44,6 +46,7 @@ export default function ChatTabs({
                 isSantaChat={false}
                 unreadCount={unreadCounts?.recipient || 0}
                 conversationId={recipientConversationId}
+                allReactions={allReactions}
             />
         );
     }
@@ -60,6 +63,7 @@ export default function ChatTabs({
                 isSantaChat={true}
                 unreadCount={unreadCounts?.santa || 0}
                 conversationId={santaConversationId}
+                allReactions={allReactions}
             />
         );
     }
@@ -68,6 +72,7 @@ export default function ChatTabs({
         return (
             <PublicFeed
                 messages={allMessages}
+                allReactions={allReactions}
                 allUsers={allUsers}
                 userId={currentUser?.id}
             />

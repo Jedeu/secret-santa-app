@@ -9,7 +9,7 @@
     "lint": "npx eslint .",
     "test": "jest",
     "test:unit": "jest --testPathIgnorePatterns=/integration/ --testPathIgnorePatterns=/helpers/ --testPathIgnorePatterns=setup.js --testPathIgnorePatterns=/e2e/",
-    "test:integration": "jest __tests__/integration",
+    "test:integration": "jest --config jest.integration.config.js",
     "test:watch": "jest --watch",
     "test:smart": "./.claude/skills/test-runner/run-tests.sh",
     "test:e2e": "playwright test",
@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@firebase/rules-unit-testing": "^5.0.0",
     "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
