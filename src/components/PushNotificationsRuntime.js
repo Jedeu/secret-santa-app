@@ -19,12 +19,15 @@ export default function PushNotificationsRuntime({ currentUser }) {
             console.error('Push token sync failed:', error);
         });
 
-        const unsubscribe = attachForegroundListener(() => {
+        const unsubscribe = attachForegroundListener((payload) => {
             if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
                 return;
             }
 
-            showToast('You have a new message.', 'success');
+            const notificationBody = payload?.data?.notificationBody
+                || payload?.notification?.body
+                || 'You have a new message';
+            showToast(notificationBody, 'success');
         });
 
         return () => {

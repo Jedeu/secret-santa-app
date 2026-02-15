@@ -7,6 +7,9 @@ const INVALID_TOKEN_ERROR_CODES = new Set([
     'messaging/registration-token-not-registered',
     'messaging/invalid-registration-token',
 ]);
+const GENERIC_MESSAGE_BODY = 'You have a new message';
+const SANTA_MESSAGE_BODY = 'You have a new message from Santa';
+const RECIPIENT_MESSAGE_BODY = 'You have a new message from your recipient';
 
 function hashPushToken(token) {
     return createHash('sha256').update(token).digest('hex');
@@ -14,6 +17,55 @@ function hashPushToken(token) {
 
 function normalizeToken(token) {
     return typeof token === 'string' ? token.trim() : '';
+}
+
+function parseConversationId(conversationId) {
+    if (!conversationId || typeof conversationId !== 'string') {
+        return null;
+    }
+
+    const parts = conversationId.split('_recipient_');
+    if (parts.length !== 2 || !parts[0].startsWith('santa_')) {
+        return null;
+    }
+
+    return {
+        santaId: parts[0].replace('santa_', ''),
+        recipientId: parts[1],
+    };
+}
+
+function resolveSenderRole({ conversationId, fromUserId }) {
+    if (!fromUserId) {
+        return '';
+    }
+
+    const parsedConversation = parseConversationId(conversationId);
+    if (!parsedConversation) {
+        return '';
+    }
+
+    if (fromUserId === parsedConversation.santaId) {
+        return 'santa';
+    }
+
+    if (fromUserId === parsedConversation.recipientId) {
+        return 'recipient';
+    }
+
+    return '';
+}
+
+function getNotificationBody(senderRole) {
+    if (senderRole === 'santa') {
+        return SANTA_MESSAGE_BODY;
+    }
+
+    if (senderRole === 'recipient') {
+        return RECIPIENT_MESSAGE_BODY;
+    }
+
+    return GENERIC_MESSAGE_BODY;
 }
 
 export async function registerPushToken({ userId, token, userAgent = null }) {
@@ -106,7 +158,7 @@ export async function cleanupInvalidTokens(tokens, fcmResponse) {
     return docsToDelete.length;
 }
 
-export async function sendIncomingMessagePush({ toUserId, conversationId = null }) {
+export async function sendIncomingMessagePush({ toUserId, conversationId = null, fromUserId = null }) {
     if (!firestore || !messaging) {
         throw new Error('Push messaging unavailable');
     }
@@ -141,15 +193,20 @@ export async function sendIncomingMessagePush({ toUserId, conversationId = null 
         };
     }
 
+    const senderRole = resolveSenderRole({ conversationId, fromUserId });
+    const notificationBody = getNotificationBody(senderRole);
+
     const fcmResponse = await messaging.sendEachForMulticast({
         tokens,
         notification: {
             title: 'Secret Santa',
-            body: 'You have a new message',
+            body: notificationBody,
         },
         data: {
             type: 'incoming_message',
             conversationId: conversationId || '',
+            senderRole,
+            notificationBody,
         },
         webpush: {
             fcmOptions: {

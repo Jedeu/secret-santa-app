@@ -245,6 +245,7 @@ export async function POST(request) {
                 await sendIncomingMessagePush({
                     toUserId: toId,
                     conversationId,
+                    fromUserId: sender.id,
                 });
             } catch (pushError) {
                 console.error('Push dispatch failed:', pushError);
