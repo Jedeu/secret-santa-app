@@ -22,9 +22,13 @@ if (hasMessagingConfig()) {
     const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
     const messaging = getMessaging(app);
 
-    onBackgroundMessage(messaging, () => {
+    onBackgroundMessage(messaging, (payload) => {
+        const notificationBody = payload?.data?.notificationBody
+            || payload?.notification?.body
+            || 'You have a new message';
+
         self.registration.showNotification('Secret Santa', {
-            body: 'You have a new message',
+            body: notificationBody,
             icon: '/icons/icon-192x192.png',
             badge: '/icons/icon-192x192.png',
             tag: 'secret-santa-message',
