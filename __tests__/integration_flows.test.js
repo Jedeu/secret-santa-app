@@ -57,6 +57,7 @@ jest.mock('firebase/firestore', () => ({
     getDocs: jest.fn(),
     getDoc: jest.fn(() => Promise.resolve({ exists: () => false })),
     setDoc: jest.fn(() => Promise.resolve()),
+    deleteDoc: jest.fn(() => Promise.resolve()),
     query: jest.fn(),
     doc: jest.fn(),
     where: jest.fn(),

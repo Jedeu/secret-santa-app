@@ -3,12 +3,22 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import Chat from '../../src/components/Chat';
 import { updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
+import { useTypingIndicator } from '../../src/hooks/useTypingIndicator';
 
 // Mock dependencies
 jest.mock('../../src/hooks/useRealtimeMessages', () => ({
     useRealtimeMessages: jest.fn(),
     updateLastReadTimestamp: jest.fn(),
     useOtherUserLastRead: jest.fn(() => null)
+}));
+
+jest.mock('../../src/hooks/useTypingIndicator', () => ({
+    useTypingIndicator: jest.fn(() => false)
+}));
+
+jest.mock('../../src/lib/typing-client', () => ({
+    setTyping: jest.fn(),
+    clearTyping: jest.fn()
 }));
 
 jest.mock('../../src/lib/firebase-client', () => ({
@@ -210,5 +220,22 @@ describe('Chat Component Unread Logic', () => {
         );
 
         expect(getByLabelText('4 unread messages')).toHaveAttribute('aria-live', 'polite');
+    });
+
+    it('shows typing indicator when other user is typing', () => {
+        useTypingIndicator.mockReturnValue(true);
+
+        const { getByText } = render(
+            <Chat
+                currentUser={currentUser}
+                otherUser={otherUser}
+                isSantaChat={false}
+                unreadCount={0}
+                messages={initialMessages}
+                conversationId={conversationId}
+            />
+        );
+
+        expect(getByText('User 2 is typing...')).toBeInTheDocument();
     });
 });

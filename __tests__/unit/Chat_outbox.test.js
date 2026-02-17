@@ -18,6 +18,15 @@ jest.mock('@/hooks/useRealtimeMessages', () => ({
     useOtherUserLastRead: jest.fn(() => null)
 }));
 
+jest.mock('@/hooks/useTypingIndicator', () => ({
+    useTypingIndicator: jest.fn(() => false)
+}));
+
+jest.mock('@/lib/typing-client', () => ({
+    setTyping: jest.fn(),
+    clearTyping: jest.fn()
+}));
+
 jest.mock('@/components/ClientProviders', () => ({
     useToast: () => ({ showToast: mockShowToast })
 }));

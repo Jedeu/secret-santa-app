@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
 import { updateLastReadTimestamp, useOtherUserLastRead } from '@/hooks/useRealtimeMessages';
+import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { useToast } from '@/components/ClientProviders';
 import {
     enqueueMessage,
@@ -12,6 +13,7 @@ import {
     drainOutboxForUser,
     retryOutboxMessage
 } from '@/lib/message-outbox';
+import { setTyping, clearTyping } from '@/lib/typing-client';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -55,6 +57,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const lastReadRef = useRef(0);
     const wasNearBottomRef = useRef(true);
     const otherLastReadAt = useOtherUserLastRead(otherUser.id, conversationId);
+    const isOtherTyping = useTypingIndicator(conversationId, otherUser.id);
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -143,7 +146,11 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const sendMessage = async (e) => {
         e.preventDefault();
         const content = newMessage.trim();
-        if (!content) return;
+        if (!content) {
+            clearTyping(currentUser.id, conversationId);
+            return;
+        }
+        clearTyping(currentUser.id, conversationId);
 
         try {
             enqueueMessage({
@@ -177,6 +184,18 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         drainOutboxForUser({ fromUserId: currentUser.id }).catch((error) => {
             console.error('Outbox drain failed after manual retry:', error);
         });
+    };
+
+    const handleInputChange = (e) => {
+        const value = e.target.value;
+        setNewMessage(value);
+
+        if (!value.trim()) {
+            clearTyping(currentUser.id, conversationId);
+            return;
+        }
+
+        setTyping(currentUser.id, conversationId);
     };
 
     // Handle emoji selection
@@ -213,6 +232,25 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
     }, [showEmojiPicker]);
+
+    useEffect(() => {
+        const onVisibility = () => {
+            if (document.visibilityState === 'hidden') {
+                clearTyping(currentUser.id, conversationId);
+            }
+        };
+
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [currentUser.id, conversationId]);
+
+    useEffect(() => {
+        return () => {
+            clearTyping(currentUser.id, conversationId);
+        };
+    }, [currentUser.id, conversationId]);
 
     return (
         <div className="card" style={{
@@ -251,6 +289,15 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                     </span>
                 )}
             </h3>
+            {isOtherTyping && (
+                <div style={{
+                    fontSize: '12px',
+                    color: 'var(--text-muted)',
+                    padding: '4px 0'
+                }}>
+                    {isSantaChat ? 'Santa' : otherUser.name} is typing...
+                </div>
+            )}
 
             <div
                 style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}
@@ -400,7 +447,8 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                             className="input"
                             style={{ marginBottom: 0, paddingRight: '45px' }}
                             value={newMessage}
-                            onChange={(e) => setNewMessage(e.target.value)}
+                            onChange={handleInputChange}
+                            onBlur={() => clearTyping(currentUser.id, conversationId)}
                             placeholder="Type a message..."
                         />
                         <button

@@ -10,6 +10,15 @@ jest.mock('../../src/hooks/useRealtimeMessages', () => ({
     useOtherUserLastRead: jest.fn(),
 }));
 
+jest.mock('../../src/hooks/useTypingIndicator', () => ({
+    useTypingIndicator: jest.fn(() => false)
+}));
+
+jest.mock('../../src/lib/typing-client', () => ({
+    setTyping: jest.fn(),
+    clearTyping: jest.fn()
+}));
+
 jest.mock('../../src/lib/message-outbox', () => ({
     enqueueMessage: jest.fn(),
     getConversationOutboxMessages: jest.fn(() => []),
