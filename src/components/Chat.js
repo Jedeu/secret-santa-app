@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
 import { updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
 import { clientAuth } from '@/lib/firebase-client';
+import { useToast } from '@/components/ClientProviders';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -46,6 +47,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
     const emojiPickerRef = useRef(null);
     const lastReadRef = useRef(0);
     const wasNearBottomRef = useRef(true);
+    const { showToast } = useToast();
 
     // Mark messages as read when component mounts, user changes, OR new messages arrive
     // This ensures badge clears even when new messages arrive while viewing the tab
@@ -157,7 +159,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
             scrollToBottom('auto');
         } catch (error) {
             console.error('Error sending message:', error);
-            alert('Failed to send message. Please try again.');
+            showToast('Failed to send message. Please try again.');
         }
     };
 

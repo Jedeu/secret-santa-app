@@ -6,6 +6,7 @@ import { signOut as firebaseSignOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase-client';
 import { getParticipantNames, getParticipantEmail } from '@/lib/participants';
 import { isAdmin } from '@/lib/config';
+import { useToast } from '@/components/ClientProviders';
 
 /**
  * RecipientSelector - First-time user recipient selection flow
@@ -20,6 +21,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
     const [recipientInput, setRecipientInput] = useState('');
     const [loading, setLoading] = useState(false);
     const submitLockRef = useRef(false);
+    const { showToast } = useToast();
 
     const handleSetRecipient = async (e) => {
         e.preventDefault();
@@ -36,7 +38,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             );
 
             if (!normalizedRecipientName) {
-                alert('Invalid recipient. Please select from the list.');
+                showToast('Invalid recipient. Please select from the list.');
                 setLoading(false);
                 return;
             }
@@ -44,7 +46,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             // Get the email for this recipient from the hardcoded list
             const recipientEmail = getParticipantEmail(normalizedRecipientName);
             if (!recipientEmail) {
-                alert('Could not find email for this recipient.');
+                showToast('Could not find email for this recipient.');
                 setLoading(false);
                 return;
             }
@@ -55,7 +57,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             const recipientSnapshot = await getDocs(recipientQuery);
 
             if (recipientSnapshot.empty) {
-                alert('Recipient not found in database.');
+                showToast('Recipient not found in database.');
                 setLoading(false);
                 return;
             }
@@ -100,11 +102,11 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
         } catch (err) {
             console.error('Failed to set recipient:', err);
             if (err?.message === 'RECIPIENT_TAKEN') {
-                alert('This recipient has already been selected by someone else.');
+                showToast('This recipient has already been selected by someone else.');
             } else if (err?.message === 'RECIPIENT_ALREADY_SELECTED') {
-                alert('You already selected a recipient.');
+                showToast('You already selected a recipient.');
             } else {
-                alert('Failed to set recipient: ' + err.message);
+                showToast('Failed to set recipient: ' + err.message);
             }
         } finally {
             setLoading(false);
@@ -123,17 +125,17 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             });
 
             if (res.ok) {
-                alert('System reset successfully.');
+                showToast('System reset successfully.', 'success');
                 if (onReset) {
                     onReset();
                 }
             } else {
                 const error = await res.json();
-                alert(`Failed to reset system: ${error.error || 'Unknown error'}`);
+                showToast(`Failed to reset system: ${error.error || 'Unknown error'}`);
             }
         } catch (err) {
             console.error('Reset error:', err);
-            alert('Failed to reset system.');
+            showToast('Failed to reset system.');
         }
     };
 

@@ -1,6 +1,7 @@
 'use client';
 import { signInWithPopup, signOut as firebaseSignOut, GoogleAuthProvider } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase-client';
+import { useToast } from '@/components/ClientProviders';
 
 /**
  * AuthGuard - Handles authentication UI states
@@ -18,11 +19,13 @@ import { clientAuth } from '@/lib/firebase-client';
  * @param {React.ReactNode} props.children - Content to render when authenticated
  */
 export default function AuthGuard({ isLoading, currentUser, authError, children }) {
+    const { showToast } = useToast();
+
     // Handle sign in with Google
     const handleSignIn = async () => {
         try {
             if (!clientAuth) {
-                alert('Firebase Auth not initialized. Make sure Firebase emulators are running: npm run emulators');
+                showToast('Firebase Auth not initialized. Make sure Firebase emulators are running: npm run emulators');
                 console.error('clientAuth is null - Firebase not initialized');
                 return;
             }
@@ -31,7 +34,7 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
         } catch (error) {
             console.error('Sign in error:', error);
             if (error.code !== 'auth/popup-closed-by-user') {
-                alert('Failed to sign in. Please try again.');
+                showToast('Failed to sign in. Please try again.');
             }
         }
     };

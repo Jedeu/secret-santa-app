@@ -1,6 +1,7 @@
 'use client';
 import { clientAuth } from '@/lib/firebase-client';
 import { isAdmin } from '@/lib/config';
+import { useToast } from '@/components/ClientProviders';
 
 /**
  * AdminPanel - Admin control buttons for assign and reset
@@ -12,6 +13,8 @@ import { isAdmin } from '@/lib/config';
  * @param {Function} [props.onResetComplete] - Called after successful reset
  */
 export default function AdminPanel({ userEmail, variant = 'full', onAssignComplete, onResetComplete }) {
+    const { showToast } = useToast();
+
     // Only render if user is admin
     if (!isAdmin(userEmail)) {
         return null;
@@ -37,11 +40,11 @@ export default function AdminPanel({ userEmail, variant = 'full', onAssignComple
                 }
             } else {
                 const error = await res.json();
-                alert(`Failed to assign users: ${error.error}`);
+                showToast(`Failed to assign users: ${error.error}`);
             }
         } catch (err) {
             console.error('Assign error:', err);
-            alert('Failed to assign users');
+            showToast('Failed to assign users');
         }
     };
 
@@ -57,17 +60,17 @@ export default function AdminPanel({ userEmail, variant = 'full', onAssignComple
             });
 
             if (res.ok) {
-                alert('System reset successfully.');
+                showToast('System reset successfully.', 'success');
                 if (onResetComplete) {
                     onResetComplete();
                 }
             } else {
                 const error = await res.json();
-                alert(`Failed to reset system: ${error.error || 'Unknown error'}`);
+                showToast(`Failed to reset system: ${error.error || 'Unknown error'}`);
             }
         } catch (err) {
             console.error('Reset error:', err);
-            alert('Failed to reset system.');
+            showToast('Failed to reset system.');
         }
     };
 
