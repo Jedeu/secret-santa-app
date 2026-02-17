@@ -3,9 +3,13 @@
  */
 
 import { POST } from '@/app/api/init/route';
-import { getAllUsers } from '@/lib/firestore';
+import { getAllUsers, resetDatabase } from '@/lib/firestore';
 
 describe('POST /api/init', () => {
+    beforeEach(async () => {
+        await resetDatabase();
+    });
+
     test('should initialize all 8 participants', async () => {
         const response = await POST();
         const data = await response.json();

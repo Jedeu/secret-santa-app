@@ -61,7 +61,10 @@ export default function Chat({
     // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-    const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
+    const [reactionPickerState, setReactionPickerState] = useState({
+        conversationId,
+        messageId: null,
+    });
     const [outboxMessages, setOutboxMessages] = useState([]);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
@@ -254,9 +257,10 @@ export default function Chat({
         }
     }, [showEmojiPicker]);
 
-    useEffect(() => {
-        setReactionPickerMessageId(null);
-    }, [conversationId]);
+    const reactionPickerMessageId =
+        reactionPickerState.conversationId === conversationId
+            ? reactionPickerState.messageId
+            : null;
 
     useEffect(() => {
         const onVisibility = () => {
@@ -356,7 +360,15 @@ export default function Chat({
                                 )}
                                 <div
                                     onClick={() => {
-                                        setReactionPickerMessageId(prev => (prev === msg.id ? null : msg.id));
+                                        setReactionPickerState((prev) => {
+                                            if (
+                                                prev.conversationId === conversationId &&
+                                                prev.messageId === msg.id
+                                            ) {
+                                                return { conversationId, messageId: null };
+                                            }
+                                            return { conversationId, messageId: msg.id };
+                                        });
                                     }}
                                     style={{
                                         background: isMe ? 'var(--primary)' : 'var(--surface-highlight)',
@@ -391,7 +403,7 @@ export default function Chat({
                                     </ReactMarkdown>
                                     {reactionPickerMessageId === msg.id && (
                                         <ReactionPicker
-                                            onClose={() => setReactionPickerMessageId(null)}
+                                            onClose={() => setReactionPickerState({ conversationId, messageId: null })}
                                             onSelect={(emoji) => handleToggleReaction(msg.id, emoji)}
                                         />
                                     )}

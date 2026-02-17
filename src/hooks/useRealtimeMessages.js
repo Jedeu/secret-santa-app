@@ -67,24 +67,21 @@ export { updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
  * @returns {string | null}
  */
 export function useOtherUserLastRead(otherUserId, conversationId) {
-    const [otherLastReadAt, setOtherLastReadAt] = useState(null);
+    const hasConversation = Boolean(otherUserId && conversationId);
+    const lastReadKey = hasConversation ? `${otherUserId}_${conversationId}` : null;
+    const [otherLastReadState, setOtherLastReadState] = useState({ key: null, value: null });
 
     useEffect(() => {
-        if (!otherUserId || !conversationId) {
-            setOtherLastReadAt(null);
+        if (!hasConversation) {
             return undefined;
         }
 
         let isMounted = true;
-        const cached = getCachedTimestamp(otherUserId, conversationId);
-        if (cached !== undefined) {
-            setOtherLastReadAt(cached);
-        }
 
         fetchLastRead(otherUserId, conversationId)
             .then((value) => {
                 if (isMounted) {
-                    setOtherLastReadAt(value);
+                    setOtherLastReadState({ key: lastReadKey, value });
                 }
             })
             .catch((error) => {
@@ -93,7 +90,7 @@ export function useOtherUserLastRead(otherUserId, conversationId) {
 
         const unsubscribe = subscribeToLastRead(otherUserId, conversationId, (value) => {
             if (isMounted) {
-                setOtherLastReadAt(value);
+                setOtherLastReadState({ key: lastReadKey, value });
             }
         });
 
@@ -101,9 +98,18 @@ export function useOtherUserLastRead(otherUserId, conversationId) {
             isMounted = false;
             unsubscribe();
         };
-    }, [otherUserId, conversationId]);
+    }, [hasConversation, otherUserId, conversationId, lastReadKey]);
 
-    return otherLastReadAt;
+    if (!hasConversation) {
+        return null;
+    }
+
+    if (otherLastReadState.key === lastReadKey) {
+        return otherLastReadState.value;
+    }
+
+    const cached = getCachedTimestamp(otherUserId, conversationId);
+    return cached !== undefined ? cached : null;
 }
 
 /**

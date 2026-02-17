@@ -92,7 +92,9 @@ describe('RealtimeMessagesContext', () => {
         let snapshotCallback;
         mockOnSnapshot.mockImplementation((...args) => {
             const { callback } = extractSnapshotCallback(args);
-            snapshotCallback = callback;
+            if (!snapshotCallback) {
+                snapshotCallback = callback;
+            }
             return jest.fn();
         });
 
