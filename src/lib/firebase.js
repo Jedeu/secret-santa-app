@@ -38,3 +38,4 @@ if (!admin.apps.length) {
 
 export const firestore = admin.apps.length ? admin.firestore() : null;
 export const auth = admin.apps.length ? admin.auth() : null;
+export const messaging = admin.apps.length ? admin.messaging() : null;

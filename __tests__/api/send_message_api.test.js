@@ -1,5 +1,6 @@
 import { POST } from '@/app/api/messages/send/route';
 import { auth as adminAuth, firestore } from '@/lib/firebase';
+import { sendIncomingMessagePush } from '@/lib/push-server';
 
 jest.mock('@/lib/firebase', () => ({
     auth: {
@@ -8,6 +9,10 @@ jest.mock('@/lib/firebase', () => ({
     firestore: {
         collection: jest.fn()
     }
+}));
+
+jest.mock('@/lib/push-server', () => ({
+    sendIncomingMessagePush: jest.fn()
 }));
 
 function createRequest({ token = null, body = {} } = {}) {
@@ -27,6 +32,12 @@ function createRequest({ token = null, body = {} } = {}) {
 describe('POST /api/messages/send', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        sendIncomingMessagePush.mockResolvedValue({
+            totalTokens: 0,
+            successCount: 0,
+            failureCount: 0,
+            cleanedTokenCount: 0
+        });
     });
 
     test('returns 401 when auth header is missing', async () => {
@@ -132,5 +143,61 @@ describe('POST /api/messages/send', () => {
                 conversationId: 'santa_real-user-id_recipient_user-2'
             })
         );
+        expect(sendIncomingMessagePush).toHaveBeenCalledWith({
+            toUserId: 'user-2',
+            conversationId: 'santa_real-user-id_recipient_user-2'
+        });
+    });
+
+    test('returns success when push dispatch fails (fail-open)', async () => {
+        adminAuth.verifyIdToken.mockResolvedValue({ email: 'jed.piezas@gmail.com' });
+        sendIncomingMessagePush.mockRejectedValue(new Error('FCM temporarily unavailable'));
+
+        const recipientGet = jest.fn().mockResolvedValue({ exists: true });
+        const addMessage = jest.fn().mockResolvedValue({ id: 'message-doc' });
+
+        const usersCollection = {
+            where: jest.fn(() => ({
+                limit: jest.fn(() => ({
+                    get: jest.fn().mockResolvedValue({
+                        empty: false,
+                        docs: [{ data: () => ({ id: 'real-user-id', email: 'jed.piezas@gmail.com' }) }]
+                    })
+                }))
+            })),
+            doc: jest.fn(() => ({
+                get: recipientGet
+            }))
+        };
+
+        const messagesCollection = {
+            add: addMessage
+        };
+
+        firestore.collection.mockImplementation((name) => {
+            if (name === 'users') return usersCollection;
+            if (name === 'messages') return messagesCollection;
+            throw new Error(`Unexpected collection ${name}`);
+        });
+
+        const req = createRequest({
+            token: 'token',
+            body: {
+                toId: 'user-2',
+                content: 'Hello from server route',
+                conversationId: 'santa_real-user-id_recipient_user-2',
+            }
+        });
+
+        const res = await POST(req);
+        const data = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(data.success).toBe(true);
+        expect(addMessage).toHaveBeenCalledTimes(1);
+        expect(sendIncomingMessagePush).toHaveBeenCalledWith({
+            toUserId: 'user-2',
+            conversationId: 'santa_real-user-id_recipient_user-2'
+        });
     });
 });
