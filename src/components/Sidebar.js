@@ -61,6 +61,7 @@ function SidebarItem({ active, onClick, children, unreadCount, icon }) {
  * @param {Object} props.unreadCounts - { recipient: number, santa: number }
  * @param {Function} props.onSignOut - () => void
  * @param {Function} props.onReset - () => void
+ * @param {React.ReactNode} [props.pushControl] - Optional push notification toggle UI
  */
 export default function Sidebar({
     currentUser,
@@ -68,7 +69,8 @@ export default function Sidebar({
     onTabChange,
     unreadCounts,
     onSignOut,
-    onReset
+    onReset,
+    pushControl
 }) {
     return (
         <div style={{
@@ -156,26 +158,30 @@ export default function Sidebar({
                 padding: '8px 24px 40px', // Bottom padding matches chat card padding + Tip text height
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between'
+                justifyContent: 'space-between',
+                gap: '10px'
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        background: 'var(--primary)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontSize: '14px',
-                        fontWeight: 'bold'
-                    }}>
-                        {currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '50%',
+                            background: 'var(--primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'white',
+                            fontSize: '14px',
+                            fontWeight: 'bold'
+                        }}>
+                            {currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
+                        </div>
+                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            {currentUser?.name}
+                        </span>
                     </div>
-                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        {currentUser?.name}
-                    </span>
+                    {pushControl}
                 </div>
                 <button
                     onClick={onSignOut}

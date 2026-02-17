@@ -15,6 +15,8 @@ import AdminPanel from '@/components/AdminPanel';
 import TabNavigation from '@/components/TabNavigation';
 import ChatTabs from '@/components/ChatTabs';
 import Sidebar from '@/components/Sidebar';
+import PushNotificationsControl from '@/components/PushNotificationsControl';
+import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 
 export default function Home() {
     // Authentication state
@@ -99,6 +101,7 @@ export default function Home() {
 
     return (
         <AuthGuard isLoading={isLoading} currentUser={currentUser} authError={authError}>
+            <PushNotificationsRuntime currentUser={currentUser} />
             {needsRecipient ? (
                 <RecipientSelector
                     currentUser={currentUser}
@@ -115,6 +118,7 @@ export default function Home() {
                             activeTab={activeTab}
                             onTabChange={setActiveTab}
                             unreadCounts={unreadCounts}
+                            pushControl={<PushNotificationsControl compact />}
                             onSignOut={() => firebaseSignOut(clientAuth)}
                             onReset={refreshUser}
                         />
@@ -126,6 +130,7 @@ export default function Home() {
                         <div className="mobile-only mobile-header">
                             <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' 👋'}</h1>
                             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <PushNotificationsControl compact />
                                 <AdminPanel userEmail={currentUser?.email} variant="compact" onResetComplete={refreshUser} />
                                 <button
                                     onClick={() => firebaseSignOut(clientAuth)}
