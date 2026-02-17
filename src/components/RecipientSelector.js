@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { collection, query, where, getDocs, limit, doc, runTransaction } from 'firebase/firestore';
 import { firestore } from '@/lib/firebase-client';
 import { signOut as firebaseSignOut } from 'firebase/auth';
@@ -19,10 +19,13 @@ import { isAdmin } from '@/lib/config';
 export default function RecipientSelector({ currentUser, availableRecipients, onComplete, onReset }) {
     const [recipientInput, setRecipientInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const submitLockRef = useRef(false);
 
     const handleSetRecipient = async (e) => {
         e.preventDefault();
-        if (!recipientInput) return;
+        if (!recipientInput || submitLockRef.current) return;
+
+        submitLockRef.current = true;
         setLoading(true);
 
         try {
@@ -105,6 +108,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             }
         } finally {
             setLoading(false);
+            submitLockRef.current = false;
         }
     };
 

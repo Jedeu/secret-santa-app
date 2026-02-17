@@ -141,4 +141,41 @@ describe('RecipientSelector transactional claim', () => {
             expect(global.alert).toHaveBeenCalledWith('This recipient has already been selected by someone else.');
         });
     });
+
+    it('guards against fast double-submit before loading state propagates', async () => {
+        const recipientRef = { id: 'user-2', path: 'users/user-2' };
+        mockGetDocs.mockResolvedValue({
+            empty: false,
+            docs: [
+                {
+                    ref: recipientRef,
+                    id: 'user-2',
+                    data: () => ({ id: 'user-2', gifterId: null })
+                }
+            ]
+        });
+
+        let resolveTransaction;
+        mockRunTransaction.mockImplementation(() => new Promise((resolve) => {
+            resolveTransaction = resolve;
+        }));
+
+        render(
+            <RecipientSelector
+                currentUser={currentUser}
+                availableRecipients={['Louis']}
+            />
+        );
+
+        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Louis' } });
+        const continueButton = screen.getByRole('button', { name: 'Continue' });
+
+        fireEvent.click(continueButton);
+        fireEvent.click(continueButton);
+
+        await waitFor(() => expect(mockRunTransaction).toHaveBeenCalledTimes(1));
+
+        resolveTransaction();
+        await waitFor(() => expect(continueButton).not.toBeDisabled());
+    });
 });
