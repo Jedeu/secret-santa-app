@@ -21,9 +21,9 @@
     "emoji-picker-react": "^4.15.1",
     "firebase": "^12.6.0",
     "firebase-admin": "^13.6.0",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "uuid": "^10.0.0"
@@ -44,7 +44,9 @@
     "jest-environment-jsdom": "^30.2.0",
     "jest-environment-node": "^30.2.0",
     "node-mocks-http": "^1.17.2",
-    "ts-jest": "^29.4.5",
     "webpack": "^5.105.1"
+  },
+  "engines": {
+    "node": ">=20.10.0 <21"
   }
 }
