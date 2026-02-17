@@ -4,7 +4,11 @@ import { signOut as firebaseSignOut } from 'firebase/auth';
 import { collection, getDocs } from 'firebase/firestore';
 import { clientAuth, firestore } from '@/lib/firebase-client';
 import { useUser } from '@/hooks/useUser';
-import { useRealtimeUnreadCounts, useRealtimeAllMessages } from '@/hooks/useRealtimeMessages';
+import {
+    useRealtimeUnreadCounts,
+    useRealtimeAllMessages,
+    useRealtimeAllMessagesLoading
+} from '@/hooks/useRealtimeMessages';
 import { getConversationId, filterMessages } from '@/lib/message-utils';
 import { getParticipantNames } from '@/lib/participants';
 
@@ -18,6 +22,7 @@ import Sidebar from '@/components/Sidebar';
 import PushNotificationsControl from '@/components/PushNotificationsControl';
 import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 import MessageOutboxRuntime from '@/components/MessageOutboxRuntime';
+import NotificationSoundRuntime from '@/components/NotificationSoundRuntime';
 
 export default function Home() {
     // Authentication state
@@ -27,9 +32,17 @@ export default function Home() {
     const [allUsers, setAllUsers] = useState([]);
     const [availableRecipients, setAvailableRecipients] = useState([]);
     const [activeTab, setActiveTab] = useState('recipient');
+    const [soundEnabled, setSoundEnabled] = useState(() => {
+        if (typeof window === 'undefined') {
+            return true;
+        }
+
+        return window.localStorage.getItem('soundEnabled') !== 'false';
+    });
 
     // Real-time message data
     const allMessages = useRealtimeAllMessages(!!currentUser);
+    const allMessagesLoading = useRealtimeAllMessagesLoading();
     const unreadData = useRealtimeUnreadCounts(
         currentUser?.id,
         currentUser?.recipientId,
@@ -100,10 +113,24 @@ export default function Home() {
     // Check if user needs to set recipient
     const needsRecipient = currentUser && !currentUser.recipientId;
 
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        window.localStorage.setItem('soundEnabled', soundEnabled ? 'true' : 'false');
+    }, [soundEnabled]);
+
     return (
         <AuthGuard isLoading={isLoading} currentUser={currentUser} authError={authError}>
             <PushNotificationsRuntime currentUser={currentUser} />
             <MessageOutboxRuntime currentUser={currentUser} />
+            <NotificationSoundRuntime
+                soundEnabled={soundEnabled}
+                currentUserId={currentUser?.id}
+                allMessages={allMessages}
+                allMessagesLoading={allMessagesLoading}
+            />
             {needsRecipient ? (
                 <RecipientSelector
                     currentUser={currentUser}
@@ -132,6 +159,28 @@ export default function Home() {
                         <div className="mobile-only mobile-header">
                             <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' 👋'}</h1>
                             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setSoundEnabled(prev => !prev)}
+                                    aria-label={soundEnabled ? 'Mute notification sound' : 'Enable notification sound'}
+                                    title={soundEnabled ? 'Mute notification sound' : 'Enable notification sound'}
+                                    style={{
+                                        background: 'transparent',
+                                        border: '1px solid var(--border)',
+                                        color: 'var(--foreground)',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        width: '32px',
+                                        height: '32px',
+                                        lineHeight: 1,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '16px'
+                                    }}
+                                >
+                                    {soundEnabled ? '🔊' : '🔇'}
+                                </button>
                                 <PushNotificationsControl compact />
                                 <AdminPanel userEmail={currentUser?.email} variant="compact" onResetComplete={refreshUser} />
                                 <button

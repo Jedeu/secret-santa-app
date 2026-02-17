@@ -28,6 +28,7 @@ jest.mock('../src/components/PublicFeed', () => {
 // Mock hooks to avoid real Firebase calls
 jest.mock('../src/hooks/useRealtimeMessages', () => ({
     useRealtimeAllMessages: jest.fn(() => []), // Return empty array by default
+    useRealtimeAllMessagesLoading: jest.fn(() => false),
     useRealtimeUnreadCounts: jest.fn(() => ({ recipientUnread: 0, santaUnread: 0 }))
 }));
 
