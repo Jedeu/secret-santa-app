@@ -2,12 +2,16 @@
  * Tests for ensureAllParticipants function in firestore.js
  */
 
-import { ensureAllParticipants, getAllUsers, getUserByEmail } from '@/lib/firestore';
+import { ensureAllParticipants, getAllUsers, getUserByEmail, resetDatabase } from '@/lib/firestore';
 import { PARTICIPANTS } from '@/lib/participants';
 
 const mockParticipants = PARTICIPANTS;
 
 describe('ensureAllParticipants', () => {
+    beforeEach(async () => {
+        await resetDatabase();
+    });
+
     test('should create all participants if they do not exist', async () => {
         await ensureAllParticipants(mockParticipants);
 
