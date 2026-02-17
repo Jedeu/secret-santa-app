@@ -7,7 +7,8 @@ import { updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
 // Mock dependencies
 jest.mock('../../src/hooks/useRealtimeMessages', () => ({
     useRealtimeMessages: jest.fn(),
-    updateLastReadTimestamp: jest.fn()
+    updateLastReadTimestamp: jest.fn(),
+    useOtherUserLastRead: jest.fn(() => null)
 }));
 
 jest.mock('../../src/lib/firebase-client', () => ({
