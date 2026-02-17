@@ -36,6 +36,7 @@ describe('next.config PWA integration', () => {
             disable: false,
             register: true,
             skipWaiting: true,
+            customWorkerSrc: 'worker',
         });
 
         expect(config.reactStrictMode).toBe(true);
@@ -52,6 +53,7 @@ describe('next.config PWA integration', () => {
             disable: true,
             register: true,
             skipWaiting: true,
+            customWorkerSrc: 'worker',
         });
     });
 });
