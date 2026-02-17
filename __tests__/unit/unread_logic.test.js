@@ -71,12 +71,9 @@ describe('Unread Count Optimization', () => {
             expect(mockGetLastRead).toHaveBeenCalled();
         });
 
-        // Initial subscription count (1 for allMessages from provider)
-        // Note: usage of useRealtimeUnreadCounts doesn't create NEW listeners anymore!
-        // It uses the Context's allMessages listener.
-        // So strict listener count check on the Hook is irrelevant if the Hook doesn't create listeners.
-        // But the Provider creates ONE.
-        expect(onSnapshot).toHaveBeenCalledTimes(1);
+        // Provider creates two listeners (messages + reactions).
+        // The hook itself should not create additional listeners.
+        expect(onSnapshot).toHaveBeenCalledTimes(2);
         const initialCallCount = onSnapshot.mock.calls.length;
 
         // Simulate user marking messages as read
@@ -97,7 +94,9 @@ describe('Unread Count Optimization', () => {
 
         let snapshotCallback;
         onSnapshot.mockImplementation((query, options, cb) => {
-            snapshotCallback = cb; // Capture callback
+            if (!snapshotCallback) {
+                snapshotCallback = cb; // First listener is messages
+            }
             return jest.fn();
         });
 

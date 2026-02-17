@@ -114,7 +114,9 @@ describe('Realtime Hooks with Context', () => {
             let snapshotCallback;
             mockOnSnapshot.mockImplementation((...args) => {
                 const { callback } = extractSnapshotCallback(args);
-                snapshotCallback = callback;
+                if (!snapshotCallback) {
+                    snapshotCallback = callback;
+                }
                 return jest.fn();
             });
 
@@ -186,24 +188,19 @@ describe('Realtime Hooks with Context', () => {
             mockOrderBy.mockImplementation((field, dir) => ({ type: 'orderBy', field, dir }));
 
 
-            // Capture callbacks for different listeners
+            // Capture callback for provider messages listener
             let allMessagesCallback;
-            let recipientCallback;
-            let santaCallback;
 
             mockOnSnapshot.mockImplementation((queryObj, ...args) => {
                 const { callback } = extractSnapshotCallback([queryObj, ...args]);
 
-                // Identify based on query structure (mocked above)
-                if (queryObj && queryObj.constraints && queryObj.constraints.some(c => c.type === 'orderBy')) {
-                    // This is the provider's 'allMessages' listener (has orderBy)
+                // Provider messages listener is the orderBy(timestamp, desc) query.
+                if (
+                    queryObj &&
+                    queryObj.constraints &&
+                    queryObj.constraints.some((c) => c.type === 'orderBy' && c.field === 'timestamp')
+                ) {
                     allMessagesCallback = callback;
-                } else if (queryObj && queryObj.constraints && queryObj.constraints.some(c => c.type === 'where' && c.value === recipientId)) {
-                    // Recipient listener
-                    recipientCallback = callback;
-                } else if (queryObj && queryObj.constraints && queryObj.constraints.some(c => c.type === 'where' && c.value === gifterId)) {
-                    // Santa listener
-                    santaCallback = callback;
                 }
 
                 return jest.fn();
@@ -219,28 +216,6 @@ describe('Realtime Hooks with Context', () => {
                         size: mockMessages.length,
                         metadata: { fromCache: false },
                         docChanges: () => mockMessages.map(() => ({}))
-                    });
-                }
-            });
-
-            // Trigger RECIPIENT listener (to update recipientMessagesRef - although logic actually uses allMessages for recipient!)
-            // Wait, previous logic for recipient used allMessages? 
-            // Let's check implementation:
-            // Recipient count uses `allMessages` filter.
-            // Santa count uses `santaMessagesRef` (from its own listener).
-
-            // So we need to trigger santaCallback to update santaMessagesRef.
-            // And we need to trigger allMessagesCallback to update allMessages for recipient count.
-
-            // Trigger SANTA listener
-            await act(async () => {
-                const santaDocs = mockMessages.filter(m => m.fromId === gifterId);
-                if (santaCallback) {
-                    santaCallback({
-                        forEach: (cb) => santaDocs.forEach(msg => cb({ data: () => msg })),
-                        size: santaDocs.length,
-                        metadata: { fromCache: false },
-                        docChanges: () => santaDocs.map(() => ({}))
                     });
                 }
             });
@@ -277,7 +252,7 @@ describe('Realtime Hooks with Context', () => {
             let allMessagesCallback;
             mockOnSnapshot.mockImplementation((queryObj, ...args) => {
                 const { callback } = extractSnapshotCallback([queryObj, ...args]);
-                if (queryObj?.constraints?.some(c => c.type === 'orderBy')) {
+                if (queryObj?.constraints?.some(c => c.type === 'orderBy' && c.field === 'timestamp')) {
                     allMessagesCallback = callback;
                 }
                 return jest.fn();

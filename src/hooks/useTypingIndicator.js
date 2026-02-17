@@ -22,11 +22,10 @@ function isTypingRecently(typingAt, nowMs) {
 
 export function useTypingIndicator(conversationId, otherUserId) {
     const [typingAt, setTypingAt] = useState(null);
-    const [nowTick, setNowTick] = useState(Date.now());
+    const [nowTick, setNowTick] = useState(0);
 
     useEffect(() => {
         if (!firestore || !conversationId || !otherUserId) {
-            setTypingAt(null);
             return undefined;
         }
 
@@ -55,6 +54,10 @@ export function useTypingIndicator(conversationId, otherUserId) {
 
         return () => clearInterval(intervalId);
     }, []);
+
+    if (!conversationId || !otherUserId) {
+        return false;
+    }
 
     return isTypingRecently(typingAt, nowTick);
 }

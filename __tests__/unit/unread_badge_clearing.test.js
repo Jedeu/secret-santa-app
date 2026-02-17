@@ -93,8 +93,11 @@ describe('Unread Badge Clearing', () => {
 
         // Mock onSnapshot to capture callbacks
         onSnapshot.mockImplementation((query, options, callback) => {
-            // The provider creates the only listener we care about
-            providerSnapshotCallback = callback;
+            // Provider creates messages + reactions listeners.
+            // First callback corresponds to messages.
+            if (!providerSnapshotCallback) {
+                providerSnapshotCallback = callback;
+            }
             return jest.fn(); // unsubscribe function
         });
     });
