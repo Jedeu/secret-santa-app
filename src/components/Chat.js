@@ -4,9 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
 import { updateLastReadTimestamp } from '@/hooks/useRealtimeMessages';
-import { firestore } from '@/lib/firebase-client';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { v4 as uuidv4 } from 'uuid';
+import { clientAuth } from '@/lib/firebase-client';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -114,17 +112,37 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         if (!newMessage.trim()) return;
 
         try {
-            // Write directly to Firestore for instant updates
-            const messageData = {
-                id: uuidv4(),
-                fromId: currentUser.id,
-                toId: otherUser.id,
-                content: newMessage.trim(),
-                timestamp: new Date().toISOString(), // Use ISO string for consistency
-                conversationId: conversationId // Add conversationId for routing
-            };
+            const token = await clientAuth?.currentUser?.getIdToken?.();
+            if (!token) {
+                throw new Error('Not authenticated. Please sign in again.');
+            }
 
-            await addDoc(collection(firestore, 'messages'), messageData);
+            const response = await fetch('/api/messages/send', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    toId: otherUser.id,
+                    content: newMessage.trim(),
+                    conversationId,
+                }),
+            });
+
+            if (!response.ok) {
+                let errorMessage = 'Failed to send message. Please try again.';
+                try {
+                    const errorData = await response.json();
+                    if (errorData?.error) {
+                        errorMessage = errorData.error;
+                    }
+                } catch {
+                    // Ignore parse error and keep default message
+                }
+                throw new Error(errorMessage);
+            }
+
             setNewMessage('');
             // Force scroll to bottom immediately after sending
             scrollToBottom('auto');
