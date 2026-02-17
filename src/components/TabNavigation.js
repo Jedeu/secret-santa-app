@@ -3,7 +3,7 @@
 /**
  * TabButton - Individual tab button with optional unread badge
  */
-function TabButton({ active, onClick, children, unreadCount }) {
+function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
     return (
         <button
             onClick={onClick}
@@ -27,6 +27,10 @@ function TabButton({ active, onClick, children, unreadCount }) {
             {unreadCount > 0 && (
                 <span
                     data-testid="unread-badge"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    aria-label={`${badgeLabel}: ${unreadCount} unread messages`}
                     style={{
                         background: 'var(--primary)',
                         color: 'white',
@@ -70,6 +74,7 @@ export default function TabNavigation({ activeTab, onTabChange, unreadCounts }) 
                 active={activeTab === 'recipient'}
                 onClick={() => onTabChange('recipient')}
                 unreadCount={unreadCounts?.recipient || 0}
+                badgeLabel="Recipient"
             >
                 {'\ud83c\udf81 Recipient'}
             </TabButton>
@@ -77,6 +82,7 @@ export default function TabNavigation({ activeTab, onTabChange, unreadCounts }) 
                 active={activeTab === 'santa'}
                 onClick={() => onTabChange('santa')}
                 unreadCount={unreadCounts?.santa || 0}
+                badgeLabel="Santa"
             >
                 {'\ud83c\udf85 Santa'}
             </TabButton>

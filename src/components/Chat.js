@@ -225,7 +225,12 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                         borderRadius: '12px',
                         minWidth: '20px',
                         textAlign: 'center'
-                    }}>
+                    }}
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                        aria-label={`${unreadCount} unread messages`}
+                    >
                         {unreadCount}
                     </span>
                 )}

@@ -3,6 +3,7 @@
  */
 import { render, screen, fireEvent } from '@testing-library/react';
 import Sidebar from '@/components/Sidebar';
+import TabNavigation from '@/components/TabNavigation';
 import * as config from '@/lib/config';
 
 // Mock the isAdmin function
@@ -66,6 +67,8 @@ describe('Sidebar Component', () => {
         render(<Sidebar {...defaultProps} unreadCounts={{ recipient: 3, santa: 5 }} />);
         expect(screen.getByText('3')).toBeInTheDocument();
         expect(screen.getByText('5')).toBeInTheDocument();
+        expect(screen.getByLabelText('Recipient: 3 unread messages')).toHaveAttribute('aria-live', 'polite');
+        expect(screen.getByLabelText('Santa: 5 unread messages')).toHaveAttribute('aria-live', 'polite');
     });
 
     test('hides unread counts when 0', () => {
@@ -94,5 +97,18 @@ describe('Sidebar Component', () => {
         const signOutButton = screen.getByRole('button', { name: /sign out/i });
         fireEvent.click(signOutButton);
         expect(mockOnSignOut).toHaveBeenCalled();
+    });
+
+    test('tab navigation unread badges announce updates with aria-live', () => {
+        render(
+            <TabNavigation
+                activeTab="recipient"
+                onTabChange={jest.fn()}
+                unreadCounts={{ recipient: 2, santa: 1 }}
+            />
+        );
+
+        expect(screen.getByLabelText('Recipient: 2 unread messages')).toHaveAttribute('aria-live', 'polite');
+        expect(screen.getByLabelText('Santa: 1 unread messages')).toHaveAttribute('aria-live', 'polite');
     });
 });

@@ -17,7 +17,7 @@ Last updated: 2026-02-08
 | BUG-9 | Completed | Updated `/Users/jed.piezas/Desktop/secret-santa-app/src/components/Chat.js` auto-scroll logic to keep the viewport pinned for incoming messages only when the user is already near the bottom (while preserving instant scroll for own sends). Added regression coverage in `/Users/jed.piezas/Desktop/secret-santa-app/__tests__/unit/Chat_unread.test.js`. Verified with `npx jest __tests__/unit/Chat_unread.test.js __tests__/integration_flows.test.js __tests__/unit/PublicFeed_lastViewed_sync.test.js --runInBand`. |
 | BUG-10 | Completed | Replaced blocking `alert()` calls with non-blocking toast notifications via shared toast context in `/Users/jed.piezas/Desktop/secret-santa-app/src/components/ClientProviders.js`, and migrated usages in `/Users/jed.piezas/Desktop/secret-santa-app/src/components/RecipientSelector.js`, `/Users/jed.piezas/Desktop/secret-santa-app/src/components/AdminPanel.js`, `/Users/jed.piezas/Desktop/secret-santa-app/src/components/AuthGuard.js`, and `/Users/jed.piezas/Desktop/secret-santa-app/src/components/Chat.js`. Updated `/Users/jed.piezas/Desktop/secret-santa-app/__tests__/unit/RecipientSelector.test.js` for toast assertions. Verified with `npx jest __tests__/unit/RecipientSelector.test.js __tests__/integration_flows.test.js __tests__/unit/Chat_unread.test.js --runInBand`. |
 | BUG-11 | Completed | Added explicit `aria-label="Add emoji"` on the emoji picker trigger button in `/Users/jed.piezas/Desktop/secret-santa-app/src/components/Chat.js` and added accessibility regression coverage in `/Users/jed.piezas/Desktop/secret-santa-app/__tests__/unit/Chat_unread.test.js`. Verified with `npx jest __tests__/unit/Chat_unread.test.js --runInBand`. |
-| BUG-12 | Not started | Unread badges `aria-live` support still pending. |
+| BUG-12 | Completed | Added live-region semantics to unread badges in `/Users/jed.piezas/Desktop/secret-santa-app/src/components/Sidebar.js`, `/Users/jed.piezas/Desktop/secret-santa-app/src/components/TabNavigation.js`, and `/Users/jed.piezas/Desktop/secret-santa-app/src/components/Chat.js` (`role="status"`, `aria-live="polite"`, `aria-atomic="true"` with descriptive `aria-label`). Added accessibility assertions in `/Users/jed.piezas/Desktop/secret-santa-app/__tests__/unit/Sidebar.test.js` and `/Users/jed.piezas/Desktop/secret-santa-app/__tests__/unit/Chat_unread.test.js`. Verified with `npx jest __tests__/unit/Sidebar.test.js __tests__/unit/Chat_unread.test.js __tests__/integration_flows.test.js --runInBand`. |
 
 ## Part 2: Mobile PWA Progress
 
@@ -31,10 +31,9 @@ Last updated: 2026-02-08
 
 ## Security Notes (Context-Aware)
 
-- Current trust model (8 known users via Firebase Auth) reduces practical risk, but `firestore.rules` are still technically permissive for any authenticated user.
-- Easy hardening opportunity (low effort): restrict access to known user IDs/emails in rules and lock admin-only operations by admin identity checks.
+- `firestore.rules` were hardened under BUG-4 to remove global authenticated read/write and enforce scoped rules for `users`, `messages`, and `lastRead`.
+- Message writes now flow through server-validated API (`/api/messages/send`) under BUG-7, reducing client-side sender-forgery risk.
 
 ## Operational Notes
 
-- Git/PR flow from this agent session has had intermittent permission/escalation interruptions.
-- `gh` CLI was installed, but this runtime reports an invalid token in `gh auth status`; PR creation has been handled via branch push + user-side PR creation when needed.
+- Part 1 has been implemented as chained PRs from BUG-3 through BUG-12.
