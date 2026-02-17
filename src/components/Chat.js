@@ -321,6 +321,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                         <button
                             type="button"
                             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                            aria-label="Add emoji"
                             style={{
                                 position: 'absolute',
                                 right: '8px',

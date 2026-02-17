@@ -180,4 +180,19 @@ describe('Chat Component Unread Logic', () => {
 
         expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
     });
+
+    it('has an accessible aria-label on emoji button', () => {
+        const { getByRole } = render(
+            <Chat
+                currentUser={currentUser}
+                otherUser={otherUser}
+                isSantaChat={false}
+                unreadCount={0}
+                messages={initialMessages}
+                conversationId={conversationId}
+            />
+        );
+
+        expect(getByRole('button', { name: 'Add emoji' })).toBeInTheDocument();
+    });
 });
