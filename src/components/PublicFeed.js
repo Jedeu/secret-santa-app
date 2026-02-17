@@ -2,6 +2,69 @@
 import { useState, useEffect } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp } from '@/lib/lastReadClient';
 
+function parseConversationId(conversationId) {
+    if (!conversationId || typeof conversationId !== 'string') return null;
+    const parts = conversationId.split('_recipient_');
+    if (parts.length !== 2 || !parts[0].startsWith('santa_')) return null;
+
+    return {
+        santaId: parts[0].replace('santa_', ''),
+        recipientId: parts[1],
+    };
+}
+
+function getConversationId(santaId, recipientId) {
+    if (!santaId || !recipientId) return null;
+    return `santa_${santaId}_recipient_${recipientId}`;
+}
+
+function resolveLegacyRole(message, fromUser, toUser) {
+    if (typeof message.isSantaMsg === 'boolean') {
+        return { isSantaMsg: message.isSantaMsg, isAmbiguous: false };
+    }
+
+    const fromIsSantaToTo = fromUser?.recipientId === message.toId;
+    const toIsSantaToFrom = toUser?.recipientId === message.fromId;
+
+    if (fromIsSantaToTo && !toIsSantaToFrom) {
+        return { isSantaMsg: true, isAmbiguous: false };
+    }
+    if (!fromIsSantaToTo && toIsSantaToFrom) {
+        return { isSantaMsg: false, isAmbiguous: false };
+    }
+
+    // Legacy rows in mutual cycles are directionally ambiguous.
+    // Keep sender identity visible instead of forcing a Santa label.
+    return { isSantaMsg: false, isAmbiguous: true };
+}
+
+function resolveLegacyConversation(message, role) {
+    if (!message?.fromId || !message?.toId) {
+        return {
+            conversationId: `legacy_${message?.id || Date.now()}`,
+            recipientId: message?.toId || null,
+            santaId: message?.fromId || null,
+        };
+    }
+
+    if (!role.isAmbiguous) {
+        const santaId = role.isSantaMsg ? message.fromId : message.toId;
+        const recipientId = role.isSantaMsg ? message.toId : message.fromId;
+        return {
+            conversationId: getConversationId(santaId, recipientId),
+            recipientId,
+            santaId,
+        };
+    }
+
+    const [santaId, recipientId] = [message.fromId, message.toId].sort();
+    return {
+        conversationId: getConversationId(santaId, recipientId),
+        recipientId,
+        santaId,
+    };
+}
+
 export default function PublicFeed({ messages = [], allUsers = [], userId }) {
     const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
     const [lastViewed, setLastViewed] = useState(() => {
@@ -18,49 +81,36 @@ export default function PublicFeed({ messages = [], allUsers = [], userId }) {
         }
         return {};
     });
+    const usersById = new Map(allUsers.map(user => [user.id, user]));
 
     // Group messages by conversationId to ensure threads are consolidated correctly.
     const threads = {};
     messages.forEach(rawMsg => {
         // Resolve users to determine direction and names
-        const fromUser = allUsers.find(u => u.id === rawMsg.fromId);
-        const toUser = allUsers.find(u => u.id === rawMsg.toId);
+        const fromUser = usersById.get(rawMsg.fromId);
+        const toUser = usersById.get(rawMsg.toId);
 
-        let isSantaMsg = rawMsg.isSantaMsg;
+        const parsedConversation = parseConversationId(rawMsg.conversationId);
+        const legacyRole = parsedConversation ? null : resolveLegacyRole(rawMsg, fromUser, toUser);
+        const legacyConversation = parsedConversation ? null : resolveLegacyConversation(rawMsg, legacyRole);
 
-        // If message has conversationId, use it to determine role definitively
-        if (rawMsg.conversationId) {
-            // conversationId format: santa_ID_recipient_ID
-            const parts = rawMsg.conversationId.split('_recipient_');
-            if (parts.length === 2) {
-                const santaPart = parts[0]; // santa_ID
-                const santaId = santaPart.replace('santa_', '');
-
-                // If the sender is the Santa of this conversation, it's a Santa message
-                isSantaMsg = rawMsg.fromId === santaId;
-            }
-        }
-
-        // Fallback: If isSantaMsg is still undefined (legacy), derive it from user relationships
-        // Note: This fallback is ambiguous in cycles (A->B and B->A), but it's the best we can do for legacy data.
-        if (isSantaMsg === undefined) {
-            if (fromUser && fromUser.recipientId === rawMsg.toId) {
-                isSantaMsg = true; // Santa -> Recipient
-            } else if (toUser && toUser.gifterId === rawMsg.fromId) {
-                isSantaMsg = true; // Santa -> Recipient (checked via recipient)
-            } else {
-                isSantaMsg = false; // Recipient -> Santa
-            }
-        }
+        const isSantaMsg = parsedConversation
+            ? rawMsg.fromId === parsedConversation.santaId
+            : legacyRole.isSantaMsg;
+        const isAmbiguousLegacy = !parsedConversation && legacyRole.isAmbiguous;
 
         let fromName = rawMsg.fromName;
         let toName = rawMsg.toName;
 
         if (!fromName) {
-            fromName = isSantaMsg ? 'Secret Santa' : (fromUser?.name || 'Unknown');
+            fromName = (isSantaMsg && !isAmbiguousLegacy)
+                ? 'Secret Santa'
+                : (fromUser?.name || 'Unknown');
         }
         if (!toName) {
-            toName = isSantaMsg ? (toUser?.name || 'Unknown') : 'Secret Santa';
+            toName = (isSantaMsg && !isAmbiguousLegacy)
+                ? (toUser?.name || 'Unknown')
+                : ((isAmbiguousLegacy ? toUser?.name : 'Secret Santa') || 'Unknown');
         }
 
         const msg = {
@@ -73,31 +123,12 @@ export default function PublicFeed({ messages = [], allUsers = [], userId }) {
         let threadId;
         let recipientName;
 
-        if (msg.conversationId) {
-            // New logic: Use conversationId directly
+        if (parsedConversation) {
             threadId = msg.conversationId;
-
-            // Extract recipientId from conversationId (format: santa_X_recipient_Y)
-            const parts = msg.conversationId.split('_recipient_');
-            if (parts.length === 2) {
-                const recipientId = parts[1];
-                const recipientUser = allUsers.find(u => u.id === recipientId);
-                recipientName = recipientUser?.name || 'Unknown';
-            } else {
-                recipientName = 'Unknown';
-            }
+            recipientName = usersById.get(parsedConversation.recipientId)?.name || 'Unknown';
         } else {
-            // Legacy logic: Group by Recipient's ID
-            if (msg.isSantaMsg) {
-                threadId = msg.toId;
-                recipientName = msg.toName;
-            } else {
-                threadId = msg.fromId;
-                recipientName = msg.fromName;
-            }
-            // Attempt to normalize legacy threadId to match new format if possible
-            // But without knowing for sure who is Santa/Recipient in a cycle, it's hard.
-            // For now, we keep legacy behavior for legacy messages.
+            threadId = legacyConversation.conversationId;
+            recipientName = usersById.get(legacyConversation.recipientId)?.name || 'Unknown';
         }
 
         const stableThreadName = `🎁 ${recipientName}'s Gift Exchange`;
@@ -225,14 +256,16 @@ export default function PublicFeed({ messages = [], allUsers = [], userId }) {
 
                             sortedMessages.forEach(msg => {
                                 const lastGroup = groups[groups.length - 1];
-                                const isSanta = msg.isSantaMsg;
+                                const isSanta = msg.isSantaMsg === true;
+                                const senderKey = isSanta ? 'santa' : `user_${msg.fromId || msg.fromName || 'unknown'}`;
 
-                                if (lastGroup && lastGroup.isSanta === isSanta) {
+                                if (lastGroup && lastGroup.senderKey === senderKey) {
                                     lastGroup.messages.push(msg);
                                 } else {
                                     groups.push({
                                         id: msg.id, // Use first message id as group key
                                         isSanta,
+                                        senderKey,
                                         fromName: msg.fromName,
                                         messages: [msg]
                                     });
