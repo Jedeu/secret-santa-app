@@ -17,6 +17,7 @@ import ChatTabs from '@/components/ChatTabs';
 import Sidebar from '@/components/Sidebar';
 import PushNotificationsControl from '@/components/PushNotificationsControl';
 import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
+import MessageOutboxRuntime from '@/components/MessageOutboxRuntime';
 
 export default function Home() {
     // Authentication state
@@ -102,6 +103,7 @@ export default function Home() {
     return (
         <AuthGuard isLoading={isLoading} currentUser={currentUser} authError={authError}>
             <PushNotificationsRuntime currentUser={currentUser} />
+            <MessageOutboxRuntime currentUser={currentUser} />
             {needsRecipient ? (
                 <RecipientSelector
                     currentUser={currentUser}
