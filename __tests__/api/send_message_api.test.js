@@ -185,7 +185,8 @@ describe('POST /api/messages/send', () => {
         );
         expect(sendIncomingMessagePush).toHaveBeenCalledWith({
             toUserId: 'user-2',
-            conversationId: 'santa_real-user-id_recipient_user-2'
+            conversationId: 'santa_real-user-id_recipient_user-2',
+            fromUserId: 'real-user-id'
         });
     });
 
@@ -365,7 +366,8 @@ describe('POST /api/messages/send', () => {
         expect(data.success).toBe(true);
         expect(sendIncomingMessagePush).toHaveBeenCalledWith({
             toUserId: 'user-2',
-            conversationId: 'santa_real-user-id_recipient_user-2'
+            conversationId: 'santa_real-user-id_recipient_user-2',
+            fromUserId: 'real-user-id'
         });
     });
 
