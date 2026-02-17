@@ -6,6 +6,8 @@ import dynamic from 'next/dynamic';
 import { updateLastReadTimestamp, useOtherUserLastRead } from '@/hooks/useRealtimeMessages';
 import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { useToast } from '@/components/ClientProviders';
+import ReactionPicker from '@/components/ReactionPicker';
+import ReactionChips from '@/components/ReactionChips';
 import {
     enqueueMessage,
     getConversationOutboxMessages,
@@ -14,6 +16,7 @@ import {
     retryOutboxMessage
 } from '@/lib/message-outbox';
 import { setTyping, clearTyping } from '@/lib/typing-client';
+import { toggleReaction } from '@/lib/reactions-client';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -45,11 +48,20 @@ function formatRelativeTime(timestamp) {
     return messageTime.toLocaleDateString('en-US', options);
 }
 
-export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount, messages, conversationId }) {
+export default function Chat({
+    currentUser,
+    otherUser,
+    isSantaChat,
+    unreadCount,
+    messages,
+    conversationId,
+    allReactions = [],
+}) {
     // Use messages passed from parent instead of fetching internally
     // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
     const [outboxMessages, setOutboxMessages] = useState([]);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
@@ -186,6 +198,15 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
         });
     };
 
+    const handleToggleReaction = async (messageId, emoji) => {
+        try {
+            await toggleReaction(messageId, currentUser.id, emoji);
+        } catch (error) {
+            console.error('Failed to toggle reaction:', error);
+            showToast('Unable to update reaction. Please try again.');
+        }
+    };
+
     const handleInputChange = (e) => {
         const value = e.target.value;
         setNewMessage(value);
@@ -232,6 +253,10 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
     }, [showEmojiPicker]);
+
+    useEffect(() => {
+        setReactionPickerMessageId(null);
+    }, [conversationId]);
 
     useEffect(() => {
         const onVisibility = () => {
@@ -329,14 +354,21 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                         {isSantaChat ? (msg.fromId === currentUser.id ? 'You' : 'Santa 🎅') : (msg.fromId === currentUser.id ? 'You' : otherUser.name)}
                                     </span>
                                 )}
-                                <div style={{
-                                    background: isMe ? 'var(--primary)' : 'var(--surface-highlight)',
-                                    color: isMe ? 'white' : 'var(--foreground)',
-                                    padding: '8px 12px',
-                                    borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                                    fontSize: '14px',
-                                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                }}>
+                                <div
+                                    onClick={() => {
+                                        setReactionPickerMessageId(prev => (prev === msg.id ? null : msg.id));
+                                    }}
+                                    style={{
+                                        background: isMe ? 'var(--primary)' : 'var(--surface-highlight)',
+                                        color: isMe ? 'white' : 'var(--foreground)',
+                                        padding: '8px 12px',
+                                        borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                                        fontSize: '14px',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                        position: 'relative',
+                                        cursor: 'pointer'
+                                    }}
+                                >
                                     <ReactMarkdown
                                         remarkPlugins={[remarkGfm]}
                                         components={{
@@ -345,7 +377,7 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                                 <a {...props} style={{
                                                     color: isMe ? 'white' : 'var(--primary)',
                                                     textDecoration: 'underline'
-                                                }} target="_blank" rel="noopener noreferrer" />
+                                                }} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} />
                                             ),
                                             // Prevent large headings in messages
                                             h1: ({ node, ...props }) => <strong {...props} />,
@@ -357,6 +389,20 @@ export default function Chat({ currentUser, otherUser, isSantaChat, unreadCount,
                                     >
                                         {msg.content}
                                     </ReactMarkdown>
+                                    {reactionPickerMessageId === msg.id && (
+                                        <ReactionPicker
+                                            onClose={() => setReactionPickerMessageId(null)}
+                                            onSelect={(emoji) => handleToggleReaction(msg.id, emoji)}
+                                        />
+                                    )}
+                                </div>
+                                <div style={{ alignSelf: isMe ? 'flex-end' : 'flex-start' }}>
+                                    <ReactionChips
+                                        messageId={msg.id}
+                                        allReactions={allReactions}
+                                        currentUserId={currentUser.id}
+                                        onToggle={(emoji) => handleToggleReaction(msg.id, emoji)}
+                                    />
                                 </div>
                                 <span style={{
                                     fontSize: '10px',

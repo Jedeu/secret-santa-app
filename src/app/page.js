@@ -7,7 +7,8 @@ import { useUser } from '@/hooks/useUser';
 import {
     useRealtimeUnreadCounts,
     useRealtimeAllMessages,
-    useRealtimeAllMessagesLoading
+    useRealtimeAllMessagesLoading,
+    useRealtimeAllReactions
 } from '@/hooks/useRealtimeMessages';
 import { getConversationId, filterMessages } from '@/lib/message-utils';
 import { getParticipantNames } from '@/lib/participants';
@@ -43,6 +44,7 @@ export default function Home() {
     // Real-time message data
     const allMessages = useRealtimeAllMessages(!!currentUser);
     const allMessagesLoading = useRealtimeAllMessagesLoading();
+    const allReactions = useRealtimeAllReactions();
     const unreadData = useRealtimeUnreadCounts(
         currentUser?.id,
         currentUser?.recipientId,
@@ -212,6 +214,7 @@ export default function Home() {
                                     currentUser={currentUser}
                                     allUsers={allUsers}
                                     allMessages={allMessages}
+                                    allReactions={allReactions}
                                     recipientMessages={recipientMessages}
                                     santaMessages={santaMessages}
                                     unreadCounts={unreadCounts}

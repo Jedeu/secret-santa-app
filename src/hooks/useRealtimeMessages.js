@@ -44,6 +44,16 @@ export function useRealtimeAllMessagesLoading() {
 }
 
 /**
+ * Hook to get all reaction documents from shared Context.
+ *
+ * @returns {Array}
+ */
+export function useRealtimeAllReactions() {
+    const { allReactions } = useRealtimeMessagesContext();
+    return allReactions;
+}
+
+/**
  * Re-export updateLastReadTimestamp for implementation backward compatibility
  */
 export { updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';

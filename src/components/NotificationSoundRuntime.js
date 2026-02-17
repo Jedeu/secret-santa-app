@@ -108,7 +108,7 @@ export default function NotificationSoundRuntime({
             return;
         }
 
-        const audio = new Audio('/sounds/notification.mp3');
+        const audio = new Audio('/sounds/notification.wav');
         audio.play()
             .then(() => {
                 logSoundDebug('played', { count: newMessages.length });

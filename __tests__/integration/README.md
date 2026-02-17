@@ -8,6 +8,7 @@ These tests require the Firebase Emulator to be running and test the full integr
 ```bash
 npm run emulators
 ```
+The integration Jest config expects Firestore/Auth emulators on `127.0.0.1:8080` and `127.0.0.1:9099`.
 
 ### 2. Run Integration Tests (in another terminal)
 ```bash
@@ -18,6 +19,9 @@ npm run test:integration
 
 - **firestore_participants.test.js**: Tests participant initialization and management with real Firestore
 - **init.test.js**: Tests the `/api/init` endpoint that seeds participant data
+- **firestore-rules-lastRead.test.js**: Validates scoped `lastRead` read rules (DM allowed, `publicFeed_*` denied cross-user)
+- **firestore-rules-typing.test.js**: Validates `typing` ID integrity and auth-match write constraints
+- **firestore-rules-reactions.test.js**: Validates `reactions` create/delete/update constraints and message existence
 
 ## Test Data Management
 
