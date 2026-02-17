@@ -1,14 +1,109 @@
-// Minimal Firestore security rules for the Secret Santa app
-// Allow any authenticated user to read/write their own documents.
-// Adjust as needed for production security.
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read/write on any collection for authenticated users
-    // You can tighten this by checking request.auth.uid against document fields.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc(userId) {
+      return get(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function userExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function authMatchesUser(userId) {
+      return isSignedIn()
+        && userExists(userId)
+        && userDoc(userId).data.email == request.auth.token.email;
+    }
+
+    function isAllowedUserCreate(userId) {
+      return request.resource.data.keys().hasOnly([
+        'id', 'name', 'email', 'oauthId', 'image', 'recipientId', 'gifterId'
+      ])
+      && request.resource.data.id == userId
+      && request.resource.data.email == request.auth.token.email
+      && request.resource.data.recipientId == null
+      && request.resource.data.gifterId == null;
+    }
+
+    function isAllowedSelfRecipientSelection(userId) {
+      return authMatchesUser(userId)
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.gifterId == resource.data.gifterId
+        && resource.data.recipientId == null
+        && request.resource.data.recipientId is string
+        && request.resource.data.recipientId != userId
+        && userExists(request.resource.data.recipientId)
+        && userDoc(request.resource.data.recipientId).data.gifterId == null;
+    }
+
+    function isAllowedRecipientClaimUpdate(recipientUserId) {
+      return request.resource.data.id == resource.data.id
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.recipientId == resource.data.recipientId
+        && resource.data.gifterId == null
+        && request.resource.data.gifterId is string
+        && request.resource.data.gifterId != recipientUserId
+        && authMatchesUser(request.resource.data.gifterId)
+        && userDoc(request.resource.data.gifterId).data.recipientId == null;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isAllowedUserCreate(userId);
+      allow update: if isAllowedSelfRecipientSelection(userId)
+        || isAllowedRecipientClaimUpdate(userId);
+      allow delete: if false;
+    }
+
+    function isAllowedMessageCreate() {
+      return request.resource.data.keys().hasOnly([
+        'id', 'fromId', 'toId', 'content', 'timestamp', 'conversationId', 'isSantaMsg', 'fromName', 'toName'
+      ])
+      && request.resource.data.fromId is string
+      && request.resource.data.toId is string
+      && request.resource.data.content is string
+      && request.resource.data.content.size() > 0
+      && request.resource.data.content.size() <= 4000
+      && request.resource.data.fromId != request.resource.data.toId
+      && userExists(request.resource.data.toId)
+      && authMatchesUser(request.resource.data.fromId);
+    }
+
+    match /messages/{messageId} {
+      allow read: if isSignedIn();
+      allow create: if isAllowedMessageCreate();
+      allow update, delete: if false;
+    }
+
+    function isAllowedLastReadWrite(lastReadId) {
+      return request.resource.data.keys().hasOnly(['userId', 'conversationId', 'lastReadAt'])
+        && request.resource.data.userId is string
+        && request.resource.data.conversationId is string
+        && request.resource.data.lastReadAt is string
+        && lastReadId.matches('^' + request.resource.data.userId + '_.*$')
+        && authMatchesUser(request.resource.data.userId);
+    }
+
+    function isAllowedLastReadRead(lastReadId) {
+      return resource.data.userId is string
+        && lastReadId.matches('^' + resource.data.userId + '_.*$')
+        && authMatchesUser(resource.data.userId);
+    }
+
+    match /lastRead/{lastReadId} {
+      allow read: if isAllowedLastReadRead(lastReadId);
+      allow create, update: if isAllowedLastReadWrite(lastReadId);
+      allow delete: if false;
+    }
+
+    // Deny any other collections by default.
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }
