@@ -194,35 +194,26 @@ export default function Home() {
                             </div>
                         </div>
 
-                        {!currentUser?.recipientId ? (
-                            <div className="card" style={{ textAlign: 'center' }}>
-                                <p style={{ marginBottom: '10px' }}>Waiting for assignments...</p>
-                                <AdminPanel userEmail={currentUser?.email} variant="full" onAssignComplete={refreshUser} onResetComplete={refreshUser} />
-                            </div>
-                        ) : (
-                            <>
-                                {/* Mobile Tabs */}
-                                <div className="mobile-only">
-                                    <TabNavigation
-                                        activeTab={activeTab}
-                                        onTabChange={setActiveTab}
-                                        unreadCounts={unreadCounts}
-                                    />
-                                </div>
-                                <ChatTabs
-                                    activeTab={activeTab}
-                                    currentUser={currentUser}
-                                    allUsers={allUsers}
-                                    allMessages={allMessages}
-                                    allReactions={allReactions}
-                                    recipientMessages={recipientMessages}
-                                    santaMessages={santaMessages}
-                                    unreadCounts={unreadCounts}
-                                    recipientConversationId={recipientConversationId}
-                                    santaConversationId={santaConversationId}
-                                />
-                            </>
-                        )}
+                        {/* Mobile Tabs */}
+                        <div className="mobile-only">
+                            <TabNavigation
+                                activeTab={activeTab}
+                                onTabChange={setActiveTab}
+                                unreadCounts={unreadCounts}
+                            />
+                        </div>
+                        <ChatTabs
+                            activeTab={activeTab}
+                            currentUser={currentUser}
+                            allUsers={allUsers}
+                            allMessages={allMessages}
+                            allReactions={allReactions}
+                            recipientMessages={recipientMessages}
+                            santaMessages={santaMessages}
+                            unreadCounts={unreadCounts}
+                            recipientConversationId={recipientConversationId}
+                            santaConversationId={santaConversationId}
+                        />
                     </div>
                 </main>
             )}

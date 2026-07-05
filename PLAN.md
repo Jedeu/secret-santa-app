@@ -1,32 +1,22 @@
-# PLAN: Dependency Security Upgrade + resetDatabase Hardening
+# PLAN: Dead-Code Sweep
 
 ## Goal
 
-Clear the critical `npm audit` findings by upgrading `firebase-admin` to v14 (plus in-range minor bumps), and fix `resetDatabase()` so it deletes all app collections in Firestore-safe batch chunks.
+Remove code with zero production callers, verified by reference search: unused firestore.js exports and their orphaned indexes, unused imports, an unreachable UI branch, and duplicated conversation-ID parsing.
 
 ## Proposed Changes
 
-### 1. Dependency upgrades
-
-- `package.json` / `package-lock.json`:
-  - `firebase-admin`: `^13.6.0` -> `^14.1.0` (major; clears critical transitive vulns in `protobufjs` and `fast-xml-parser`). v14 requires Node >= 20, which matches the existing `engines` policy (`>=20.10.0 <21`).
-  - `npm update` for in-range minors: `firebase` 12.15, `next` 16.2.x, `eslint-config-next` 16.2.x, `react`/`react-dom` 19.2.7, `jest` 30.4.x, `@playwright/test` 1.61.x, `emoji-picker-react`, `@testing-library/react`, `firebase-tools` 14.27, `webpack` 5.108, etc.
-  - Deliberately NOT taken (out-of-scope majors): `eslint` 10, `@eslint/js` 10, `globals` 17, `uuid` 11+, `firebase-tools` 15.
-
-### 2. `resetDatabase()` fix (`src/lib/firestore.js`)
-
-- Extend the deleted-collections list from `['users', 'messages', 'lastRead']` to also include `'typing'`, `'reactions'`, `'pushTokens'` (matches every collection the app writes; see `firestore.rules` and `PUSH_TOKENS_COLLECTION` in `src/lib/push-server.js`).
-- Delete in chunks of 500 docs per batch (Firestore hard limit per `WriteBatch`); skip the commit entirely for empty collections.
-
-### 3. Test updates (`__tests__/lib/firestore.test.js`)
-
-- Update the `resetDatabase` unit test for the new collection list and skip-empty-commit behavior.
-- Add a chunking regression test: >500 docs in one collection must produce multiple batch commits.
+1. **`src/lib/firestore.js`** — delete unused exports: `getMessages`, `getUserMessages`, `getUnreadCount`, `markAsRead`, `getLastRead`, `getUserById`, `getUsersByName`, `getPlaceholderUserByName`, `getAllMessagesWithCache`, `getAllUsersWithCache`, `sendMessage`. (Note: the dead `markAsRead` wrote `lastReadAt` as an ISO string, which current firestore.rules would reject — it predates the read-receipts rework.) Keep `updateUser` (used by integration tests as a fixture helper).
+2. **`__tests__/lib/firestore.test.js`** — drop the test blocks and imports for the deleted functions.
+3. **`firestore.indexes.json`** — remove all three composite indexes; they only served the deleted compound queries. Every remaining query is single-field (auto-indexed).
+4. **`src/hooks/useRealtimeMessages.js`** — remove unused imports left over from the Context refactor: `firestore`, the whole `firebase/firestore` import, the listener-tracker functions, and `useRef`.
+5. **`src/app/page.js`** — remove the unreachable `!currentUser?.recipientId` branch ("Waiting for assignments…" + AdminPanel `full` variant): AuthGuard blocks null users and `needsRecipient` diverts users without a recipient to RecipientSelector, so the condition can never be true. AdminPanel's `full` variant becomes unreferenced but is intentionally left in place (separate decision whether to rewire the admin assign UI).
+6. **`src/lib/message-utils.js`** — export the currently-private `parseConversationId`.
+7. **`src/components/PublicFeed.js`** and **`src/lib/push-server.js`** — delete their local copies of `parseConversationId` (and PublicFeed's `getConversationId`) and import from `@/lib/message-utils` (pure module, safe on both sides of the SDK boundary).
 
 ## Verification
 
 - `npm run lint`
-- `npm run test:unit` (full unit suite)
-- `npx firebase emulators:exec --project=demo-secret-santa "npm run test:integration"` (exercises `resetDatabase` against the real emulator via `firestore_participants.test.js` and `init.test.js`)
-- `npm run build` (confirm Next production build still succeeds after upgrades)
-- `npm audit --omit=dev` (confirm criticals cleared)
+- `npm run test:unit`
+- `npx firebase emulators:exec --project=demo-secret-santa "npm run test:integration"`
+- `npm run build`

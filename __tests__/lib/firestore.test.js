@@ -1,4 +1,4 @@
-import { getUserByEmail, createUser, sendMessage, getMessages, getAllUsers, batchUpdateUsers, markAsRead, getLastRead, resetDatabase } from '@/lib/firestore';
+import { getUserByEmail, createUser, getAllUsers, batchUpdateUsers, resetDatabase } from '@/lib/firestore';
 
 // Mock Firebase Admin SDK
 jest.mock('@/lib/firebase', () => ({
@@ -70,43 +70,6 @@ describe('Firestore Functions (Unit Tests with Mocks)', () => {
         });
     });
 
-    describe('sendMessage', () => {
-        test('should send message to Firestore', async () => {
-            const mockDoc = { set: jest.fn().mockResolvedValue(undefined) };
-            mockFirestore.doc.mockReturnValue(mockDoc);
-
-            const msg = { id: 'm1', fromId: '1', toId: '2', content: 'Hello', timestamp: '2023-01-01T10:00:00Z' };
-
-            await sendMessage(msg);
-
-            expect(mockFirestore.collection).toHaveBeenCalledWith('messages');
-            expect(mockFirestore.doc).toHaveBeenCalledWith('m1');
-            expect(mockDoc.set).toHaveBeenCalledWith(msg);
-        });
-    });
-
-    describe('getMessages', () => {
-        test('should retrieve conversation between two users', async () => {
-            const msg1 = { id: 'm1', fromId: '1', toId: '2', content: 'Hi', timestamp: '2023-01-01T10:00:00Z' };
-            const msg2 = { id: 'm2', fromId: '2', toId: '1', content: 'Hello', timestamp: '2023-01-01T10:01:00Z' };
-
-            // Mock two separate queries (sent and received)
-            mockFirestore.get
-                .mockResolvedValueOnce({
-                    forEach: (cb) => [msg1].forEach(msg => cb({ data: () => msg }))
-                })
-                .mockResolvedValueOnce({
-                    forEach: (cb) => [msg2].forEach(msg => cb({ data: () => msg }))
-                });
-
-            const conversation = await getMessages('1', '2');
-
-            expect(conversation).toHaveLength(2);
-            expect(conversation[0].id).toBe('m1');
-            expect(conversation[1].id).toBe('m2');
-        });
-    });
-
     describe('getAllUsers', () => {
         test('should retrieve all users', async () => {
             const users = [
@@ -144,50 +107,6 @@ describe('Firestore Functions (Unit Tests with Mocks)', () => {
             expect(mockFirestore.batch).toHaveBeenCalled();
             expect(mockBatch.update).toHaveBeenCalledTimes(2);
             expect(mockBatch.commit).toHaveBeenCalled();
-        });
-    });
-
-    describe('markAsRead and getLastRead', () => {
-        test('should mark conversation as read', async () => {
-            const mockDoc = { set: jest.fn().mockResolvedValue(undefined) };
-            mockFirestore.doc.mockReturnValue(mockDoc);
-
-            await markAsRead('user1', 'conv_1_2');
-
-            expect(mockFirestore.collection).toHaveBeenCalledWith('lastRead');
-            expect(mockFirestore.doc).toHaveBeenCalledWith('user1_conv_1_2');
-            expect(mockDoc.set).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    userId: 'user1',
-                    conversationId: 'conv_1_2'
-                })
-            );
-        });
-
-        test('should get last read timestamp', async () => {
-            const mockData = { userId: 'user1', conversationId: 'conv_1_2', lastReadAt: '2023-01-01T10:00:00Z' };
-            const mockDoc = {
-                get: jest.fn().mockResolvedValue({
-                    exists: true,
-                    data: () => mockData
-                })
-            };
-            mockFirestore.doc.mockReturnValue(mockDoc);
-
-            const result = await getLastRead('user1', 'conv_1_2');
-
-            expect(result).toEqual(mockData);
-        });
-
-        test('should return null when no read status exists', async () => {
-            const mockDoc = {
-                get: jest.fn().mockResolvedValue({ exists: false })
-            };
-            mockFirestore.doc.mockReturnValue(mockDoc);
-
-            const result = await getLastRead('user1', 'conv_1_2');
-
-            expect(result).toBeNull();
         });
     });
 

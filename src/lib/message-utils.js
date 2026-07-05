@@ -32,7 +32,7 @@ export function getLegacyConversationId(userId1, userId2) {
  * @param {string} conversationId
  * @returns {{santaId: string, recipientId: string} | null}
  */
-function parseConversationId(conversationId) {
+export function parseConversationId(conversationId) {
     if (!conversationId || typeof conversationId !== 'string') return null;
     const parts = conversationId.split('_recipient_');
     if (parts.length !== 2 || !parts[0].startsWith('santa_')) return null;

@@ -1,23 +1,12 @@
 'use client';
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { firestore } from '@/lib/firebase-client';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { useState, useMemo, useEffect } from 'react';
 import { getConversationId } from '@/lib/message-utils';
-import {
-    logListenerCreated,
-    logListenerDestroyed,
-    logSnapshotReceived
-} from '@/lib/firestore-listener-tracker';
-import { useRealtimeMessagesContext, updateLastReadTimestamp } from '@/context/RealtimeMessagesContext';
+import { useRealtimeMessagesContext } from '@/context/RealtimeMessagesContext';
 import {
     getLastReadTimestamp as fetchLastRead,
     getCachedTimestamp,
     subscribeToLastRead
 } from '@/lib/lastReadClient';
-
-
-
-
 
 
 /**
@@ -225,5 +214,3 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
 
     return { recipientUnread, santaUnread };
 }
-
-// In-memory cache for lastRead timestamps (synced with lastReadClient)
