@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { firestore, messaging } from '@/lib/firebase';
+import { parseConversationId } from '@/lib/message-utils';
 
 const PUSH_TOKENS_COLLECTION = 'pushTokens';
 
@@ -17,22 +18,6 @@ function hashPushToken(token) {
 
 function normalizeToken(token) {
     return typeof token === 'string' ? token.trim() : '';
-}
-
-function parseConversationId(conversationId) {
-    if (!conversationId || typeof conversationId !== 'string') {
-        return null;
-    }
-
-    const parts = conversationId.split('_recipient_');
-    if (parts.length !== 2 || !parts[0].startsWith('santa_')) {
-        return null;
-    }
-
-    return {
-        santaId: parts[0].replace('santa_', ''),
-        recipientId: parts[1],
-    };
 }
 
 function resolveSenderRole({ conversationId, fromUserId }) {

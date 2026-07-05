@@ -1,23 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
+import { getConversationId, parseConversationId } from '@/lib/message-utils';
 import ReactionChips from '@/components/ReactionChips';
-
-function parseConversationId(conversationId) {
-    if (!conversationId || typeof conversationId !== 'string') return null;
-    const parts = conversationId.split('_recipient_');
-    if (parts.length !== 2 || !parts[0].startsWith('santa_')) return null;
-
-    return {
-        santaId: parts[0].replace('santa_', ''),
-        recipientId: parts[1],
-    };
-}
-
-function getConversationId(santaId, recipientId) {
-    if (!santaId || !recipientId) return null;
-    return `santa_${santaId}_recipient_${recipientId}`;
-}
 
 function resolveLegacyRole(message, fromUser, toUser) {
     if (typeof message.isSantaMsg === 'boolean') {
