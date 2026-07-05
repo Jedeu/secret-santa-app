@@ -1,4 +1,7 @@
-import admin from 'firebase-admin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
+import { getMessaging } from 'firebase-admin/messaging';
 
 // Connect to emulators in development
 if (process.env.NODE_ENV === 'development') {
@@ -7,7 +10,7 @@ if (process.env.NODE_ENV === 'development') {
     console.log('🔥 Server: Configured to use Firebase Emulators');
 }
 
-if (!admin.apps.length) {
+if (!getApps().length) {
     try {
         // In production (Vercel), these env vars will be set.
         // For local dev, we might need a service account key file or just rely on these vars.
@@ -15,13 +18,13 @@ if (!admin.apps.length) {
 
         // In dev mode with emulators, we don't strictly need creds, but it's good practice to have a project ID
         if (process.env.NODE_ENV === 'development') {
-            admin.initializeApp({
+            initializeApp({
                 projectId: 'xmasteak-app'
             });
             console.log('✅ Server: Firebase Admin initialized for emulator');
         } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-            admin.initializeApp({
-                credential: admin.credential.cert({
+            initializeApp({
+                credential: cert({
                     projectId: process.env.FIREBASE_PROJECT_ID,
                     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
                     privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
@@ -36,6 +39,6 @@ if (!admin.apps.length) {
     }
 }
 
-export const firestore = admin.apps.length ? admin.firestore() : null;
-export const auth = admin.apps.length ? admin.auth() : null;
-export const messaging = admin.apps.length ? admin.messaging() : null;
+export const firestore = getApps().length ? getFirestore() : null;
+export const auth = getApps().length ? getAuth() : null;
+export const messaging = getApps().length ? getMessaging() : null;

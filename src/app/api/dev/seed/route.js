@@ -13,7 +13,7 @@ export async function POST() {
         const usingFirestore = !!firebaseAdmin.firestore;
 
         // Get Project ID from the initialized app if possible
-        const adminApp = (await import('firebase-admin')).apps[0];
+        const adminApp = (await import('firebase-admin/app')).getApps()[0];
         const projectId = adminApp ? adminApp.options.projectId : 'unknown';
 
         await ensureAllParticipants(PARTICIPANTS);

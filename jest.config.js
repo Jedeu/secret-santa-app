@@ -12,8 +12,11 @@ const customJestConfig = {
     moduleNameMapper: {
         '^@/(.*)$': '<rootDir>/src/$1',
     },
+    // jose (firebase-admin dependency) is ESM-only and needs transforming; it must be
+    // allowlisted BOTH here AND in next.config.js transpilePackages, because a file is
+    // skipped if it matches any ignore pattern and next/jest prepends its own.
     transformIgnorePatterns: [
-        'node_modules/(?!(react-markdown|remark-gfm|vfile|unist-util|unified|bail|is-plain-obj|trough|remark|mdast|micromark|decode|character|property|hast|space|comma|pretty|ccount|markdown-table|escape-string-regexp)/)'
+        'node_modules/(?!(react-markdown|remark-gfm|vfile|unist-util|unified|bail|is-plain-obj|trough|remark|mdast|micromark|decode|character|property|hast|space|comma|pretty|ccount|markdown-table|escape-string-regexp|jose)/)'
     ],
     // Exclude integration tests and E2E tests from default test runs
     // Integration tests require Firebase Emulator to be running

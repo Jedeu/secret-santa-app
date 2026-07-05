@@ -42,6 +42,9 @@ export default function PushNotificationsControl({ compact = false }) {
             ? Notification.permission
             : 'default';
 
+        // Browser-only capabilities must be synced after mount; deriving them
+        // during render would mismatch the server-rendered HTML on hydration.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSupported(isPushSupported());
         setPermission(currentPermission);
         setEnabled(currentPermission === 'granted');
