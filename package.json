@@ -9,7 +9,7 @@
     "lint": "npx eslint .",
     "test": "jest",
     "test:unit": "jest --testPathIgnorePatterns=/integration/ --testPathIgnorePatterns=/helpers/ --testPathIgnorePatterns=setup.js --testPathIgnorePatterns=/e2e/",
-    "test:integration": "jest --config jest.integration.config.js",
+    "test:integration": "jest --config jest.integration.config.js --runInBand",
     "test:watch": "jest --watch",
     "test:smart": "./.claude/skills/test-runner/run-tests.sh",
     "test:e2e": "playwright test",
@@ -20,13 +20,13 @@
     "@ducanh2912/next-pwa": "^10.2.9",
     "emoji-picker-react": "^4.15.1",
     "firebase": "^12.6.0",
-    "firebase-admin": "^13.6.0",
+    "firebase-admin": "^14.1.0",
     "next": "^16.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "uuid": "^10.0.0"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

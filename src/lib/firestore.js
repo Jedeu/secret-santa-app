@@ -240,15 +240,21 @@ export async function ensureAllParticipants(participants) {
 
 // --- Admin ---
 
+// Firestore allows at most 500 operations per WriteBatch.
+const MAX_BATCH_OPERATIONS = 500;
+
 export async function resetDatabase() {
-    // Delete all collections
-    const collections = ['users', 'messages', 'lastRead'];
+    // Every collection the app writes. Keep in sync with firestore.rules and
+    // PUSH_TOKENS_COLLECTION in src/lib/push-server.js.
+    const collections = ['users', 'messages', 'lastRead', 'typing', 'reactions', 'pushTokens'];
     for (const collectionName of collections) {
         const snapshot = await firestore.collection(collectionName).get();
-        const batch = firestore.batch();
-        snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
+        for (let i = 0; i < snapshot.docs.length; i += MAX_BATCH_OPERATIONS) {
+            const batch = firestore.batch();
+            snapshot.docs.slice(i, i + MAX_BATCH_OPERATIONS).forEach((doc) => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+        }
     }
 }

@@ -192,25 +192,72 @@ describe('Firestore Functions (Unit Tests with Mocks)', () => {
     });
 
     describe('resetDatabase', () => {
-        test('should delete all documents from all collections', async () => {
+        const APP_COLLECTIONS = ['users', 'messages', 'lastRead', 'typing', 'reactions', 'pushTokens'];
+
+        test('should delete documents from every app collection', async () => {
             const mockBatch = {
                 delete: jest.fn(),
                 commit: jest.fn().mockResolvedValue(undefined)
             };
             mockFirestore.batch.mockReturnValue(mockBatch);
 
-            // Mock empty collections with docs array
+            // One doc per collection
             mockFirestore.get.mockResolvedValue({
-                docs: [],
-                forEach: jest.fn()
+                docs: [{ ref: 'mockRef' }]
             });
 
             await resetDatabase();
 
-            expect(mockFirestore.collection).toHaveBeenCalledWith('users');
-            expect(mockFirestore.collection).toHaveBeenCalledWith('messages');
-            expect(mockFirestore.collection).toHaveBeenCalledWith('lastRead');
-            expect(mockBatch.commit).toHaveBeenCalledTimes(3);
+            APP_COLLECTIONS.forEach((collectionName) => {
+                expect(mockFirestore.collection).toHaveBeenCalledWith(collectionName);
+            });
+            expect(mockBatch.commit).toHaveBeenCalledTimes(APP_COLLECTIONS.length);
+            expect(mockBatch.delete).toHaveBeenCalledTimes(APP_COLLECTIONS.length);
+        });
+
+        test('should skip batch commits for empty collections', async () => {
+            const mockBatch = {
+                delete: jest.fn(),
+                commit: jest.fn().mockResolvedValue(undefined)
+            };
+            mockFirestore.batch.mockReturnValue(mockBatch);
+
+            mockFirestore.get.mockResolvedValue({ docs: [] });
+
+            await resetDatabase();
+
+            expect(mockBatch.commit).not.toHaveBeenCalled();
+        });
+
+        test('should chunk deletes into batches of at most 500 operations', async () => {
+            const commitCalls = [];
+            const batches = [];
+            mockFirestore.batch.mockImplementation(() => {
+                const batch = {
+                    delete: jest.fn(),
+                    commit: jest.fn().mockImplementation(() => {
+                        commitCalls.push(batch.delete.mock.calls.length);
+                        return Promise.resolve();
+                    })
+                };
+                batches.push(batch);
+                return batch;
+            });
+
+            const manyDocs = Array.from({ length: 1201 }, (_, i) => ({ ref: `ref-${i}` }));
+            // First collection has 1201 docs, the rest are empty
+            mockFirestore.get
+                .mockResolvedValueOnce({ docs: manyDocs })
+                .mockResolvedValue({ docs: [] });
+
+            await resetDatabase();
+
+            // 1201 docs -> batches of 500, 500, 201
+            expect(commitCalls).toEqual([500, 500, 201]);
+            batches.forEach((batch) => {
+                expect(batch.delete.mock.calls.length).toBeLessThanOrEqual(500);
+                expect(batch.commit).toHaveBeenCalledTimes(1);
+            });
         });
     });
 });

@@ -1,13 +1,14 @@
-const admin = require('firebase-admin');
+const { initializeApp, getApps } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
 // Initialize Firebase Admin for Firestore Emulator
-if (!admin.apps.length) {
-    admin.initializeApp({
+if (!getApps().length) {
+    initializeApp({
         projectId: 'demo-secret-santa',
     });
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 db.settings({
     host: 'localhost:8080',
     ssl: false
