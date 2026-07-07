@@ -238,4 +238,80 @@ describe('Chat Component Unread Logic', () => {
 
         expect(getByText('User 2 is typing...')).toBeInTheDocument();
     });
+
+    describe('visibility-gated mark-as-read', () => {
+        const setVisibility = (state) => {
+            Object.defineProperty(document, 'visibilityState', {
+                configurable: true,
+                value: state,
+            });
+        };
+
+        afterEach(() => {
+            setVisibility('visible');
+        });
+
+        it('does not mark messages read when the tab is hidden', () => {
+            setVisibility('hidden');
+
+            const { rerender } = render(
+                <Chat
+                    currentUser={currentUser}
+                    otherUser={otherUser}
+                    isSantaChat={false}
+                    unreadCount={0}
+                    messages={initialMessages}
+                    conversationId={conversationId}
+                />
+            );
+
+            // Not called on mount while hidden.
+            expect(updateLastReadTimestamp).not.toHaveBeenCalled();
+
+            act(() => {
+                jest.advanceTimersByTime(2500);
+            });
+
+            rerender(
+                <Chat
+                    currentUser={currentUser}
+                    otherUser={otherUser}
+                    isSantaChat={false}
+                    unreadCount={1}
+                    messages={[
+                        ...initialMessages,
+                        { id: '2', fromId: 'user2', toId: 'user1', content: 'Arrived while hidden', timestamp: new Date().toISOString() }
+                    ]}
+                    conversationId={conversationId}
+                />
+            );
+
+            // Still not called: a background tab must not clear the badge.
+            expect(updateLastReadTimestamp).not.toHaveBeenCalled();
+        });
+
+        it('flushes the read marker once the tab becomes visible', () => {
+            setVisibility('hidden');
+
+            render(
+                <Chat
+                    currentUser={currentUser}
+                    otherUser={otherUser}
+                    isSantaChat={false}
+                    unreadCount={1}
+                    messages={initialMessages}
+                    conversationId={conversationId}
+                />
+            );
+
+            expect(updateLastReadTimestamp).not.toHaveBeenCalled();
+
+            act(() => {
+                setVisibility('visible');
+                document.dispatchEvent(new Event('visibilitychange'));
+            });
+
+            expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
+        });
+    });
 });
