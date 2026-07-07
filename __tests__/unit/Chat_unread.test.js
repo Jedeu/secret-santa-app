@@ -290,6 +290,37 @@ describe('Chat Component Unread Logic', () => {
             expect(updateLastReadTimestamp).not.toHaveBeenCalled();
         });
 
+        it('does not mark messages read from scroll events while hidden', () => {
+            setVisibility('hidden');
+
+            const { container } = render(
+                <Chat
+                    currentUser={currentUser}
+                    otherUser={otherUser}
+                    isSantaChat={false}
+                    unreadCount={1}
+                    messages={initialMessages}
+                    conversationId={conversationId}
+                />
+            );
+
+            // Get past the 2s scroll-path debounce, then simulate the scroll that
+            // the programmatic auto-scroll effect triggers in a hidden tab.
+            act(() => {
+                jest.advanceTimersByTime(2500);
+            });
+
+            const chatContainer = container.querySelector('div[style*="overflow-y: auto"]');
+            // Overflowing container, scrolled to bottom
+            Object.defineProperty(chatContainer, 'scrollHeight', { value: 500, configurable: true });
+            Object.defineProperty(chatContainer, 'clientHeight', { value: 200, configurable: true });
+            Object.defineProperty(chatContainer, 'scrollTop', { value: 300, configurable: true });
+
+            fireEvent.scroll(chatContainer);
+
+            expect(updateLastReadTimestamp).not.toHaveBeenCalled();
+        });
+
         it('flushes the read marker once the tab becomes visible', () => {
             setVisibility('hidden');
 

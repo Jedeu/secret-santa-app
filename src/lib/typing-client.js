@@ -19,17 +19,18 @@ function logTypingDebug(action, userId, conversationId) {
     console.debug(`[Typing] ${action} userId=${userId} convId=${conversationId}`);
 }
 
-function writeTyping(key, userId, conversationId) {
+// async so both sync throws and setDoc rejections land in the catch;
+// callers fire-and-forget, the returned promise never rejects.
+async function writeTyping(key, userId, conversationId) {
     lastWriteAt.set(key, Date.now());
     try {
         const docRef = doc(firestore, 'typing', key);
-        const result = setDoc(docRef, {
+        await setDoc(docRef, {
             userId,
             conversationId,
             typingAt: new Date().toISOString(),
         });
         logTypingDebug('set', userId, conversationId);
-        return result;
     } catch (error) {
         console.error('Failed to write typing state:', error);
     }
@@ -60,9 +61,9 @@ export function setTyping(userId, conversationId) {
     }
 
     const delay = previousWriteAt + TYPING_THROTTLE_MS - now;
-    const timeout = setTimeout(async () => {
+    const timeout = setTimeout(() => {
         pendingTypingWrites.delete(key);
-        await writeTyping(key, userId, conversationId);
+        writeTyping(key, userId, conversationId);
     }, delay);
 
     pendingTypingWrites.set(key, timeout);

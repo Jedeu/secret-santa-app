@@ -73,4 +73,33 @@ describe('typing-client', () => {
         clearTyping('user1', 'conv3');
         expect(mockDeleteDoc).toHaveBeenCalledWith('typingDocRef');
     });
+
+    test('setDoc rejection is caught and logged, not an unhandled rejection', async () => {
+        const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const unhandled = jest.fn();
+        process.on('unhandledRejection', unhandled);
+
+        try {
+            mockSetDoc.mockRejectedValue(new Error('offline'));
+
+            // Leading write (immediate) and trailing write both take the rejecting path
+            setTyping('user1', 'conv4');
+            setTyping('user1', 'conv4');
+            jest.advanceTimersByTime(2000);
+
+            // Flush microtasks so rejections would surface
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(mockSetDoc).toHaveBeenCalledTimes(2);
+            expect(consoleError).toHaveBeenCalledWith(
+                'Failed to write typing state:',
+                expect.any(Error)
+            );
+            expect(unhandled).not.toHaveBeenCalled();
+        } finally {
+            process.off('unhandledRejection', unhandled);
+            consoleError.mockRestore();
+        }
+    });
 });

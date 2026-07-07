@@ -118,6 +118,9 @@ export default function Chat({
     };
 
     const checkIfRead = () => {
+        // Scroll events also fire from the programmatic auto-scroll effect below,
+        // which runs in hidden tabs too — so this path needs the visibility gate.
+        if (!isDocumentVisible()) return;
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
             const isAtBottom = isNearBottom(chatContainer);
