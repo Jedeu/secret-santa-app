@@ -22,7 +22,7 @@ Built with **Next.js** (App Router), **Firebase Auth**, **Cloud Firestore**, and
 
 ## Prerequisites
 
-- **Node.js `>=20.10.0 <21`** (see `engines` in `package.json`)
+- **Node.js `>=22.13.0 <23`** (see `engines` in `package.json`)
 - **Java 11+** — required to run the Firebase Emulators
 - **Firebase CLI** — `npm install -g firebase-tools`
 
