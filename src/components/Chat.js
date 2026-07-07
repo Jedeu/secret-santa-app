@@ -24,6 +24,12 @@ const EmojiPicker = dynamic(
     { ssr: false }
 );
 
+// Whether the tab is currently foregrounded. Background tabs must not mark
+// messages as read (mirrors the gate in NotificationSoundRuntime.js).
+function isDocumentVisible() {
+    return typeof document === 'undefined' || document.visibilityState === 'visible';
+}
+
 // Format timestamp as relative time
 function formatRelativeTime(timestamp) {
     const now = new Date();
@@ -90,8 +96,11 @@ export default function Chat({
     }, [currentUser.id, conversationId]);
 
     // Mark messages as read when component mounts, user changes, OR new messages arrive
-    // This ensures badge clears even when new messages arrive while viewing the tab
+    // This ensures badge clears even when new messages arrive while viewing the tab.
+    // Gate on visibility: a background tab must not clear the badge (see visibilitychange
+    // effect below, which flushes the read marker once the tab is foregrounded again).
     useEffect(() => {
+        if (!isDocumentVisible()) return;
         // IMPORTANT: Use the conversationId passed from parent (new format)
         // NOT getLegacyConversationId which would cause format mismatch
         updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
@@ -109,6 +118,9 @@ export default function Chat({
     };
 
     const checkIfRead = () => {
+        // Scroll events also fire from the programmatic auto-scroll effect below,
+        // which runs in hidden tabs too — so this path needs the visibility gate.
+        if (!isDocumentVisible()) return;
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
             const isAtBottom = isNearBottom(chatContainer);
@@ -125,7 +137,9 @@ export default function Chat({
     };
 
     useEffect(() => {
-        // Check if content fits in viewport (no scroll needed) -> Mark as read
+        // Check if content fits in viewport (no scroll needed) -> Mark as read.
+        // Skip in a background tab so a hidden chat never clears its own badge.
+        if (!isDocumentVisible()) return;
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
             if (chatContainer.scrollHeight <= chatContainer.clientHeight) {
@@ -266,14 +280,20 @@ export default function Chat({
         const onVisibility = () => {
             if (document.visibilityState === 'hidden') {
                 clearTyping(currentUser.id, conversationId);
+                return;
             }
+            // Tab was foregrounded: flush the read marker for messages that arrived
+            // while hidden. The messages effect is visibility-gated and won't fire on
+            // its own until the next messages change, so do it here.
+            updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
+            lastReadRef.current = Date.now();
         };
 
         document.addEventListener('visibilitychange', onVisibility);
         return () => {
             document.removeEventListener('visibilitychange', onVisibility);
         };
-    }, [currentUser.id, conversationId]);
+    }, [currentUser.id, otherUser.id, conversationId]);
 
     useEffect(() => {
         return () => {

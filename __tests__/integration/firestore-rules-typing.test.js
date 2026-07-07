@@ -87,4 +87,22 @@ describe('firestore rules: typing', () => {
         const db = authedDb(testEnv, 'user-a', 'user-a@example.com');
         await assertSucceeds(deleteDoc(doc(db, 'typing', 'santa_user-a_recipient_user-b_user-a')));
     });
+
+    test('delete of a nonexistent typing doc is a permitted no-op', async () => {
+        // clearTyping fires unconditionally (unmount/blur), often before any
+        // typing doc exists; that delete must not surface as permission-denied.
+        const db = authedDb(testEnv, 'user-a', 'user-a@example.com');
+        await assertSucceeds(deleteDoc(doc(db, 'typing', 'santa_user-a_recipient_user-b_user-a')));
+    });
+
+    test('cross-user delete of an existing typing doc is rejected', async () => {
+        await seedDoc(testEnv, 'typing', 'santa_user-a_recipient_user-b_user-a', {
+            userId: 'user-a',
+            conversationId: 'santa_user-a_recipient_user-b',
+            typingAt: new Date().toISOString(),
+        });
+
+        const db = authedDb(testEnv, 'user-b', 'user-b@example.com');
+        await assertFails(deleteDoc(doc(db, 'typing', 'santa_user-a_recipient_user-b_user-a')));
+    });
 });
