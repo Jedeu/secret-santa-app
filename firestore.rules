@@ -115,9 +115,12 @@ service cloud.firestore {
         && request.resource.data.typingAt is string
         && authMatchesUser(request.resource.data.userId)
         && typingId == (request.resource.data.conversationId + '_' + request.resource.data.userId);
+      // resource == null: deleting a nonexistent doc is a no-op; clients call
+      // clearTyping unconditionally (unmount/blur), so don't deny it as an error.
       allow delete: if isSignedIn()
-        && resource.data.userId is string
-        && authMatchesUser(resource.data.userId);
+        && (resource == null
+          || (resource.data.userId is string
+            && authMatchesUser(resource.data.userId)));
     }
 
     match /reactions/{reactionId} {
