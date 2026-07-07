@@ -73,14 +73,16 @@ Participants are defined in `src/lib/participants.js` as the source of truth:
 ### Message Architecture
 
 Messages use a **conversationId-based system**:
-- Each message has `conversationId` (deterministic hash of two user IDs)
-- `senderId` and `recipientId` track message direction
-- `isSantaAnonymous` boolean controls name display
+- Each message has `fromId` and `toId` (both are user UUIDs) tracking direction
+- `content` holds the message body; `timestamp` is an **ISO 8601 string** (not a Firestore Timestamp)
+- `conversationId` is a **directional** string, not a hash — format `santa_{santaId}_recipient_{recipientId}`
+- Optional idempotency fields `clientMessageId` (UUID) and `clientCreatedAt` (ISO string) support safe retries; the message doc id is the `clientMessageId` when provided, else a fresh UUID
 - Real-time updates via Firestore listeners in `src/hooks/useRealtimeMessages.js`
 
 Key utilities in `src/lib/message-utils.js`:
-- `getConversationId(userId1, userId2)`: Generates deterministic conversation ID
-- `filterMessages(allMessages, userId, otherId, conversationId)`: Filters messages for a specific chat
+- `getConversationId(santaId, recipientId)`: Builds the directional conversation ID `santa_{santaId}_recipient_{recipientId}` (order matters — swapping the args yields a different conversation)
+- `getLegacyConversationId(userId1, userId2)`: Sorted-join (`{minId}_{maxId}`) fallback for old messages that predate `conversationId`; loses directionality
+- `filterMessages(messages, currentUserId, otherUserId, targetConversationId)`: Filters and time-sorts messages for a specific chat. Dual-routing logic: messages with a `conversationId` must match exactly; legacy messages (no `conversationId`) are routed by their `isSantaMsg` flag when present, otherwise assigned to a single canonical conversation (`santa=min(id)`, `recipient=max(id)`) to avoid duplicate rendering in mutual A↔B cycles
 
 ### Data Model
 
@@ -100,25 +102,49 @@ Key utilities in `src/lib/message-utils.js`:
 **messages collection:**
 ```javascript
 {
-  id: string,              // UUID
-  conversationId: string,  // Hash of two user IDs
-  senderId: string,        // UUID
-  recipientId: string,     // UUID
-  message: string,
-  timestamp: Firestore Timestamp,
-  isSantaAnonymous: boolean,
-  read: boolean
+  id: string,                 // UUID (equals clientMessageId when provided)
+  fromId: string,             // Sender's user UUID
+  toId: string,               // Recipient's user UUID
+  content: string,            // Message body (1–4000 chars)
+  timestamp: string,          // ISO 8601 string, e.g. "2026-07-05T18:30:00.000Z"
+  conversationId: string,     // Directional: santa_{santaId}_recipient_{recipientId} (or null)
+  clientMessageId?: string,   // Optional UUID for idempotent retries
+  clientCreatedAt?: string    // Optional ISO string set by the client
 }
 ```
 
+Firestore rules additionally permit the **legacy** fields `isSantaMsg`, `fromName`, and `toName` on message create for backward compatibility. New messages written by `/api/messages/send` do not set them.
+
+**lastRead collection** (per-user read markers; doc id `{userId}_{conversationId}`):
+```javascript
+{ userId: string, conversationId: string, lastReadAt: Timestamp }
+```
+
+**typing collection** (ephemeral typing indicators; doc id `{conversationId}_{userId}`):
+```javascript
+{ userId: string, conversationId: string, typingAt: string }
+```
+
+**reactions collection** (emoji reactions; doc id `{messageId}_{userId}_{emoji}`):
+```javascript
+{ messageId: string, userId: string, emoji: string, createdAt: string }
+```
+
+**pushTokens collection**: Web Push subscription storage, managed server-side by `src/lib/push-server.js`.
+
 ### API Routes
 
-- **POST /api/init**: Initialize all participants in Firestore from hardcoded list
-- **POST /api/admin/assign**: Shuffle and assign Secret Santa pairs (admin only)
-- **POST /api/admin/reset**: Delete all data and reset app (admin only)
-- **POST /api/dev/seed**: Create seed data for testing
+Auth conventions: routes verify a Firebase **Bearer ID token** (`Authorization: Bearer <token>`) via the Admin SDK. Admin checks go through `isAdmin(email)` in `src/lib/config.js` (single source of truth — the admin email is no longer duplicated inline). Routes under `/api/dev/*` are hard-disabled outside `NODE_ENV=development`.
 
-Admin routes check for email `jed.piezas@gmail.com` via Firebase Auth token.
+- **POST /api/init**: Initialize all participants from the hardcoded list. No auth in development; requires an admin Bearer token in production.
+- **POST /api/admin/assign**: Shuffle and assign Secret Santa pairs. Requires admin Bearer token.
+- **POST /api/admin/reset**: Delete all data and reset the app. Requires admin Bearer token.
+- **POST /api/dev/assign**: Dev-only assignment helper. 403 outside development.
+- **POST /api/dev/inject-message**: Dev-only message injection for testing. 403 outside development.
+- **POST /api/dev/seed**: Dev-only seed data from the participants list. 403 outside development.
+- **POST /api/messages/send**: Send a message. Requires a Bearer token; verifies the sender matches an authorized user, validates length (≤4000), and writes idempotently keyed on `clientMessageId`. Dispatches a fail-open push notification to the recipient.
+- **POST /api/push/register**: Register a Web Push subscription for the authenticated user. Requires Bearer token.
+- **POST /api/push/unregister**: Remove a Web Push subscription. Requires Bearer token.
 
 ### Testing Strategy
 
@@ -139,10 +165,16 @@ Integration tests are excluded from default `npm test` runs. Use `npm test:integ
 
 ## Important Notes
 
-- Admin email is hardcoded as `jed.piezas@gmail.com` in multiple places
-- The app uses UUID-based user IDs throughout, not Firebase Auth UIDs
-- Production requires environment variables: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
-- Firestore rules are minimal - tighten for production use
+- Admin email lives in one place: `ADMIN_EMAILS` in `src/lib/config.js` (checked via `isAdmin()`). Update it there.
+- The app uses UUID-based user IDs throughout, not Firebase Auth UIDs. A user's Firestore doc id **is** their UUID (`users/{uuid}`), and message `fromId`/`toId` reference those UUIDs.
+- Production requires environment variables: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (server Admin SDK), plus the `NEXT_PUBLIC_FIREBASE_*` client config including `NEXT_PUBLIC_FIREBASE_VAPID_KEY`. Push notifications go through Firebase Cloud Messaging (Admin SDK `messaging`), so they reuse the server Admin credentials — there is no separate web-push private key.
+- **Firestore rules are hardened** (`firestore.rules`), not minimal:
+  - Per-collection field allowlists (`keys().hasOnly([...])`) on every create/update.
+  - Message create verifies sender identity (`authMatchesUser(fromId)`), requires the recipient to exist, and enforces the 1–4000 char content bound at the DB layer.
+  - `lastRead` writes are owner-scoped by doc-id prefix; reads are owner-only except a deliberate carve-out that lets DM read-receipt markers be cross-read (public-feed markers stay owner-only).
+  - `typing` and `reactions` enforce deterministic doc-id shapes and owner identity.
+  - `allow delete: if false` (and no `update`) across messages/users/lastRead; a catch-all denies every other collection.
+- **Anonymity is a trust model, not a hard guarantee.** The Public Feed and Santa/Recipient split hide identities in the UI, but `messages` are readable by any signed-in participant (rules `allow read: if isSignedIn()`), so identities are technically discoverable by a determined participant inspecting raw data. Treat anonymity as social convention enforced by the client.
 
 ## Workflows & Guidelines
 
