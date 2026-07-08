@@ -2,31 +2,31 @@
  * @jest-environment jsdom
  */
 
-import Home from '../src/app/page';
+import Home from '../../src/app/page';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { RealtimeMessagesProvider } from '../src/context/RealtimeMessagesContext';
-import { useUser } from '../src/hooks/useUser';
+import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
+import { useUser } from '../../src/hooks/useUser';
 
 // Mock dependencies
-jest.mock('../src/hooks/useUser', () => ({
+jest.mock('../../src/hooks/useUser', () => ({
     useUser: jest.fn()
 }));
 
 // Mock components that make network calls or complex imports
-jest.mock('../src/components/Chat', () => {
+jest.mock('../../src/components/Chat', () => {
     const MockChat = () => <div data-testid="chat-component">Chat</div>;
     MockChat.displayName = 'MockChat';
     return MockChat;
 });
 
-jest.mock('../src/components/PublicFeed', () => {
+jest.mock('../../src/components/PublicFeed', () => {
     const MockPublicFeed = () => <div data-testid="feed-component">Feed</div>;
     MockPublicFeed.displayName = 'MockPublicFeed';
     return MockPublicFeed;
 });
 
 // Mock hooks to avoid real Firebase calls
-jest.mock('../src/hooks/useRealtimeMessages', () => ({
+jest.mock('../../src/hooks/useRealtimeMessages', () => ({
     useRealtimeAllMessages: jest.fn(() => []), // Return empty array by default
     useRealtimeAllMessagesLoading: jest.fn(() => false),
     useRealtimeAllReactions: jest.fn(() => []),
