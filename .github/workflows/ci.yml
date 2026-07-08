@@ -31,6 +31,25 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      - run: npm ci
+      - name: Java Setup
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Run Integration Tests
+        run: npx firebase emulators:exec --project=demo-secret-santa "npm run test:integration"
+
   e2e-test:
     name: E2E Tests
     runs-on: ubuntu-latest
