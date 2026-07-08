@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
 import { getConversationId, parseConversationId } from '@/lib/message-utils';
 import ReactionChips from '@/components/ReactionChips';
@@ -67,76 +67,84 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
         }
         return {};
     });
-    const usersById = new Map(allUsers.map(user => [user.id, user]));
-
     // Group messages by conversationId to ensure threads are consolidated correctly.
-    const threads = {};
-    messages.forEach(rawMsg => {
-        // Resolve users to determine direction and names
-        const fromUser = usersById.get(rawMsg.fromId);
-        const toUser = usersById.get(rawMsg.toId);
+    const { threadsById, threadList } = useMemo(() => {
+        const usersById = new Map(allUsers.map(user => [user.id, user]));
+        const threadsById = {};
+        messages.forEach(rawMsg => {
+            // Resolve users to determine direction and names
+            const fromUser = usersById.get(rawMsg.fromId);
+            const toUser = usersById.get(rawMsg.toId);
 
-        const parsedConversation = parseConversationId(rawMsg.conversationId);
-        const legacyRole = parsedConversation ? null : resolveLegacyRole(rawMsg, fromUser, toUser);
-        const legacyConversation = parsedConversation ? null : resolveLegacyConversation(rawMsg, legacyRole);
+            const parsedConversation = parseConversationId(rawMsg.conversationId);
+            const legacyRole = parsedConversation ? null : resolveLegacyRole(rawMsg, fromUser, toUser);
+            const legacyConversation = parsedConversation ? null : resolveLegacyConversation(rawMsg, legacyRole);
 
-        const isSantaMsg = parsedConversation
-            ? rawMsg.fromId === parsedConversation.santaId
-            : legacyRole.isSantaMsg;
-        const isAmbiguousLegacy = !parsedConversation && legacyRole.isAmbiguous;
+            const isSantaMsg = parsedConversation
+                ? rawMsg.fromId === parsedConversation.santaId
+                : legacyRole.isSantaMsg;
+            const isAmbiguousLegacy = !parsedConversation && legacyRole.isAmbiguous;
 
-        let fromName = rawMsg.fromName;
-        let toName = rawMsg.toName;
+            let fromName = rawMsg.fromName;
+            let toName = rawMsg.toName;
 
-        if (!fromName) {
-            fromName = (isSantaMsg && !isAmbiguousLegacy)
-                ? 'Secret Santa'
-                : (fromUser?.name || 'Unknown');
-        }
-        if (!toName) {
-            toName = (isSantaMsg && !isAmbiguousLegacy)
-                ? (toUser?.name || 'Unknown')
-                : ((isAmbiguousLegacy ? toUser?.name : 'Secret Santa') || 'Unknown');
-        }
+            if (!fromName) {
+                fromName = (isSantaMsg && !isAmbiguousLegacy)
+                    ? 'Secret Santa'
+                    : (fromUser?.name || 'Unknown');
+            }
+            if (!toName) {
+                toName = (isSantaMsg && !isAmbiguousLegacy)
+                    ? (toUser?.name || 'Unknown')
+                    : ((isAmbiguousLegacy ? toUser?.name : 'Secret Santa') || 'Unknown');
+            }
 
-        const msg = {
-            ...rawMsg,
-            isSantaMsg,
-            fromName,
-            toName
-        };
-
-        let threadId;
-        let recipientName;
-
-        if (parsedConversation) {
-            threadId = msg.conversationId;
-            recipientName = usersById.get(parsedConversation.recipientId)?.name || 'Unknown';
-        } else {
-            threadId = legacyConversation.conversationId;
-            recipientName = usersById.get(legacyConversation.recipientId)?.name || 'Unknown';
-        }
-
-        const stableThreadName = `🎁 ${recipientName}'s Gift Exchange`;
-
-        if (!threads[threadId]) {
-            threads[threadId] = {
-                id: threadId,
-                name: stableThreadName,
-                messages: [],
-                lastMessage: msg
+            const msg = {
+                ...rawMsg,
+                isSantaMsg,
+                fromName,
+                toName
             };
-        }
-        threads[threadId].messages.push(msg);
-        // Update lastMessage if this message is newer
-        if (new Date(msg.timestamp) > new Date(threads[threadId].lastMessage.timestamp)) {
-            threads[threadId].lastMessage = msg;
-        }
-    });
 
-    const threadList = Object.values(threads).sort((a, b) =>
-        new Date(b.lastMessage.timestamp) - new Date(a.lastMessage.timestamp)
-    );
+            let threadId;
+            let recipientName;
+
+            if (parsedConversation) {
+                threadId = msg.conversationId;
+                recipientName = usersById.get(parsedConversation.recipientId)?.name || 'Unknown';
+            } else {
+                threadId = legacyConversation.conversationId;
+                recipientName = usersById.get(legacyConversation.recipientId)?.name || 'Unknown';
+            }
+
+            const stableThreadName = `🎁 ${recipientName}'s Gift Exchange`;
+
+            if (!threadsById[threadId]) {
+                threadsById[threadId] = {
+                    id: threadId,
+                    name: stableThreadName,
+                    messages: [],
+                    lastMessage: msg
+                };
+            }
+            threadsById[threadId].messages.push(msg);
+            // Update lastMessage if this message is newer
+            if (new Date(msg.timestamp) > new Date(threadsById[threadId].lastMessage.timestamp)) {
+                threadsById[threadId].lastMessage = msg;
+            }
+        });
+
+        Object.values(threadsById).forEach(thread => {
+            thread.messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        });
+
+        const threadList = Object.values(threadsById).sort((a, b) =>
+            new Date(b.lastMessage.timestamp) - new Date(a.lastMessage.timestamp)
+        );
+
+        return { threadsById, threadList };
+    }, [messages, allUsers]);
+
     const threadIdsKey = threadList.map(thread => thread.id).join('|');
 
     // Hydrate lastViewed from Firestore-backed lastRead documents on first load.
@@ -193,13 +201,14 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
         };
     }, [userId, threadIdsKey]);
 
-    // Calculate unread count for each thread
-    threadList.forEach(thread => {
+    // Calculate unread count for each thread without mutating the memoized objects
+    const threadListWithUnread = useMemo(() => threadList.map(thread => {
         const lastViewedTime = lastViewed[thread.id] || new Date(0).toISOString();
-        thread.unreadCount = thread.messages.filter(
+        const unreadCount = thread.messages.filter(
             msg => msg.timestamp > lastViewedTime
         ).length;
-    });
+        return { ...thread, unreadCount };
+    }), [threadList, lastViewed]);
 
     // Handle viewing a thread - mark as read
     const handleThreadClick = (threadId) => {
@@ -238,17 +247,17 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                     </button>
                 )}
                 <h3 className="subtitle" style={{ margin: 0 }}>
-                    {selectedThread ? threads[selectedThread]?.name : 'Public Feed 🎄'}
+                    {selectedThread ? threadsById[selectedThread]?.name : 'Public Feed 🎄'}
                 </h3>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto' }}>
                 {!selectedThread ? (
                     // Thread List
-                    threadList.length === 0 ? (
+                    threadListWithUnread.length === 0 ? (
                         <p className="text-muted">No active conversations yet...</p>
                     ) : (
-                        threadList.map(thread => (
+                        threadListWithUnread.map(thread => (
                             <div
                                 key={thread.id}
                                 onClick={() => handleThreadClick(thread.id)}
@@ -292,7 +301,7 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                     // Message View
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px' }}>
                         {(() => {
-                            const sortedMessages = threads[selectedThread]?.messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)) || [];
+                            const sortedMessages = threadsById[selectedThread]?.messages || [];
                             const groups = [];
 
                             sortedMessages.forEach(msg => {
