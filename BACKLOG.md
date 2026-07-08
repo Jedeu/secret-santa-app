@@ -46,3 +46,4 @@ From the July 2026 codebase audit. Completed so far: dependency security upgrade
 - `PublicFeed.js` regroups/re-sorts all messages every render with no `useMemo` and computes `unreadCount` by mutating `threadList` mid-render.
 - Relative timestamps in `Chat.js` ("Just now", "5m ago") never refresh without a re-render; a slow interval tick would keep them honest.
 - Five test files sit at `__tests__/` root outside the documented `unit/`/`integration/` split — confusing naming, they run in the unit suite.
+- E2E send assertions can't detect server-side send failures: the sender-view check is satisfied by optimistic outbox rendering, and `messaging.spec.ts` wraps its cross-user delivery check in an `if (visible)` guard that silently skips on failure (found via PR #59's `aud`-mismatch investigation).

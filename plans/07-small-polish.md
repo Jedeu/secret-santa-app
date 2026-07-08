@@ -1,6 +1,6 @@
 # Plan 7: Small Polish Items (Backlog §7)
 
-Six independent fixes, each small enough for a single commit. Could ship as one "polish" PR.
+Seven independent fixes, each small enough for a single commit. Could ship as one "polish" PR.
 
 ## 7.1 Restore pinch-zoom (WCAG 1.4.4)
 
@@ -40,6 +40,17 @@ Six independent fixes, each small enough for a single commit. Could ship as one 
 - **Ground truth**: five test files sit at `__tests__/` root outside the documented `unit/`/`integration/` split, and all run in the unit suite: `admin_ui.test.js`, `integration_flows.test.js`, `outbox_retry_delivery.test.js`, `participants.test.js`, `realtime_hooks.test.js`. (Directories `__tests__/api/`, `__tests__/lib/`, `__tests__/context/` also sit outside the split — leave them or fold into `unit/` as a follow-up.)
 - **Change**: `git mv` the five files into `__tests__/unit/`. Rename `integration_flows.test.js` → `app_flows.test.js` (it's a jsdom unit test; the name is the confusing part). Fix any relative imports to `../helpers`/`./setup` (they'd become `../helpers` → check each file's imports after the move).
 - **Watch out**: `npm run test:unit` ignores `/helpers/` and `setup.js` by pattern — moving test files (not helpers) doesn't change what runs, but confirm the count of collected suites is identical before/after (`npx jest --listTests | wc -l`).
+
+## 7.7 Make e2e send assertions detect server-side send failures
+
+- **Ground truth**: discovered during PR #59 — for months, two e2e message sends failed server-side in CI (Auth-emulator tokens carried `aud: demo-secret-santa` while the Admin SDK expected `xmasteak-app`) yet the suite stayed green, because:
+  - `e2e/unread-badge.spec.ts:154-168` `sendMessage()` asserts the message text appears in the **sender's own page**, which the optimistic outbox renders even when `/api/messages/send` fails.
+  - `e2e/messaging.spec.ts:166-174` does check the recipient's page, but wraps it in `if (await messageInB.isVisible(...))` — a failed delivery is silently skipped, not failed.
+  - PR #59 fixed the project-id mismatch itself (`--project=xmasteak-app` in both CI emulator jobs); this item fixes the assertions so a future send regression can't hide behind optimistic rendering again.
+- **Change**:
+  - `messaging.spec.ts`: replace the `if (visible)` guard around the recipient-side check with an unconditional `await expect(messageInB).toBeVisible({ timeout: ... })`. The guard's original excuse ("assignments may differ") is moot — the test already seeds via `/api/dev/seed` + `/api/dev/assign`.
+  - `unread-badge.spec.ts` `sendMessage()`: after the sender-view wait, also assert no failed/retry state on the message (or assert delivery via the observing context, which these two-context tests already have open). Alternatively, intercept the `/api/messages/send` response via `page.waitForResponse` and assert `response.ok()`.
+- **Verify**: `npx firebase emulators:exec --project=xmasteak-app "npm run test:e2e"` passes; then temporarily break token verification (or point `--project` back to `demo-secret-santa`) and confirm the suite now **fails** instead of passing with buried `[WebServer]` errors.
 
 ## Verification (whole plan)
 

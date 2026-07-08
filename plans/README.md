@@ -10,7 +10,7 @@ One plan per section of `BACKLOG.md` (July 2026 audit follow-ups). Each is groun
 | [04-correctness-robustness](04-correctness-robustness.md) | 4 | useUser dup race, email casing, assign guard, trust-model doc | M | Item 3 waits on Plan 5 decision |
 | [05-admin-assign-decision](05-admin-assign-decision.md) | 5 | Delete vs. re-home the admin shuffle (**user decision**) | S | — |
 | [06-modernization](06-modernization.md) | 6 | Persistence API, TS migration, legacy backfill, dep majors | L (phased) | 6.4 coordinates with Plan 4 item 1 |
-| [07-small-polish](07-small-polish.md) | 7 | Six one-commit fixes (zoom, lint, gitignore, memo, timestamps, test layout) | S | 7.4 easier after 6.3 |
+| [07-small-polish](07-small-polish.md) | 7 | Seven one-commit fixes (zoom, lint, gitignore, memo, timestamps, test layout, e2e send assertions) | S | 7.4 easier after 6.3 |
 
 **Suggested order**: 03 (CI safety net first) → 07 → 02 → 05 (decision) → 04 → 01 (docs last, so they describe the post-fix state) → 06 phased.
 
