@@ -159,11 +159,20 @@ async function sendMessage(
     const messageInput = page.getByPlaceholder('Type a message...');
     await messageInput.fill(messageText);
 
-    // Click send button
+    // Click send button and capture the server's response — the optimistic
+    // outbox renders the message locally even when /api/messages/send fails,
+    // so the sender-side wait below cannot detect a server-side send failure.
     const sendButton = page.getByRole('button', { name: /send/i });
+    const sendResponsePromise = page.waitForResponse(
+        response => response.url().includes('/api/messages/send')
+            && response.request().method() === 'POST'
+    );
     await sendButton.click();
 
-    // Wait for message to appear in the chat (confirms Firestore write)
+    const sendResponse = await sendResponsePromise;
+    expect(sendResponse.ok(), `/api/messages/send returned ${sendResponse.status()}`).toBeTruthy();
+
+    // Wait for message to appear in the chat
     await page.getByText(messageText).waitFor({ timeout: 5000 });
 }
 
