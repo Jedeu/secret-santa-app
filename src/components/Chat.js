@@ -95,6 +95,20 @@ export default function Chat({
         return unsubscribe;
     }, [currentUser.id, conversationId]);
 
+    // Re-render once a minute so relative timestamps ("Just now", "5m ago")
+    // don't go stale between message-driven renders. Skips ticks while the
+    // tab is backgrounded; the next foreground tick catches labels up.
+    const [, setTimestampTick] = useState(0);
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            if (isDocumentVisible()) {
+                setTimestampTick(tick => tick + 1);
+            }
+        }, 60_000);
+
+        return () => clearInterval(intervalId);
+    }, []);
+
     // Mark messages as read when component mounts, user changes, OR new messages arrive
     // This ensures badge clears even when new messages arrive while viewing the tab.
     // Gate on visibility: a background tab must not clear the badge (see visibilitychange
