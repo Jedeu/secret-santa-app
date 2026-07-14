@@ -59,14 +59,24 @@ export async function getLastReadTimestamp(userId, conversationId) {
         const docRef = doc(firestore, 'lastRead', key);
         const snapshot = await getDoc(docRef);
 
+        // A local marker may have been written while the fetch was in flight
+        // (e.g. the user opened the chat, marking it read). Never let the
+        // fetched value move the cache backwards, or the unread badge would
+        // re-inflate for a conversation the user is already viewing.
+        const existing = lastReadCache.get(key);
+
         if (!snapshot.exists()) {
-            const defaultTime = EPOCH_ISO;
-            lastReadCache.set(key, defaultTime);
-            return defaultTime;
+            if (existing !== undefined) {
+                return existing;
+            }
+            lastReadCache.set(key, EPOCH_ISO);
+            return EPOCH_ISO;
         }
 
-        const fallback = lastReadCache.get(key) || EPOCH_ISO;
-        const timestamp = normalizeLastReadValue(snapshot.data()?.lastReadAt, fallback);
+        const timestamp = normalizeLastReadValue(snapshot.data()?.lastReadAt, existing || EPOCH_ISO);
+        if (existing !== undefined && new Date(existing) > new Date(timestamp)) {
+            return existing;
+        }
         lastReadCache.set(key, timestamp);
         return timestamp;
     } catch (error) {
