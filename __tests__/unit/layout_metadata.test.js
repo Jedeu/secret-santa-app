@@ -1,4 +1,4 @@
-import { metadata } from '@/app/layout';
+import { metadata, viewport } from '@/app/layout';
 
 describe('app layout metadata', () => {
     test('exports PWA metadata for manifest and iOS standalone mode', () => {
@@ -16,5 +16,14 @@ describe('app layout metadata', () => {
                 apple: '/icons/icon-180x180.png',
             },
         });
+    });
+
+    test('viewport does not block pinch-zoom (WCAG 1.4.4)', () => {
+        expect(viewport).toEqual({
+            width: 'device-width',
+            initialScale: 1,
+        });
+        expect(viewport).not.toHaveProperty('maximumScale');
+        expect(viewport).not.toHaveProperty('userScalable');
     });
 });

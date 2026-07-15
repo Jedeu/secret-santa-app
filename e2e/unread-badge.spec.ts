@@ -159,11 +159,20 @@ async function sendMessage(
     const messageInput = page.getByPlaceholder('Type a message...');
     await messageInput.fill(messageText);
 
-    // Click send button
+    // Click send button and capture the server's response — the optimistic
+    // outbox renders the message locally even when /api/messages/send fails,
+    // so the sender-side wait below cannot detect a server-side send failure.
     const sendButton = page.getByRole('button', { name: /send/i });
+    const sendResponsePromise = page.waitForResponse(
+        response => response.url().includes('/api/messages/send')
+            && response.request().method() === 'POST'
+    );
     await sendButton.click();
 
-    // Wait for message to appear in the chat (confirms Firestore write)
+    const sendResponse = await sendResponsePromise;
+    expect(sendResponse.ok(), `/api/messages/send returned ${sendResponse.status()}`).toBeTruthy();
+
+    // Wait for message to appear in the chat
     await page.getByText(messageText).waitFor({ timeout: 5000 });
 }
 
@@ -186,6 +195,20 @@ async function getBadgeCount(
     }
 
     return 0;
+}
+
+/**
+ * Polls until the santa-tab badge settles at 0.
+ *
+ * On a fresh page the unread count can be briefly inflated: until the
+ * lastRead cache primes from Firestore, the badge counts ALL historical
+ * messages in the conversation. One-shot samples of an "initial" badge
+ * count race against that priming, so baselines must poll to a settled 0.
+ */
+async function expectSantaBadgeToSettleAtZero(page: Page): Promise<void> {
+    await expect(async () => {
+        expect(await getBadgeCount(page, 'santa')).toBe(0);
+    }).toPass({ timeout: 5000, intervals: [500] });
 }
 
 /**
@@ -348,21 +371,24 @@ test.describe('Unread Badge Functionality', () => {
         }
 
         test('Badge appears when message arrives while NOT viewing that tab', async ({ page }) => {
+            // View the Santa tab first: Chat marks the conversation read
+            // synchronously in the lastRead cache, giving a deterministic
+            // zero baseline instead of a racy "initial count" sample.
+            await switchToTab(page, 'santa');
+            await expectSantaBadgeToSettleAtZero(page);
+
             // Navigate to Recipient tab (NOT Santa tab)
             await switchToTab(page, 'recipient');
-
-            // Record initial badge count (may have accumulated messages from previous tests)
-            const initialBadge = await getBadgeCount(page, 'santa');
 
             // Inject a message from Santa via API
             await injectMessageFromSanta(page, 'Test message from Santa via API');
 
-            // Smart wait: Poll for badge to increase by 1
+            // Smart wait: Poll for the badge to show the injected message
             // This handles real-time sync timing more reliably than fixed delays
             await expect(async () => {
                 const badge = await getBadgeCount(page, 'santa');
-                expect(badge).toBeGreaterThanOrEqual(initialBadge + 1);
-            }).toPass({ timeout: 5000, intervals: [500] });
+                expect(badge).toBeGreaterThanOrEqual(1);
+            }).toPass({ timeout: 10000, intervals: [500] });
         });
 
         test('Badge clears when clicking tab', async ({ page }) => {
@@ -392,9 +418,9 @@ test.describe('Unread Badge Functionality', () => {
             // Navigate to Santa tab FIRST (viewing it)
             await switchToTab(page, 'santa');
 
-            // Verify badge starts at 0
-            const initialBadge = await getBadgeCount(page, 'santa');
-            expect(initialBadge).toBe(0);
+            // Verify the badge settles at 0 (polling — a one-shot sample can
+            // catch the pre-priming inflated count)
+            await expectSantaBadgeToSettleAtZero(page);
 
             // Inject a message while VIEWING the Santa tab
             await injectMessageFromSanta(page, 'Message while watching');
@@ -409,21 +435,24 @@ test.describe('Unread Badge Functionality', () => {
         });
 
         test('Badge increments for multiple rapid messages', async ({ page }) => {
+            // View the Santa tab first for a deterministic zero baseline
+            // (see expectSantaBadgeToSettleAtZero for why sampling an
+            // "initial count" instead is racy).
+            await switchToTab(page, 'santa');
+            await expectSantaBadgeToSettleAtZero(page);
+
             // Navigate to Recipient tab (NOT Santa tab)
             await switchToTab(page, 'recipient');
-
-            // Get initial badge count (may have accumulated messages from previous tests)
-            const initialBadge = await getBadgeCount(page, 'santa');
 
             // Inject 2 messages rapidly
             await injectMessageFromSanta(page, 'Rapid message 1');
             await injectMessageFromSanta(page, 'Rapid message 2');
 
-            // Smart wait: Poll for badge to show at least 2 MORE than initial
+            // Smart wait: Poll for badge to count both injected messages
             await expect(async () => {
                 const badge = await getBadgeCount(page, 'santa');
-                expect(badge).toBeGreaterThanOrEqual(initialBadge + 2);
-            }).toPass({ timeout: 5000, intervals: [500] });
+                expect(badge).toBeGreaterThanOrEqual(2);
+            }).toPass({ timeout: 10000, intervals: [500] });
         });
 
     });

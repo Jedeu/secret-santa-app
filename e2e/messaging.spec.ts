@@ -118,10 +118,19 @@ test.describe('Chat Component Structure', () => {
 });
 
 test.describe('E2E Messaging with Dev Login', () => {
+    const FIRESTORE_EMULATOR = 'http://127.0.0.1:8080';
+    const PROJECT_ID = 'xmasteak-app';
+
     test('Santa can send message to Recipient', async ({ browser }) => {
-        // Context A: Login as Jed (Santa)
+        // Context A: Login as Jed (the sender)
         const contextA = await browser.newContext();
         const pageA = await contextA.newPage();
+
+        // Seed participants and assignments up front so every assertion below
+        // can be unconditional — a missing assignment is a test failure, not a
+        // reason to silently skip the send.
+        await pageA.request.post('/api/dev/seed');
+        await pageA.request.post('/api/dev/assign');
 
         // Login as Jed via Dev Login
         await pageA.goto('/dev/login');
@@ -129,54 +138,62 @@ test.describe('E2E Messaging with Dev Login', () => {
         await pageA.waitForURL('/');
         // Don't use networkidle - Firebase keeps connections open
         await pageA.waitForLoadState('domcontentloaded');
-        await pageA.waitForTimeout(2000);
 
-        // Context B: Login as Natalie (Recipient)
+        // Assignments are shuffled randomly, so look up who Jed is actually
+        // buying for and observe that user's page in Context B.
+        await expect.poll(async () => {
+            const data = await pageA.evaluate(() => (window as any).__e2eUserData__);
+            return data?.recipientId;
+        }, { timeout: 10000 }).toBeTruthy();
+        const recipientId = await pageA.evaluate(() => (window as any).__e2eUserData__.recipientId);
+
+        const recipientDocResponse = await pageA.request.get(
+            `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT_ID}/databases/(default)/documents/users/${recipientId}`,
+            { headers: { Authorization: 'Bearer owner' } }
+        );
+        expect(recipientDocResponse.ok(), 'recipient user doc must exist in the emulator').toBeTruthy();
+        const recipientName = (await recipientDocResponse.json()).fields.name.stringValue;
+
+        // Context B: Login as Jed's assigned recipient
         const contextB = await browser.newContext();
         const pageB = await contextB.newPage();
 
-        // Login as Natalie via Dev Login
         await pageB.goto('/dev/login');
-        await pageB.getByRole('button', { name: 'Natalie' }).click();
+        await pageB.getByRole('button', { name: recipientName, exact: true }).click();
         await pageB.waitForURL('/');
         // Don't use networkidle - Firebase keeps connections open
         await pageB.waitForLoadState('domcontentloaded');
-        await pageB.waitForTimeout(2000);
+
+        // The recipient sees Santa's messages on the Santa tab
+        const santaTabB = pageB.getByRole('button', { name: /santa/i });
+        await santaTabB.click();
 
         // Generate unique message content for this test run
         const testMessage = `E2E Test Message ${Date.now()}`;
 
-        // On Page A (Jed): Find the message input and send a message
+        // On Page A (Jed): send a message to the recipient
         const messageInputA = pageA.getByPlaceholder(/type a message/i);
+        await expect(messageInputA).toBeVisible({ timeout: 10000 });
+        await messageInputA.fill(testMessage);
 
-        // Check if we can find a message input (requires Jed to have an assignment)
-        if (await messageInputA.isVisible({ timeout: 5000 })) {
-            await messageInputA.fill(testMessage);
+        const sendResponsePromise = pageA.waitForResponse(
+            response => response.url().includes('/api/messages/send')
+                && response.request().method() === 'POST'
+        );
+        await pageA.getByRole('button', { name: /send/i }).click();
 
-            // Click send button
-            const sendButton = pageA.getByRole('button', { name: /send/i });
-            await sendButton.click();
+        // The optimistic outbox renders the message on the sender's page even
+        // when the server rejects it, so assert the API actually accepted it.
+        const sendResponse = await sendResponsePromise;
+        expect(sendResponse.ok(), `/api/messages/send returned ${sendResponse.status()}`).toBeTruthy();
 
-            // Verify message appears in sender's view (Page A)
-            await expect(pageA.getByText(testMessage)).toBeVisible({ timeout: 10000 });
+        // Verify message appears in sender's view (Page A)
+        await expect(pageA.getByText(testMessage)).toBeVisible({ timeout: 10000 });
 
-            // Verify message appears in recipient's view (Page B)
-            // Note: This requires Jed to be assigned to Natalie
-            // If assignments are different, this check may need adjustment
-            const messageInB = pageB.getByText(testMessage);
-
-            // Give time for real-time sync
-            await pageB.waitForTimeout(2000);
-
-            // Check if message is visible (if Jed→Natalie assignment exists)
-            if (await messageInB.isVisible({ timeout: 5000 })) {
-                await expect(messageInB).toBeVisible();
-            }
-        } else {
-            // If no message input, the user might not have an assignment yet
-            // This is expected in a fresh emulator state before seeding
-            console.log('Message input not visible - user may not have assignment');
-        }
+        // Verify delivery on the recipient's page — unconditionally. A failed
+        // delivery must fail the test, not be skipped (a server-side send
+        // regression once hid behind this check being optional).
+        await expect(pageB.getByText(testMessage)).toBeVisible({ timeout: 10000 });
 
         // Cleanup
         await contextA.close();

@@ -86,6 +86,50 @@ describe('lastReadClient', () => {
             const result = await getLastReadTimestamp('user1', 'conv2');
             expect(result).toBe(new Date(0).toISOString());
         });
+
+        test('should not clobber a marker written while the fetch was in flight (missing doc)', async () => {
+            // getDoc resolves only when we say so, simulating a slow fetch
+            let resolveGetDoc;
+            mockGetDoc.mockReturnValueOnce(new Promise(resolve => {
+                resolveGetDoc = resolve;
+            }));
+
+            const fetchPromise = getLastReadTimestamp('user1', 'conv1');
+
+            // While the fetch is in flight, the user opens the chat and marks it read
+            updateLastReadTimestamp('user1', 'conv1');
+            const localMarker = getCachedTimestamp('user1', 'conv1');
+            expect(localMarker).toBeTruthy();
+
+            // The fetch comes back with "no doc" — it must not reset the cache to epoch
+            resolveGetDoc({ exists: () => false });
+            const result = await fetchPromise;
+
+            expect(result).toBe(localMarker);
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(localMarker);
+        });
+
+        test('should not move the cache backwards when the fetched value is older', async () => {
+            let resolveGetDoc;
+            mockGetDoc.mockReturnValueOnce(new Promise(resolve => {
+                resolveGetDoc = resolve;
+            }));
+
+            const fetchPromise = getLastReadTimestamp('user1', 'conv1');
+
+            updateLastReadTimestamp('user1', 'conv1');
+            const localMarker = getCachedTimestamp('user1', 'conv1');
+
+            // Server has a stale marker older than the local one
+            resolveGetDoc({
+                exists: () => true,
+                data: () => ({ lastReadAt: '2020-01-01T00:00:00.000Z' })
+            });
+            const result = await fetchPromise;
+
+            expect(result).toBe(localMarker);
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(localMarker);
+        });
     });
 
     describe('updateLastReadTimestamp', () => {

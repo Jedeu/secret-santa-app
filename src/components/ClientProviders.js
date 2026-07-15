@@ -124,9 +124,10 @@ export default function ClientProviders({ children }) {
     }, [dismissToast]);
 
     useEffect(() => {
+        const timeoutMap = timeoutMapRef.current;
         return () => {
-            timeoutMapRef.current.forEach(timeoutId => clearTimeout(timeoutId));
-            timeoutMapRef.current.clear();
+            timeoutMap.forEach(timeoutId => clearTimeout(timeoutId));
+            timeoutMap.clear();
         };
     }, []);
 
