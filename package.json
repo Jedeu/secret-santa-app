@@ -11,7 +11,6 @@
     "test:unit": "jest --testPathIgnorePatterns=/integration/ --testPathIgnorePatterns=/helpers/ --testPathIgnorePatterns=setup.js --testPathIgnorePatterns=/e2e/",
     "test:integration": "jest --config jest.integration.config.js --runInBand",
     "test:watch": "jest --watch",
-    "test:smart": "./.claude/skills/test-runner/run-tests.sh",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "emulators": "firebase emulators:start"

@@ -44,8 +44,9 @@ auto-detect development mode and connect to the emulators at `127.0.0.1` — no
 production Firebase project is needed for local work.
 
 To seed local data, POST to the dev routes (development only): `/api/init` or
-`/api/dev/seed`. See the `db-admin` workflow / `src/lib/participants.js` for the
-participant list.
+`/api/dev/seed`. The participant list lives in `src/lib/participants.js`.
+See [Runtime verification](docs/runtime-verification.md) for local setup and
+multi-user browser checks.
 
 ## Testing
 

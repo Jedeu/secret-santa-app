@@ -1,6 +1,15 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. It is the source of truth for architecture, the data model, and code-level constraints. The agent workflow is defined once, in `AGENTS.md`.
+
+## Agent Workflow (read first)
+
+- A Claude Code session in this repository is a **delegate** of the primary assistant: the **planner** or the **implementer**, as its launch prompt states. With no role assigned by the launch prompt or by the user in the session, it is read-only and asks first.
+- Delegates do not run checks, tests, builds, emulators, or browsers, do not use Git, do not touch databases, and do not delegate to subagents or skills. The primary assistant owns all of that.
+- No implementation starts without a user-approved `PLAN.md`.
+- These bullets are a summary. `AGENTS.md` governs and is imported on the next line; if its content is not in your context, read `AGENTS.md` before doing anything else.
+
+@AGENTS.md
 
 ## Project Overview
 
@@ -25,14 +34,19 @@ npm run lint
 npm test
 
 # Run unit tests only
-npm test:unit
+npm run test:unit
 
 # Run integration tests (requires emulators running)
-npm test:integration
+npm run test:integration
+
+# Run Playwright end-to-end tests (requires emulators; Playwright starts or reuses the dev server)
+npm run test:e2e
 
 # Run tests in watch mode
-npm test:watch
+npm run test:watch
 ```
+
+Node `>=22.13.0 <23` is required (`engines` in `package.json`; `.nvmrc` pins `22.15.0`). CI (`.github/workflows/ci.yml`) runs the emulator-backed suites through `npx firebase emulators:exec --project=xmasteak-app "<npm script>"`. In the agent workflow only the primary assistant runs these commands (see `AGENTS.md`). Local setup and multi-user browser verification notes are in [`docs/runtime-verification.md`](docs/runtime-verification.md).
 
 ## Firebase Emulator Setup
 
@@ -152,7 +166,7 @@ Tests are split into unit and integration:
 - **Unit tests** (`__tests__/unit/`): No external dependencies, use mocks
 - **Integration tests** (`__tests__/integration/`): Require Firebase Emulators running
 
-Integration tests are excluded from default `npm test` runs. Use `npm test:integration` explicitly.
+Integration tests are excluded from default `npm test` runs. Use `npm run test:integration` explicitly.
 
 ## Key Files
 
@@ -161,31 +175,26 @@ Integration tests are excluded from default `npm test` runs. Use `npm test:integ
 - `src/components/PublicFeed.js`: Public message feed grouped by conversation
 - `src/lib/firestore.js`: Firestore operations (ensureAllParticipants, assignSecretSantas, etc.)
 - `firebase.json`: Emulator configuration
-- `firestore.rules`: Security rules (currently permissive for authenticated users)
+- `firestore.rules`: Firestore security rules (authoritative; summarized under Important Notes)
+- `AGENTS.md`: Agent workflow contract (roles, approval loop, safety boundaries)
 
 ## Important Notes
 
 - Admin email lives in one place: `ADMIN_EMAILS` in `src/lib/config.js` (checked via `isAdmin()`). Update it there.
 - The app uses UUID-based user IDs throughout, not Firebase Auth UIDs. A user's Firestore doc id **is** their UUID (`users/{uuid}`), and message `fromId`/`toId` reference those UUIDs.
 - Production requires environment variables: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (server Admin SDK), plus the `NEXT_PUBLIC_FIREBASE_*` client config including `NEXT_PUBLIC_FIREBASE_VAPID_KEY`. Push notifications go through Firebase Cloud Messaging (Admin SDK `messaging`), so they reuse the server Admin credentials — there is no separate web-push private key.
-- **Firestore rules are hardened** (`firestore.rules`), not minimal:
+- **Firestore rules are hardened** (`firestore.rules`), not minimal. The rules file is authoritative; this list is a reading aid, not a guarantee:
   - Per-collection field allowlists (`keys().hasOnly([...])`) on every create/update.
   - Message create verifies sender identity (`authMatchesUser(fromId)`), requires the recipient to exist, and enforces the 1–4000 char content bound at the DB layer.
   - `lastRead` writes are owner-scoped by doc-id prefix; reads are owner-only except a deliberate carve-out that lets DM read-receipt markers be cross-read (public-feed markers stay owner-only).
   - `typing` and `reactions` enforce deterministic doc-id shapes and owner identity.
-  - `allow delete: if false` (and no `update`) across messages/users/lastRead; a catch-all denies every other collection.
+  - `allow delete: if false` on users/messages/lastRead. `messages` also deny `update`; `users` and `lastRead` allow only the specific updates the rules check. `typing` and `reactions` let a signed-in user delete their own docs. A catch-all denies every other collection.
 - **Anonymity is a trust model, not a hard guarantee.** The Public Feed and Santa/Recipient split hide identities in the UI, but `messages` are readable by any signed-in participant (rules `allow read: if isSignedIn()`), so identities are technically discoverable by a determined participant inspecting raw data. Treat anonymity as social convention enforced by the client.
 
 ## Workflows & Guidelines
 
-### 1. State Persistence (The PLAN.md Rule)
-For any task involving more than 2 files, **persist your plan to disk**.
-- **Why:** To enable context clearing and "Architect -> Builder" handoffs.
-- **How:** Use your internal planning capabilities to generate a `PLAN.md` first.
-- **Content:**
-  - **Goal:** One-line summary.
-  - **Proposed Changes:** List specific files (e.g., `src/lib/message-utils.js`) and the changes intended.
-  - **Verification:** The specific test command (`npm run test:integration`) to run afterwards.
+### 1. Plans (The PLAN.md Rule)
+All implementation is driven by a user-approved root `PLAN.md`. Its required sections, who writes and saves it, and the review and approval loop are defined in `AGENTS.md`.
 
 ### 2. Strict SDK Separation
 The separation between Admin and Client SDKs is strict.
@@ -196,7 +205,7 @@ The separation between Admin and Client SDKs is strict.
 ### 3. Known Complexity (Refactoring Targets)
 Be extra careful when modifying message routing logic.
 - **Legacy vs New:** `src/lib/message-utils.js` contains complex logic to handle both legacy messages (no `conversationId`) and new messages.
-- **Consult Tests:** Always run `__tests__/unit/PublicFeed_grouping.test.js` after touching message logic.
+- **Consult Tests:** Any change to message logic must be verified with `__tests__/unit/PublicFeed_grouping.test.js`. Plans touching this area list it under Verification; the primary assistant runs it (see `AGENTS.md`).
 
 ### 4. Firestore Listener Management (Read Optimization)
 
@@ -227,27 +236,3 @@ The app uses optimized Firestore listeners to minimize reads on the free tier.
 - Page refresh: ONE initial read of all messages (N reads for N docs)
 - Send message: ONE read (only the new message via listener update)
 - View message tab: ZERO reads (filtered client-side from cached messages)
-
-## The RPI Workflow (Research -> Plan -> Implement)
-
-To avoid the "Dumb Zone" (context saturation), we strictly follow this 3-phase process using our specialized agents.
-
-### Phase 1: Research (The Truth)
-* **Agent:** `codebase-research-analyst`
-* **Goal:** Understand the *current* state of the codebase relevant to the request.
-* **Action:** Read files, check imports, verify assumptions against ground truth (code > docs).
-* **Output:** `RESEARCH.md` (A summary of relevant file paths, existing function signatures, and "gotchas").
-
-### Phase 2: Plan (The Contract)
-* **Agent:** `architect-planner`
-* **Input:** User Request + `RESEARCH.md`.
-* **Goal:** Define *how* we will solve it without ambiguity.
-* **Action:** Create a detailed implementation guide defining **Code Contracts**.
-* **Output:** `PLAN.md` (Must include exact file paths, new function signatures, and test cases).
-* **Review:** The user MUST approve `PLAN.md` before coding starts.
-
-### Phase 3: Implement (The Build)
-* **Agent:** `phase3-implementer`
-* **Input:** `PLAN.md` (and `PROGRESS.md` if resuming).
-* **Action:** Write code and run tests (`test-runner`).
-* **Compaction Rule:** If the session gets too long (e.g., >20 exchanges) or you receive warnings of hitting >90% usage limits, summarize progress to `PROGRESS.md` so that another phase3-implementer agent can pick up where you left off in a new session
