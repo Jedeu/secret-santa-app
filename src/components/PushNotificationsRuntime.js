@@ -4,36 +4,46 @@ import { useEffect } from 'react';
 import { useToast } from '@/components/ClientProviders';
 import {
     attachForegroundListener,
+    cancelPushOperations,
     syncPushTokenIfGranted,
 } from '@/lib/push-client';
 
-export default function PushNotificationsRuntime({ currentUser }) {
+export default function PushNotificationsRuntime({ currentUser, authUid }) {
     const { showToast } = useToast();
+    const userId = currentUser?.id;
 
     useEffect(() => {
-        if (!currentUser?.id) {
-            return;
+        if (!userId || !authUid) {
+            return undefined;
         }
 
-        syncPushTokenIfGranted().catch((error) => {
+        syncPushTokenIfGranted({ authUid }).catch((error) => {
             console.error('Push token sync failed:', error);
         });
 
-        const unsubscribe = attachForegroundListener((payload) => {
-            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-                return;
-            }
+        let unsubscribe = () => { };
+        try {
+            unsubscribe = attachForegroundListener((payload) => {
+                if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+                    return;
+                }
 
-            const notificationBody = payload?.data?.notificationBody
-                || payload?.notification?.body
-                || 'You have a new message';
-            showToast(notificationBody, 'success');
-        });
+                const notificationBody = payload?.data?.notificationBody
+                    || payload?.notification?.body
+                    || 'You have a new message';
+                showToast(notificationBody, 'success');
+            });
+        } catch (error) {
+            console.error('Push foreground listener failed:', error);
+        }
 
         return () => {
-            unsubscribe();
+            cancelPushOperations();
+            if (typeof unsubscribe === 'function') {
+                unsubscribe();
+            }
         };
-    }, [currentUser?.id, showToast]);
+    }, [userId, authUid, showToast]);
 
     return null;
 }

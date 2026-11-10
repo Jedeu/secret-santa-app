@@ -23,6 +23,16 @@ jest.mock('firebase/firestore', () => ({
     limit: jest.fn(),
     getDocs: jest.fn(() => Promise.resolve({ empty: true, docs: [] })),
     addDoc: jest.fn(),
+    doc: jest.fn((db, ...segments) => ({ path: segments.join('/') })),
+    getDoc: jest.fn(() => Promise.resolve({ exists: () => false, data: () => undefined })),
+    setDoc: jest.fn(() => Promise.resolve()),
+    deleteDoc: jest.fn(() => Promise.resolve()),
+    Timestamp: {
+        fromDate: jest.fn((date) => ({
+            toDate: () => date,
+            toMillis: () => date.getTime(),
+        })),
+    },
     serverTimestamp: jest.fn(),
     onSnapshot: jest.fn((query, callback) => {
         // Return unsubscribe function

@@ -2,11 +2,11 @@
 import { useRef, useState } from 'react';
 import { collection, query, where, getDocs, limit, doc, runTransaction } from 'firebase/firestore';
 import { firestore } from '@/lib/firebase-client';
-import { signOut as firebaseSignOut } from 'firebase/auth';
-import { clientAuth } from '@/lib/firebase-client';
+import { signOutCurrentUser } from '@/lib/sign-out';
 import { getParticipantNames, getParticipantEmail } from '@/lib/participants';
 import { isAdmin } from '@/lib/config';
 import { useToast } from '@/components/ClientProviders';
+import { useAdminReset } from '@/hooks/useAdminReset';
 
 /**
  * RecipientSelector - First-time user recipient selection flow
@@ -114,30 +114,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
         }
     };
 
-    const handleReset = async () => {
-        if (!confirm('WARNING: This will delete ALL data (users, messages, assignments). This cannot be undone. Are you sure?')) return;
-
-        try {
-            const token = await clientAuth.currentUser.getIdToken();
-            const res = await fetch('/api/admin/reset', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (res.ok) {
-                showToast('System reset successfully.', 'success');
-                if (onReset) {
-                    onReset();
-                }
-            } else {
-                const error = await res.json();
-                showToast(`Failed to reset system: ${error.error || 'Unknown error'}`);
-            }
-        } catch (err) {
-            console.error('Reset error:', err);
-            showToast('Failed to reset system.');
-        }
-    };
+    const handleReset = useAdminReset({ onComplete: onReset });
 
     return (
         <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
@@ -184,7 +161,9 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
                 )}
 
                 <button
-                    onClick={() => firebaseSignOut(clientAuth)}
+                    onClick={() => {
+                        signOutCurrentUser().catch((error) => console.error('Sign out error:', error));
+                    }}
                     style={{
                         color: 'var(--text-muted)',
                         fontSize: '14px',

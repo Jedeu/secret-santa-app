@@ -82,7 +82,8 @@ describe('Chat Component Unread Logic', () => {
             />
         );
 
-        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
+        // Fourth argument: the latest observed message timestamp (not "now").
+        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId, initialMessages[0].timestamp);
     });
 
     it('should call updateLastReadTimestamp when new messages arrive', () => {
@@ -105,9 +106,10 @@ describe('Chat Component Unread Logic', () => {
             jest.advanceTimersByTime(2500);
         });
 
+        const laterTimestamp = new Date(Date.parse(initialMessages[0].timestamp) + 60_000).toISOString();
         const newMessages = [
             ...initialMessages,
-            { id: '2', fromId: 'user2', toId: 'user1', content: 'New message', timestamp: new Date().toISOString() }
+            { id: '2', fromId: 'user2', toId: 'user1', content: 'New message', timestamp: laterTimestamp }
         ];
 
         rerender(
@@ -121,7 +123,22 @@ describe('Chat Component Unread Logic', () => {
             />
         );
 
-        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
+        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId, laterTimestamp);
+    });
+
+    it('does not mark read when there are no messages', () => {
+        render(
+            <Chat
+                currentUser={currentUser}
+                otherUser={otherUser}
+                isSantaChat={false}
+                unreadCount={0}
+                messages={[]}
+                conversationId={conversationId}
+            />
+        );
+
+        expect(updateLastReadTimestamp).not.toHaveBeenCalled();
     });
 
     it('auto-scrolls when an incoming message arrives and user is near bottom', () => {
@@ -342,7 +359,7 @@ describe('Chat Component Unread Logic', () => {
                 document.dispatchEvent(new Event('visibilitychange'));
             });
 
-            expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
+            expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId, initialMessages[0].timestamp);
         });
     });
 });

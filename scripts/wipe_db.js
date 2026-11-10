@@ -1,52 +1,54 @@
-const { initializeApp, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { APP_COLLECTIONS, getEmulatorFirestore } = require('./lib/emulator-firestore');
 
-// Initialize Firebase Admin for Firestore Emulator
-if (!getApps().length) {
-    initializeApp({
-        projectId: 'demo-secret-santa',
-    });
+// Emulator only (exits 1 for a non-loopback FIRESTORE_EMULATOR_HOST).
+const db = getEmulatorFirestore();
+
+const MAX_BATCH_OPERATIONS = 400;
+
+async function deleteCollection(collectionName) {
+    let deleted = 0;
+    let snapshot;
+    do {
+        snapshot = await db.collection(collectionName).limit(MAX_BATCH_OPERATIONS).get();
+        if (snapshot.empty) break;
+        const batch = db.batch();
+        snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+        deleted += snapshot.size;
+    } while (snapshot.size > 0);
+    return deleted;
 }
 
-const db = getFirestore();
-db.settings({
-    host: 'localhost:8080',
-    ssl: false
-});
-
 async function wipeDatabase() {
+    let exitCode = 0;
     try {
-        console.log('\n=== WIPING DATABASE ===\n');
+        console.log('\n=== WIPING EMULATOR DATABASE ===\n');
 
-        // Delete all messages
-        const messagesSnapshot = await db.collection('messages').get();
-        console.log(`Deleting ${messagesSnapshot.size} messages...`);
+        for (const collectionName of APP_COLLECTIONS) {
+            const deleted = await deleteCollection(collectionName);
+            console.log(`✓ ${collectionName}: deleted ${deleted} documents`);
+        }
 
-        const messageBatch = db.batch();
-        messagesSnapshot.docs.forEach(doc => {
-            messageBatch.delete(doc.ref);
+        // Advance the lifecycle epoch so any stale admission/push state is fenced off.
+        const lifecycleRef = db.collection('system').doc('lifecycle');
+        const lifecycleSnap = await lifecycleRef.get();
+        const previousEpoch = lifecycleSnap.exists ? (lifecycleSnap.data().epoch || 0) : 0;
+        const epoch = previousEpoch + 1;
+        await lifecycleRef.set({
+            epoch,
+            state: 'active',
+            resetId: null,
+            resetStartedAt: null,
+            updatedAt: new Date().toISOString(),
         });
-        await messageBatch.commit();
-        console.log('✓ Messages deleted');
-
-        // Delete all users
-        const usersSnapshot = await db.collection('users').get();
-        console.log(`Deleting ${usersSnapshot.size} users...`);
-
-        const userBatch = db.batch();
-        usersSnapshot.docs.forEach(doc => {
-            userBatch.delete(doc.ref);
-        });
-        await userBatch.commit();
-        console.log('✓ Users deleted');
+        console.log(`✓ system/lifecycle: epoch ${epoch}, active`);
 
         console.log('\n=== DATABASE WIPED CLEAN ===\n');
-        console.log('You can now seed fresh data with: npm run seed:users\n');
-
     } catch (error) {
-        console.error('Error wiping database:', error);
+        console.error('Error wiping database:', error?.message || error);
+        exitCode = 1;
     } finally {
-        process.exit(0);
+        process.exit(exitCode);
     }
 }
 

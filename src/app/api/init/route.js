@@ -3,6 +3,18 @@ import { ensureAllParticipants } from '@/lib/firestore';
 import { PARTICIPANTS } from '@/lib/participants';
 import { auth as adminAuth } from '@/lib/firebase';
 import { isAdmin } from '@/lib/config';
+import { admissionErrorResponse } from '@/lib/participant-admission';
+
+function initErrorResponse(error) {
+    if (error?.isAdmissionError && error.code === 'PROFILE_CONFLICT') {
+        return NextResponse.json({
+            error: error.message,
+            code: 'PROFILE_CONFLICT',
+            conflicts: typeof error.conflicts === 'number' ? error.conflicts : 1,
+        }, { status: 409 });
+    }
+    return admissionErrorResponse(error);
+}
 
 /**
  * Initialize the application by ensuring all participants exist in the database
@@ -47,6 +59,9 @@ export async function POST(request) {
         if (error.code === 'auth/argument-error') {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
+
+        const mapped = initErrorResponse(error);
+        if (mapped) return mapped;
 
         return NextResponse.json({ error: 'Failed to initialize participants' }, { status: 500 });
     }

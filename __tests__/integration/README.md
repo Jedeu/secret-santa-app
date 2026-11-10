@@ -19,9 +19,13 @@ npm run test:integration
 
 - **firestore_participants.test.js**: Tests participant initialization and management with real Firestore
 - **init.test.js**: Tests the `/api/init` endpoint that seeds participant data
-- **firestore-rules-lastRead.test.js**: Validates scoped `lastRead` read rules (DM allowed, `publicFeed_*` denied cross-user)
+- **firestore-rules-lastRead.test.js**: Validates scoped `lastRead` read rules (DM allowed, `publicFeed_*` denied cross-user), exact doc ids, monotonic markers and the future-skew bound
 - **firestore-rules-typing.test.js**: Validates `typing` ID integrity and auth-match write constraints
 - **firestore-rules-reactions.test.js**: Validates `reactions` create/delete/update constraints and message existence
+- **participant-admission.test.js**: Concurrent admissions, seeding and linking resolve to exactly one UUID profile per participant
+- **reset-fencing.test.js**: Overlapping, crashed and held resets (via test barrier hooks) fence assignments, delayed sends, push registration and admission
+- **firestore-rules-admission.test.js**: Rules admit only current-epoch participants, deny client user/message creates, and require reciprocal recipient claims
+- **push-registration.test.js**: Push status/register/unregister epoch+revision preconditions and fenced invalid-token cleanup (crafted FCM responses, no real FCM)
 
 ## Test Data Management
 

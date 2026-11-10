@@ -32,6 +32,10 @@ jest.mock('@/components/ClientProviders', () => ({
     useToast: () => ({ showToast: mockShowToast })
 }));
 
+jest.mock('@/lib/sign-out', () => ({
+    signOutCurrentUser: jest.fn(() => Promise.resolve())
+}));
+
 describe('RecipientSelector transactional claim', () => {
     const currentUser = {
         id: 'user-1',

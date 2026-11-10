@@ -1,18 +1,19 @@
 'use client';
 
 import { useEffect } from 'react';
-import { clearDeliveredOrExpired, drainOutboxForUser } from '@/lib/message-outbox';
+import { cancelOutboxDrains, clearDeliveredOrExpired, drainOutboxForUser } from '@/lib/message-outbox';
 
-export default function MessageOutboxRuntime({ currentUser }) {
+export default function MessageOutboxRuntime({ currentUser, authUid }) {
+    const userId = currentUser?.id;
+
     useEffect(() => {
-        const userId = currentUser?.id;
-        if (!userId) {
-            return;
+        if (!userId || !authUid) {
+            return undefined;
         }
 
         const runDrain = () => {
             clearDeliveredOrExpired({ fromUserId: userId });
-            drainOutboxForUser({ fromUserId: userId }).catch((error) => {
+            drainOutboxForUser({ ownerUid: authUid, fromUserId: userId }).catch((error) => {
                 console.error('Outbox drain failed:', error);
             });
         };
@@ -37,8 +38,9 @@ export default function MessageOutboxRuntime({ currentUser }) {
             window.removeEventListener('focus', onFocus);
             window.removeEventListener('online', onOnline);
             document.removeEventListener('visibilitychange', onVisibility);
+            cancelOutboxDrains();
         };
-    }, [currentUser?.id]);
+    }, [userId, authUid]);
 
     return null;
 }

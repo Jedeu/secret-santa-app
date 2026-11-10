@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ensureAllParticipants } from '@/lib/firestore';
 import { PARTICIPANTS } from '@/lib/participants';
+import { admissionErrorResponse } from '@/lib/participant-admission';
 
 export async function POST() {
     if (process.env.NODE_ENV !== 'development') {
@@ -33,6 +34,9 @@ export async function POST() {
             }
         });
     } catch (error) {
+        const mapped = admissionErrorResponse(error);
+        if (mapped) return mapped;
+
         console.error('Seeding failed:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }

@@ -1,13 +1,23 @@
 import { NextResponse } from 'next/server';
 import { firestore } from '@/lib/firebase';
 import { v4 as uuidv4 } from 'uuid';
+import { assertLifecycleActive, admissionErrorResponse } from '@/lib/participant-admission';
+import { getConversationId, resolveAuthorizedConversationId } from '@/lib/message-utils';
+
+class InjectError extends Error {
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
 
 /**
  * DEV-ONLY: Inject a message into Firestore for E2E testing
- * This bypasses Firestore security rules by using the Admin SDK
- * 
+ * Uses the Admin SDK (clients cannot create messages under the security rules).
+ * fromId must be toId's Santa with a reciprocal assignment.
+ *
  * Usage: POST /api/dev/inject-message
- * Body: { fromId, toId, content, displayName? }
+ * Body: { fromId, toId, content, displayName? }  (displayName is accepted but not stored)
  */
 export async function POST(request) {
     if (process.env.NODE_ENV !== 'development') {
@@ -16,7 +26,7 @@ export async function POST(request) {
 
     try {
         const body = await request.json();
-        const { fromId, toId, content, displayName = 'Secret Santa 🎅' } = body;
+        const { fromId, toId, content } = body;
 
         if (!fromId || !toId || !content) {
             return NextResponse.json({
@@ -24,33 +34,55 @@ export async function POST(request) {
             }, { status: 400 });
         }
 
-        // Generate message ID and conversation ID
         // IMPORTANT: Must match the format in src/lib/message-utils.js getConversationId()
-        // Format: santa_{santaId}_recipient_{recipientId}
-        // In this case: fromId is Santa, toId is recipient
+        // Format: santa_{santaId}_recipient_{recipientId}; fromId is Santa, toId is recipient.
+        const requestedConversationId = getConversationId(fromId, toId);
         const messageId = uuidv4();
-        const conversationId = `santa_${fromId}_recipient_${toId}`;
 
-        // Create the message document
-        const messageData = {
-            id: messageId,
-            fromId,
-            toId,
-            conversationId,
-            content,
-            displayName,
-            timestamp: new Date().toISOString()
-        };
+        const message = await firestore.runTransaction(async (tx) => {
+            await assertLifecycleActive(tx);
+            const [fromSnap, toSnap] = await tx.getAll(
+                firestore.collection('users').doc(fromId),
+                firestore.collection('users').doc(toId)
+            );
+            if (!fromSnap.exists || !toSnap.exists) {
+                throw new InjectError(400, 'Both users must exist');
+            }
+            const fromData = fromSnap.data() || {};
+            const toData = toSnap.data() || {};
+            const resolved = resolveAuthorizedConversationId(
+                { ...fromData, id: fromData.id ?? fromSnap.id },
+                { ...toData, id: toData.id ?? toSnap.id },
+                requestedConversationId
+            );
+            if (resolved.error) {
+                throw new InjectError(400, `Invalid conversation for this pair (${resolved.error})`);
+            }
 
-        // Write to Firestore using Admin SDK (bypasses security rules)
-        await firestore.collection('messages').doc(messageId).set(messageData);
+            const messageData = {
+                id: messageId,
+                fromId,
+                toId,
+                content,
+                timestamp: new Date().toISOString(),
+                conversationId: resolved.conversationId,
+            };
+            tx.create(firestore.collection('messages').doc(messageId), messageData);
+            return messageData;
+        });
 
         return NextResponse.json({
             success: true,
-            messageId,
-            conversationId
+            messageId: message.id,
+            conversationId: message.conversationId
         });
     } catch (error) {
+        if (error instanceof InjectError) {
+            return NextResponse.json({ error: error.message }, { status: error.status });
+        }
+        const mapped = admissionErrorResponse(error);
+        if (mapped) return mapped;
+
         console.error('Failed to inject message:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }

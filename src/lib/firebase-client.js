@@ -14,6 +14,13 @@ const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || (process.env.NODE_ENV === 'development' ? 'fake-api-key-for-emulator' : undefined),
     authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || (process.env.NODE_ENV === 'development' ? 'localhost' : undefined),
     projectId: process.env.NODE_ENV === 'development' ? 'xmasteak-app' : process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    // Required by Firebase Cloud Messaging (getToken) in the page.
+    ...(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+        ? { messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }
+        : {}),
+    ...(process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+        ? { appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID }
+        : {}),
 };
 
 // Initialize Firebase only once

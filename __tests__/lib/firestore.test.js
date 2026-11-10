@@ -1,29 +1,114 @@
-import { getUserByEmail, createUser, getAllUsers, batchUpdateUsers, resetDatabase } from '@/lib/firestore';
+import {
+    getUserByEmail,
+    createUser,
+    getAllUsers,
+    resetDatabase,
+    resetAndReseedParticipants,
+    assignUsersInTransaction,
+    APP_COLLECTIONS,
+} from '@/lib/firestore';
+import {
+    beginReset,
+    assertResetOwner,
+    completeReset,
+    assertLifecycleActive,
+    ensureParticipantProfiles,
+    AdmissionError,
+} from '@/lib/participant-admission';
 
 // Mock Firebase Admin SDK
 jest.mock('@/lib/firebase', () => ({
     firestore: {
-        collection: jest.fn(function () { return this; }),
-        where: jest.fn(function () { return this; }),
-        limit: jest.fn(function () { return this; }),
-        orderBy: jest.fn(function () { return this; }),
+        collection: jest.fn(),
+        where: jest.fn(),
+        limit: jest.fn(),
+        orderBy: jest.fn(),
         get: jest.fn(),
-        doc: jest.fn(() => ({
-            set: jest.fn(),
-            get: jest.fn(),
-            update: jest.fn(),
-            ref: 'mockRef'
-        })),
+        doc: jest.fn(),
         batch: jest.fn(),
+        runTransaction: jest.fn(),
     }
 }));
+
+jest.mock('@/lib/participant-admission', () => {
+    const actual = jest.requireActual('@/lib/participant-admission');
+    return {
+        ...actual,
+        beginReset: jest.fn(),
+        assertResetOwner: jest.fn(),
+        completeReset: jest.fn(),
+        assertLifecycleActive: jest.fn(),
+        ensureParticipantProfiles: jest.fn(),
+    };
+});
 
 // Get reference to the mocked firestore for test setup
 import { firestore as mockFirestore } from '@/lib/firebase';
 
+function useChainableFirestore() {
+    mockFirestore.collection.mockImplementation(function () { return this; });
+    mockFirestore.where.mockImplementation(function () { return this; });
+    mockFirestore.limit.mockImplementation(function () { return this; });
+    mockFirestore.orderBy.mockImplementation(function () { return this; });
+    mockFirestore.doc.mockImplementation(() => ({
+        set: jest.fn(),
+        get: jest.fn(),
+        update: jest.fn(),
+        ref: 'mockRef'
+    }));
+}
+
+/**
+ * Fake collections for reset tests. Each transaction records the collection it read,
+ * the limit it used and how many deletes it issued.
+ */
+function useResetCollections(docCounts = {}, { failDeleteIn = null } = {}) {
+    const remaining = { ...docCounts };
+    const transactions = [];
+
+    mockFirestore.collection.mockImplementation((name) => ({
+        limit: (n) => ({ __collection: name, __limit: n }),
+        doc: (id) => ({ __collection: name, id }),
+    }));
+
+    mockFirestore.runTransaction.mockImplementation(async (fn) => {
+        const record = { collection: null, limit: null, deletes: 0 };
+        transactions.push(record);
+        const tx = {
+            get: jest.fn(async (query) => {
+                record.collection = query.__collection;
+                record.limit = query.__limit;
+                const available = remaining[query.__collection] || 0;
+                const count = Math.min(available, query.__limit);
+                remaining[query.__collection] = available - count;
+                return {
+                    docs: Array.from({ length: count }, (_, i) => ({
+                        ref: { collection: query.__collection, i }
+                    }))
+                };
+            }),
+            delete: jest.fn((ref) => {
+                if (failDeleteIn && ref.collection === failDeleteIn) {
+                    throw new Error('delete failed');
+                }
+                record.deletes += 1;
+            }),
+        };
+        return fn(tx);
+    });
+
+    return { transactions };
+}
+
 describe('Firestore Functions (Unit Tests with Mocks)', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        useChainableFirestore();
+        beginReset.mockResolvedValue({ resetId: 'reset-1', epoch: 2 });
+        assertResetOwner.mockResolvedValue(undefined);
+        completeReset.mockResolvedValue(undefined);
+        assertLifecycleActive.mockResolvedValue({ epoch: 1 });
+        ensureParticipantProfiles.mockResolvedValue({ created: 0, linked: 0, existing: 0 });
     });
 
     describe('getUserByEmail', () => {
@@ -88,95 +173,173 @@ describe('Firestore Functions (Unit Tests with Mocks)', () => {
         });
     });
 
-    describe('batchUpdateUsers', () => {
-        test('should batch update multiple users', async () => {
-            const mockBatch = {
-                update: jest.fn(),
-                commit: jest.fn().mockResolvedValue(undefined)
-            };
-            mockFirestore.batch.mockReturnValue(mockBatch);
-            mockFirestore.doc.mockReturnValue({ ref: 'mockRef' });
+    describe('resetDatabase', () => {
+        test('APP_COLLECTIONS lists every app collection in deletion order', () => {
+            expect(APP_COLLECTIONS).toEqual([
+                'authIdentities', 'participantIndex', 'users', 'messages',
+                'lastRead', 'typing', 'reactions', 'pushTokens'
+            ]);
+        });
 
-            const updates = [
-                { id: '1', recipientId: '2', gifterId: '3' },
-                { id: '2', recipientId: '1', gifterId: '4' }
-            ];
+        test('begins, deletes all eight collections in order in owner-checked transactions, then completes', async () => {
+            const counts = Object.fromEntries(APP_COLLECTIONS.map((name) => [name, 1]));
+            const { transactions } = useResetCollections(counts);
 
-            await batchUpdateUsers(updates);
+            await resetDatabase();
 
-            expect(mockFirestore.batch).toHaveBeenCalled();
-            expect(mockBatch.update).toHaveBeenCalledTimes(2);
-            expect(mockBatch.commit).toHaveBeenCalled();
+            expect(beginReset).toHaveBeenCalledTimes(1);
+
+            // Each collection: one transaction deleting its doc, one finding it empty.
+            const order = [];
+            transactions.forEach((record) => {
+                if (order[order.length - 1] !== record.collection) {
+                    order.push(record.collection);
+                }
+            });
+            expect(order).toEqual(APP_COLLECTIONS);
+
+            // Every delete transaction checked reset ownership first.
+            expect(assertResetOwner).toHaveBeenCalledTimes(transactions.length);
+            assertResetOwner.mock.calls.forEach(([, resetId]) => {
+                expect(resetId).toBe('reset-1');
+            });
+
+            expect(completeReset).toHaveBeenCalledWith('reset-1');
+            expect(completeReset.mock.invocationCallOrder[0])
+                .toBeGreaterThan(Math.max(...assertResetOwner.mock.invocationCallOrder));
+        });
+
+        test('chunks deletes into transactions of at most 400 documents', async () => {
+            const { transactions } = useResetCollections({ users: 1201 });
+
+            await resetDatabase();
+
+            const userDeletes = transactions
+                .filter((record) => record.collection === 'users')
+                .map((record) => record.deletes);
+            expect(userDeletes).toEqual([400, 400, 400, 1, 0]);
+            transactions.forEach((record) => {
+                expect(record.limit).toBeLessThanOrEqual(400);
+                expect(record.deletes).toBeLessThanOrEqual(400);
+            });
+        });
+
+        test('awaits the afterBegin hook before deleting', async () => {
+            const { transactions } = useResetCollections({});
+            let transactionsAtHook = null;
+
+            await resetDatabase({
+                afterBegin: async () => {
+                    transactionsAtHook = transactions.length;
+                }
+            });
+
+            expect(transactionsAtHook).toBe(0);
+        });
+
+        test('on a delete error the reset is not completed and the error propagates', async () => {
+            useResetCollections({ messages: 3 }, { failDeleteIn: 'messages' });
+
+            await expect(resetDatabase()).rejects.toThrow('delete failed');
+            expect(completeReset).not.toHaveBeenCalled();
+        });
+
+        test('a superseded reset stops without completing', async () => {
+            useResetCollections({ users: 2 });
+            assertResetOwner.mockRejectedValueOnce(new AdmissionError('RESET_SUPERSEDED'));
+
+            await expect(resetDatabase()).rejects.toMatchObject({ code: 'RESET_SUPERSEDED' });
+            expect(completeReset).not.toHaveBeenCalled();
         });
     });
 
-    describe('resetDatabase', () => {
-        const APP_COLLECTIONS = ['users', 'messages', 'lastRead', 'typing', 'reactions', 'pushTokens'];
+    describe('resetAndReseedParticipants', () => {
+        test('reseeds with the reset id between delete and complete, awaiting hooks in order', async () => {
+            useResetCollections({});
+            const calls = [];
+            ensureParticipantProfiles.mockImplementation(async () => {
+                calls.push('reseed');
+                return { created: 2, linked: 0, existing: 0 };
+            });
+            completeReset.mockImplementation(async () => {
+                calls.push('complete');
+            });
+            const participants = [{ name: 'A', email: 'a@example.test' }];
 
-        test('should delete documents from every app collection', async () => {
-            const mockBatch = {
-                delete: jest.fn(),
-                commit: jest.fn().mockResolvedValue(undefined)
-            };
-            mockFirestore.batch.mockReturnValue(mockBatch);
-
-            // One doc per collection
-            mockFirestore.get.mockResolvedValue({
-                docs: [{ ref: 'mockRef' }]
+            await resetAndReseedParticipants(participants, {
+                afterBegin: async () => { calls.push('afterBegin'); },
+                afterDelete: async () => { calls.push('afterDelete'); },
+                afterReseed: async () => { calls.push('afterReseed'); },
             });
 
-            await resetDatabase();
-
-            APP_COLLECTIONS.forEach((collectionName) => {
-                expect(mockFirestore.collection).toHaveBeenCalledWith(collectionName);
-            });
-            expect(mockBatch.commit).toHaveBeenCalledTimes(APP_COLLECTIONS.length);
-            expect(mockBatch.delete).toHaveBeenCalledTimes(APP_COLLECTIONS.length);
+            expect(ensureParticipantProfiles).toHaveBeenCalledWith(participants, { resetId: 'reset-1' });
+            expect(calls).toEqual(['afterBegin', 'afterDelete', 'reseed', 'afterReseed', 'complete']);
         });
 
-        test('should skip batch commits for empty collections', async () => {
-            const mockBatch = {
-                delete: jest.fn(),
-                commit: jest.fn().mockResolvedValue(undefined)
+        test('a reseed failure leaves the reset incomplete', async () => {
+            useResetCollections({});
+            ensureParticipantProfiles.mockRejectedValue(new AdmissionError('PROFILE_CONFLICT'));
+
+            await expect(resetAndReseedParticipants([])).rejects.toMatchObject({ code: 'PROFILE_CONFLICT' });
+            expect(completeReset).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('assignUsersInTransaction', () => {
+        function useAssignTransaction(users) {
+            const usersCollection = {
+                __name: 'users',
+                doc: jest.fn((id) => ({ id })),
             };
-            mockFirestore.batch.mockReturnValue(mockBatch);
+            mockFirestore.collection.mockImplementation(() => usersCollection);
+            const tx = {
+                get: jest.fn(async () => ({
+                    docs: users.map((user) => ({ id: user.id, data: () => user }))
+                })),
+                update: jest.fn(),
+            };
+            mockFirestore.runTransaction.mockImplementation(async (fn) => fn(tx));
+            return { tx, usersCollection };
+        }
 
-            mockFirestore.get.mockResolvedValue({ docs: [] });
+        test('reads users inside the transaction and writes the built pairs', async () => {
+            const users = [{ id: 'u1' }, { id: 'u2' }];
+            const { tx, usersCollection } = useAssignTransaction(users);
+            const buildUpdates = jest.fn(() => ([
+                { id: 'u1', recipientId: 'u2', gifterId: 'u2' },
+                { id: 'u2', recipientId: 'u1', gifterId: 'u1' },
+            ]));
 
-            await resetDatabase();
+            const result = await assignUsersInTransaction(buildUpdates);
 
-            expect(mockBatch.commit).not.toHaveBeenCalled();
+            expect(assertLifecycleActive).toHaveBeenCalledWith(tx);
+            expect(tx.get).toHaveBeenCalledWith(usersCollection);
+            expect(buildUpdates).toHaveBeenCalledWith([
+                expect.objectContaining({ id: 'u1' }),
+                expect.objectContaining({ id: 'u2' }),
+            ]);
+            expect(tx.update).toHaveBeenCalledTimes(2);
+            expect(tx.update).toHaveBeenCalledWith({ id: 'u1' }, { recipientId: 'u2', gifterId: 'u2' });
+            expect(result).toEqual({ usersFound: 2, updated: 2 });
         });
 
-        test('should chunk deletes into batches of at most 500 operations', async () => {
-            const commitCalls = [];
-            const batches = [];
-            mockFirestore.batch.mockImplementation(() => {
-                const batch = {
-                    delete: jest.fn(),
-                    commit: jest.fn().mockImplementation(() => {
-                        commitCalls.push(batch.delete.mock.calls.length);
-                        return Promise.resolve();
-                    })
-                };
-                batches.push(batch);
-                return batch;
-            });
+        test('rejects when the lifecycle is not active and writes nothing', async () => {
+            const { tx } = useAssignTransaction([{ id: 'u1' }, { id: 'u2' }]);
+            assertLifecycleActive.mockRejectedValue(new AdmissionError('RESET_IN_PROGRESS'));
+            const buildUpdates = jest.fn();
 
-            const manyDocs = Array.from({ length: 1201 }, (_, i) => ({ ref: `ref-${i}` }));
-            // First collection has 1201 docs, the rest are empty
-            mockFirestore.get
-                .mockResolvedValueOnce({ docs: manyDocs })
-                .mockResolvedValue({ docs: [] });
+            await expect(assignUsersInTransaction(buildUpdates)).rejects.toMatchObject({ code: 'RESET_IN_PROGRESS' });
+            expect(buildUpdates).not.toHaveBeenCalled();
+            expect(tx.update).not.toHaveBeenCalled();
+        });
 
-            await resetDatabase();
+        test('writes nothing when buildUpdates returns null', async () => {
+            const { tx } = useAssignTransaction([{ id: 'u1' }]);
 
-            // 1201 docs -> batches of 500, 500, 201
-            expect(commitCalls).toEqual([500, 500, 201]);
-            batches.forEach((batch) => {
-                expect(batch.delete.mock.calls.length).toBeLessThanOrEqual(500);
-                expect(batch.commit).toHaveBeenCalledTimes(1);
-            });
+            const result = await assignUsersInTransaction(() => null);
+
+            expect(tx.update).not.toHaveBeenCalled();
+            expect(result).toEqual({ usersFound: 1, updated: 0 });
         });
     });
 });

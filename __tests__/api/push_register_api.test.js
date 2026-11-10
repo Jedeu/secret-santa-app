@@ -1,6 +1,7 @@
 import { POST } from '@/app/api/push/register/route';
-import { auth as adminAuth, firestore } from '@/lib/firebase';
+import { auth as adminAuth } from '@/lib/firebase';
 import { registerPushToken } from '@/lib/push-server';
+import { AdmissionError } from '@/lib/participant-admission';
 
 jest.mock('@/lib/firebase', () => ({
     auth: {
@@ -14,6 +15,9 @@ jest.mock('@/lib/firebase', () => ({
 jest.mock('@/lib/push-server', () => ({
     registerPushToken: jest.fn()
 }));
+
+const DECODED = { uid: 'auth-uid-1', email: 'member@example.test', email_verified: true };
+const PUSH_TOKEN = 'valid_token_value_1234567890';
 
 function createRequest({ token = null, body = {}, userAgent = 'Unit Test Agent' } = {}) {
     return {
@@ -34,14 +38,20 @@ function createRequest({ token = null, body = {}, userAgent = 'Unit Test Agent' 
     };
 }
 
+function staleError() {
+    const error = new Error('Push registration changed; refresh and try again');
+    error.code = 'STALE_REGISTRATION';
+    return error;
+}
+
 describe('POST /api/push/register', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        adminAuth.verifyIdToken.mockResolvedValue(DECODED);
     });
 
     test('returns 401 when auth header is missing', async () => {
-        const req = createRequest();
-        const res = await POST(req);
+        const res = await POST(createRequest());
         const data = await res.json();
 
         expect(res.status).toBe(401);
@@ -49,82 +59,100 @@ describe('POST /api/push/register', () => {
     });
 
     test('returns 400 for invalid token body', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ email: 'jed.piezas@gmail.com' });
-
-        const req = createRequest({
+        const res = await POST(createRequest({
             token: 'auth-token',
-            body: { token: 'short' }
-        });
-
-        const res = await POST(req);
+            body: { token: 'short', expectedEpoch: 1, expectedRevision: null }
+        }));
         const data = await res.json();
 
         expect(res.status).toBe(400);
         expect(data.error).toBe('Invalid push token');
     });
 
-    test('returns 403 when sender does not map to an app user', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ email: 'unknown@example.com' });
-
-        const usersCollection = {
-            where: jest.fn(() => ({
-                limit: jest.fn(() => ({
-                    get: jest.fn().mockResolvedValue({ empty: true, docs: [] })
-                }))
-            }))
-        };
-
-        firestore.collection.mockImplementation((name) => {
-            if (name === 'users') return usersCollection;
-            throw new Error(`Unexpected collection ${name}`);
-        });
-
-        const req = createRequest({
-            token: 'auth-token',
-            body: { token: 'valid_token_value_1234567890' }
-        });
-
-        const res = await POST(req);
+    test.each([
+        [{ token: PUSH_TOKEN }],
+        [{ token: PUSH_TOKEN, expectedEpoch: 1 }],
+        [{ token: PUSH_TOKEN, expectedRevision: null }],
+    ])('returns 400 PRECONDITION_REQUIRED when a precondition key is missing (%j)', async (body) => {
+        const res = await POST(createRequest({ token: 'auth-token', body }));
         const data = await res.json();
 
-        expect(res.status).toBe(403);
-        expect(data.error).toBe('Unauthorized sender');
+        expect(res.status).toBe(400);
+        expect(data.code).toBe('PRECONDITION_REQUIRED');
+        expect(registerPushToken).not.toHaveBeenCalled();
     });
 
-    test('registers push token for authenticated sender', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ email: 'jed.piezas@gmail.com' });
+    test.each([
+        [{ expectedEpoch: 0, expectedRevision: null }],
+        [{ expectedEpoch: 1.5, expectedRevision: null }],
+        [{ expectedEpoch: '1', expectedRevision: null }],
+        [{ expectedEpoch: 1, expectedRevision: 42 }],
+        [{ expectedEpoch: 1, expectedRevision: null, enabled: 'yes' }],
+    ])('returns 400 for invalid precondition types (%j)', async (extra) => {
+        const res = await POST(createRequest({ token: 'auth-token', body: { token: PUSH_TOKEN, ...extra } }));
 
-        const usersCollection = {
-            where: jest.fn(() => ({
-                limit: jest.fn(() => ({
-                    get: jest.fn().mockResolvedValue({
-                        empty: false,
-                        docs: [{ data: () => ({ id: 'user-1', email: 'jed.piezas@gmail.com' }) }]
-                    })
-                }))
-            }))
-        };
+        expect(res.status).toBe(400);
+        expect(registerPushToken).not.toHaveBeenCalled();
+    });
 
-        firestore.collection.mockImplementation((name) => {
-            if (name === 'users') return usersCollection;
-            throw new Error(`Unexpected collection ${name}`);
-        });
+    test('maps STALE_REGISTRATION to 409', async () => {
+        registerPushToken.mockRejectedValue(staleError());
 
-        const req = createRequest({
+        const res = await POST(createRequest({
             token: 'auth-token',
-            body: { token: 'valid_token_value_1234567890' },
-            userAgent: 'iPhone Safari'
-        });
+            body: { token: PUSH_TOKEN, expectedEpoch: 1, expectedRevision: 'rev-old' }
+        }));
+        const data = await res.json();
 
-        const res = await POST(req);
+        expect(res.status).toBe(409);
+        expect(data.code).toBe('STALE_REGISTRATION');
+    });
+
+    test('maps RESET_IN_PROGRESS to 503', async () => {
+        registerPushToken.mockRejectedValue(new AdmissionError('RESET_IN_PROGRESS'));
+
+        const res = await POST(createRequest({
+            token: 'auth-token',
+            body: { token: PUSH_TOKEN, expectedEpoch: 1, expectedRevision: null }
+        }));
+
+        expect(res.status).toBe(503);
+    });
+
+    test('registers with the decoded token, preconditions and requested state', async () => {
+        registerPushToken.mockResolvedValue({ epoch: 3, revision: 'rev-new', enabled: false });
+
+        const res = await POST(createRequest({
+            token: 'auth-token',
+            body: { token: PUSH_TOKEN, expectedEpoch: 3, expectedRevision: 'rev-old', enabled: false },
+            userAgent: 'iPhone Safari'
+        }));
         const data = await res.json();
 
         expect(res.status).toBe(200);
-        expect(data.success).toBe(true);
+        expect(data).toEqual({ success: true, epoch: 3, revision: 'rev-new', enabled: false });
         expect(registerPushToken).toHaveBeenCalledWith({
-            userId: 'user-1',
-            token: 'valid_token_value_1234567890',
+            decodedToken: DECODED,
+            token: PUSH_TOKEN,
+            expectedEpoch: 3,
+            expectedRevision: 'rev-old',
+            enabled: false,
             userAgent: 'iPhone Safari'
         });
+    });
+
+    test('defaults enabled to true and accepts a null revision', async () => {
+        registerPushToken.mockResolvedValue({ epoch: 1, revision: 'rev-1', enabled: true });
+
+        const res = await POST(createRequest({
+            token: 'auth-token',
+            body: { token: PUSH_TOKEN, expectedEpoch: 1, expectedRevision: null }
+        }));
+
+        expect(res.status).toBe(200);
+        expect(registerPushToken).toHaveBeenCalledWith(expect.objectContaining({
+            expectedRevision: null,
+            enabled: true
+        }));
     });
 });

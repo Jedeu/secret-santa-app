@@ -1,94 +1,130 @@
-# Research: Project Agent Workflow Contract
+# Research: Bug-sweep remediation plan
 
-## User requirements
-- Primary GPT assistant owns codebase research, context preparation, adversarial plan review and feedback to Fable, code review, all executed checks, Git management, and browser/computer work.
-- Claude Code Fable 5.2, xhigh: planning only.
-- Claude Code Opus 5.5, xhigh: implementation only.
-- First task: Fable assesses necessary changes to CLAUDE.md and other project-specific instructions/settings.
-- Reviewed PLAN.md requires user approval before implementation. This task is planning, not authorization to alter workflow settings or application behavior.
-- User clarification during planning: instructions/settings changes such as CLAUDE.md only need ordinary review, not an adversarial challenge round. Reserve adversarial review for substantive application plans.
-- Subsequent user directions: launch Claude delegates visibly through Herdr, use Opus 5.5 at medium effort for this particular implementation, and close the other agents when work is done. Approval covers the planned individual protected-file edits; do not repeatedly request the same approval.
-- Completion: Opus performed only file edits; primary reviewed, deleted the three retired agent definitions, and ran documentation/configuration checks. No application code, dependencies, CI, helpers, user settings, or service workers were changed by this task. No commits or staging performed.
+## Request and ownership
 
-## Repository baseline
-- Started on `main`; primary assistant created `chore/agent-workflow-contract` for this task.
-- Existing user changes, not ours: tracked modification to `.claude/settings.local.json`; untracked `public/sw.js`, `public/workbox-f1770938.js`, `public/worker-2a484529a5551160.js`.
-- Do not overwrite, stage, delete, or reclassify those changes without explicit approval.
-- Claude Code installed: 2.1.321. Local `--help` advertises model selection, xhigh effort, per-invocation tools, and plan permission mode. Exact requested model access is not yet verified.
-- Previous launch failed before inference due to expired OAuth; user has reauthenticated and `claude auth status` now confirms login.
-- Fable launch succeeded after reauthentication: stream initialization and actual response messages report `claude-fable-5-2`; CLI was explicitly passed `--effort xhigh`. Effective tools are only Glob, Grep, Read, with no MCP servers.
-- Current host Node: v26.5.0. `package.json` requires >=22.13.0 <23. Primary assistant must choose a compatible runtime before future application checks.
-- No app tests, builds, database operations, website navigation, or deployments have been performed for this planning task.
+The user asks Claude Fable 5.2 to read `BUG_REPORT.md` and prepare an efficient, correct implementation plan covering every reported bug, ready for a later Opus implementer. The user explicitly requires the primary assistant to review the plan, review the eventual implementation, and execute the tests. This is planning only; neither the request nor this file is approval to implement.
 
-## Verified instruction/configuration findings
+Use `AGENTS.md` and `CLAUDE.md` for the workflow and architecture contract. Planner: `claude-fable-5-2`, xhigh effort, read/search tools only. Later implementer: Claude Opus 5.5, **high** effort by the user's latest explicit instruction; edits only after approval. The primary performs adversarial review, all execution, checks, Git, and runtime verification.
 
-### CLAUDE.md
-- RPI section assigns research to `codebase-research-analyst`, planning to `architect-planner`, implementation plus tests to `phase3-implementer`.
-- Workflow conflicts with the user's new ownership; approval requirement should remain explicit.
-- Development commands contain invalid `npm test:unit`, `npm test:integration`, and `npm test:watch`; actual scripts require `npm run ...`.
-- Key Files calls Firestore rules permissive; Important Notes calls them hardened. Avoid turning documentation adjectives into unverified security guarantees.
-- Valuable existing constraints include directional conversation IDs, UUID-based user IDs, client/Admin SDK separation, routing regression coverage, listener costs, and UI-only anonymity limitations.
-- Existing architecture guidance should not be discarded or expanded into an app audit during this task.
+## Baseline and limits
 
-### .claude/agents/architect-planner.md
-- Frontmatter: `model: opus`, no explicit tool allowlist.
-- Body says only writable output is PLAN.md; forbids application implementation.
-- Mandatory exact function/schema/SDK sections are not proportionate to documentation-only work.
-- Needs an explicit review/revision loop with the primary assistant and user approval gate.
+- `BUG_REPORT.md` is the current audit artifact: 22 findings plus one conditional development-FCM risk. Its numbering is the traceability contract for this plan; validate root causes against code rather than treating proposed fixes as mandatory designs.
+- Working tree before planning: modified user-owned `.claude/settings.local.json`; untracked `BUG_REPORT.md`, `public/sw.js`, `public/workbox-f1770938.js`, and `public/worker-2a484529a5551160.js`. Preserve them. Do not plan changes to local settings or generated service workers.
+- Existing root `PLAN.md` describes a completed, unrelated project-skill cleanup; it is not approval for this task. The primary saved copies of the previous root research and plan outside the repository before replacing the working artifacts.
+- No application files have changed in this planning task. No production access is authorized. Do not read `.env*`, credentials, participant-data logs, or anything outside the repository. Do not include personal participant values in plans; refer to the existing participant source symbolically and use synthetic test fixtures.
+- The preceding audit ran Node 22.15.0 unit tests (39 suites, 184 tests passed), lint (passed), synthetic in-memory/React reproductions, and isolated Firestore rules probes. Those are historical audit results, not verification of future fixes. Full integration, build, E2E, and actual FCM delivery were not run.
+- Host default Node is newer than the app supports; `/usr/local/bin/node` is verified Node 22.15.0. Primary commands must use a compatible PATH.
+- Planner launch verified: Claude CLI 2.1.321, explicit `--model claude-fable-5-2 --effort xhigh`; initialization and response metadata confirm `claude-fable-5-2`, tools exactly `Glob`, `Grep`, `Read`, no MCP servers, plan permission mode. Safe/restricted mode and disabled settings/skills prevent inherited execution paths. No bypass-permissions mode.
 
-### .claude/agents/phase3-implementer.md
-- Frontmatter: `model: sonnet`, no explicit tool allowlist.
-- Requires tests after every edited file plus final verification, contrary to user's implementation-only role.
-- Contains obsolete claims: conversationId is a deterministic hash; isSantaAnonymous is an established field; repeats inline admin email instead of shared config.
-- Some SDK language treats all src/app files as client while separately allowing API routes; preserve accurate client/server boundaries.
-- Must report changes/blockers without claiming tests it did not execute. Primary assistant supplies actual check failures for implementation corrections; unapproved contract changes return to planning.
+## Ground truth relevant to a coherent fix
 
-### .claude/agents/codebase-research-analyst.md
-- Frontmatter: `model: opus`; tools include Bash, Write, WebFetch, Skill, SlashCommand, and other capabilities despite body claiming read-only/no editing tools.
-- Examples contain stale message schema and hash claims.
-- Primary assistant now owns research. Assess retirement versus updating; avoid leaving a conflicting auto-delegation path.
+### 1. Admission, profiles, and reset (#1, #6, #7, #8)
 
-### .claude/settings.local.json
-- Despite its name, file IS TRACKED (`git ls-files .claude`).
-- User's existing diff adds broad Git, gh, firebase, npm, and other Bash permissions.
-- Baseline also allows commands such as chmod, curl, and tests. Deny/ask arrays are empty.
-- Must not silently overwrite or stage the user's changes; must not casually ignore/untrack a tracked modified file.
-- Assess shared project settings versus local overrides. Instruction prose alone is not a security boundary. Per-invocation delegate tool restriction and effective permission precedence require verified handling.
-- Do not add broad permissions, edit home-directory/global settings, or assume settings filenames enforce role isolation.
+- `src/hooks/useUser.js` locally maintains auth/profile state. `src/app/page.js` and `src/context/RealtimeMessagesContext.js` both call it; this creates independent profile lookups and listeners.
+- First-login profile creation is a client email query followed by a random UUID `setDoc`. `src/lib/firestore.js:ensureAllParticipants` also queries then creates. Neither establishes uniqueness across clients/processes.
+- User document IDs and message endpoints are existing UUIDs, not Auth UIDs. Preserve existing IDs and relationships; never silently choose among duplicate profiles, re-key existing users, or rewrite messages as an incidental fix.
+- `firestore.rules:isSignedIn` only checks authentication. User creation matches token email but does not validate membership. Rules cannot import the JS participant array. A legitimate admission mechanism must not be based on the existence of a client-creatable profile or another client-writable flag.
+- Send and push routes use Admin SDK and bypass rules, so admission must cover server routes as well as direct client reads/writes. Audit every collection and route, including receipts, typing/reactions, init, reset, dev routes, and new identity mappings if proposed.
+- `useUser` has no stale-request generation guard and ignores profile deletion. Reset deletes all user docs and recreates participants with new UUIDs, which strands other clients on deleted IDs.
+- Design a single auth/profile owner with clear bootstrap/error/reset transitions. A reset can race bootstrap/seed and old network responses; define how they coordinate. New identity mappings/admission state, if any, need exact schemas, ownership, bootstrap order, reset semantics, and migration/rollout instructions.
+- No live duplicate-profile inventory exists. Any repair/migration needing real project reads/writes is a separately authorized primary action, not a delegate action or an automatic deployment side effect. Fail safely on conflicting existing records.
 
-### .claude/skills/test-runner/
-- SKILL.md, README.md, run-tests.sh auto-select integration INSTEAD OF unit if any process occupies port 8080.
-- Thus test:smart is not a full validation gate and port occupancy does not identify Firebase.
-- SKILL.md troubleshooting suggests killing processes by port and deleting package-lock.json.
-- package.json test:smart points to this helper; avoid script/API removal without handling the reference.
-- Primary assistant owns checks. Prefer documentation/ownership correction to script redesign unless necessary for this task.
+### 2. Pairing and routing (#4, #9, #14, #15)
 
-### .claude/skills/verify/SKILL.md
-- Claims npm run dev uses Turbopack and must not be used. Current package.json dev is already next dev --webpack.
-- Provides browser actions, emulator seeding, and destructive account resets. These require explicit primary-assistant ownership and target/authorization safety, not automatic delegation.
+- `RecipientSelector` uses a client transaction to set self `recipientId` and target `gifterId`. Keep that normal self-selection flow unless the user approves a product change.
+- Rules currently permit either one-sided write separately; their predicates inspect pre-write docs and do not restrict unrelated changed fields. The fix must enforce both sides at the database layer, including concurrent claims and post-write invariants.
+- `/api/messages/send` checks sender profile and recipient existence, accepts arbitrary optional `conversationId`, and writes using `create` for idempotency. Client retries include `clientMessageId` and `clientCreatedAt`. Preserve safe replay semantics: historical replay must not become a conflict or duplicate merely because assignment state changed after the original commit.
+- Directional IDs are `santa_{santaUUID}_recipient_{recipientUUID}`. Mutual pairs have two legitimate conversations. Do not collapse those or infer a direction that is ambiguous.
+- Direct message-write rules currently allow legacy fields but not the API's idempotency fields; decide explicitly which client write paths remain supported. Old persisted messages must stay readable even if new writes become stricter. Check dev injection and test fixture paths too.
+- `message-utils.filterMessages` routes unannotated legacy rows to a sorted-ID canonical direction even in nonmutual pairs; PublicFeed independently infers roles from assignments. Unread counts use a third, less precise filter and count legacy rows in both mutual tabs.
+- Prefer a shared pure resolver over multiple divergent routing implementations. Specify input context, malformed/historical row behavior, explicit metadata precedence, mutual ambiguity fallback, and how all callers obtain assignments without duplicating all-message listeners or introducing render-time reads.
 
-### .claude/skills/db-admin/ and visual-qa/
-- Include SKILL.md, README.md, and shell helpers with database and browser operations.
-- These must not become backdoors for planner/implementer execution.
-- db-admin examples include outdated auth API and inline admin identity.
-- visual-qa uses npx Puppeteer latest although Puppeteer is not declared; Playwright is installed and e2e commands exist. Do not modernize browser tooling in a workflow-only task without need.
-- Consider linked-document consistency if skill contracts change; avoid exhaustive unrelated rewrite.
+### 3. Outbox ownership/concurrency (#2, #3)
 
-## Other relevant files
-- `package.json`: dev/build already use --webpack; scripts for lint, unit, integration, Playwright, smart helper; Node >=22.13.0 <23.
-- `.github/workflows/ci.yml`: Node 22; Java 17; lint/unit/integration/e2e jobs already exist. No CI changes needed solely to reassign agent roles.
-- `README.md` already exists. Avoid treating old proposals to create it as current work.
-- `.gitignore` does not ignore `.claude/settings.local.json`; existing tracked status cannot be fixed by adding an ignore entry alone.
-- `plans/README.md` and `plans/01-documentation-truth-up.md` contain historical backlog recommendations. They are not current authorization; archive/migration proposals may already be completed or stale.
-- `.agent/db-json-analysis.md` is a project artifact to assess only if relevant; don't expose data contents unnecessarily.
+- `message-outbox.js` stores the entire queue under one localStorage key and writes stale snapshots after await boundaries. A newer enqueue can be overwritten in success, error, or retry paths.
+- `activeDrains` is per JS realm; it does not coordinate multiple tabs. Simply re-reading localStorage before an update is not a cross-tab transaction. Select a small, well-defined mutation strategy and explain fallback compatibility and data migration.
+- Queue items contain UUID `fromUserId`, not an immutable captured Auth UID. Token fetch uses whichever `clientAuth.currentUser` exists at that moment. Runtime cleanup removes scheduling listeners but does not cancel in-flight drains.
+- Define enqueue, retries, identity changes, cancellation, fetch completion, 401 refresh, storage events, sign-out, and server sender checks as one contract. Cancellation after server commit must preserve the same idempotency key for safe recovery; a network abort is not proof of non-delivery.
+- Preserve already queued drafts without assigning legacy items to a different account. Do not discard an old shared queue merely to change storage shape. Include deterministic deferred-promise tests, success/error-path interleavings, account changes before/after token resolution, and simultaneous-tab behavior.
 
-## Planner questions
-1. What is the smallest coherent set of instruction/config changes that enforces the requested role split without replacing it with more agent automation?
-2. Is a shared AGENTS.md useful for GPT/Claude, and how can CLAUDE.md link rather than duplicate it?
-3. Which capabilities must be restricted at delegate launch versus project agent frontmatter? Do not assume unsupported version/effort keys.
-4. How should existing tracked and user-modified local permissions be handled without overwriting user work or weakening effective restrictions?
-5. Which legacy agents/skills should be retired, redirected, or retained for primary-assistant use only?
-6. How can safety around credentials, production targets, destructive emulator operations, existing processes, and Git be made explicit and proportionate?
+### 4. Read boundaries and feed state (#12, #13, #18, #19)
 
-## Verification ownership and limits
-All executed checks belong to the primary assistant. A docs/config plan should specify concrete syntax/consistency checks, preservation of existing changes, and capability assertions. Do not claim any result not executed. Runtime application checks should be justified by scope rather than mechanically requiring all suites for markdown-only edits.
+- `lastReadClient` stores a debounced execution-time `serverTimestamp`, not the observed boundary. Its flush helper has no caller. Timers/cache are module state and need explicit auth/reset lifecycle handling.
+- `useRealtimeUnreadCounts` primes own markers once and subscribes to a local event bus only; the actual Firestore subscription in `useOtherUserLastRead` watches the other participant's receipt.
+- Specify marker shape and migration compatibility, observed timestamp/message boundary behavior, monotonic updates across devices, pending-write ordering, stale snapshot handling, clock behavior, visibility, and permissions. Avoid merely swapping in client wall-clock time without considering skew or unseen messages loaded later.
+- PublicFeed uses one global `publicFeedLastViewed` localStorage key, merges it over user-specific remote markers, and advances markers only when clicking a thread. Do not import an unowned legacy key into a different account. Define migration and selected-thread/new-message visibility behavior.
+- Account reset and deleted profiles must not flush old-user writes under a new auth identity. Visibility/unload writes are best-effort; the plan must not promise browser shutdown guarantees it cannot provide.
+- Keep Firestore marker subscriptions scoped to active/relevant documents and cleanly shared where appropriate. Preserve the single all-messages listener.
+
+### 5. Push, worker, and sounds (#5, #10, #11, #20, #21; conditional FCM risk)
+
+- `firebase-client` initializes the browser app with only apiKey/authDomain/projectId. Messaging requires appId and messagingSenderId, even when those environment variables exist separately.
+- Foreground listener attachment can throw synchronously inside the runtime effect. Unsupported environments or failed push setup must not break auth/chat.
+- Push client caches only the token globally. It neither tracks registration ownership nor persists desired opt-out state. Startup skips reconciliation if the token string is unchanged and re-enables after disable clears that string.
+- Push APIs authenticate independently. Server token docs are keyed by token hash; a device's ownership can move. Define token rotation, unregister ordering, auth-transition races, reset/server-registration loss, multiple controls, multiple tabs, and sign-out/device sharing semantics.
+- Choose exactly one background display owner. The installed SDK inspected by the primary automatically displays notification-payload messages before calling `onBackgroundMessage`; the worker displays a second custom notification with another tag. Planner must use repository source, not inspect dependencies; primary verified this behavior during the audit.
+- If choosing data-only custom display, specify awaited worker lifetime and click behavior; if keeping SDK display, preserve appropriate icons/click handling without adding a second display.
+- Auth/Firestore emulators do not emulate FCM. Include a fail-closed development/test push guard or a clearly separated authorization decision for real push, not credential-dependent accidental external dispatch.
+- `NotificationSoundRuntime` only initializes after seeing loading transition true to false, so a component mounted after provider hydration stays silent. Preserve initial-history suppression, identity resets, visibility/standalone/mute rules, and deduplication.
+
+### 6. UI and utilities (#16, #17, #22)
+
+- `ChatTabs` returns the same unkeyed `Chat` type for Recipient and Santa. Draft state persists across destination changes. A per-conversation key is the minimal isolation option; explicitly document whether returning to a tab clears or restores an unsent draft.
+- Desktop `Sidebar.onReset` is passed `refreshUser`, not a reset action. The mobile compact AdminPanel has the real authenticated confirmation/reset flow. Prefer shared action ownership rather than duplicating destructive-action implementations.
+- IMPORTANT PRODUCT DECISION: `plans/05-admin-assign-decision.md` already identifies unreachable Start Exchange as an unresolved choice. The live flow is self-selection. It recommends removing the unused shuffle UI/endpoint; alternatively exposing it requires overwrite protection because the current route reshuffles existing selections. Do not automatically add a destructive shuffle button merely because audit #17 noted it was unreachable. Surface the decision with a recommendation; user approval of the final plan can resolve it.
+- Utility scripts use a different emulator namespace from the app. Keep diagnostic/wipe/injection scripts explicitly emulator-only; do not solve the namespace mismatch by allowing an unset host to connect to production. Old hardcoded participant UUIDs in routing diagnostics become stale after reset; handle them without logging personal data or adding incidental cleanup.
+
+## Primary-verified external constraints
+
+Official Firebase rules documentation confirms that `getAfter()` evaluates post-transaction/batch state and can require sets of writes to occur together. Access limits are 10 document calls per operation and 20 per multi-operation request (cached calls may be excluded); document-dependent rules reads can be billed. Rules are not query filters. Source inspected by the primary: https://firebase.google.com/docs/firestore/security/rules-conditions . Account for these constraints in assignment/admission rules and listener-read budgeting; the planner must not execute external lookups.
+
+Additional primary-inspected references:
+- Firestore transactions require all reads before writes, may rerun their callbacks, and fail offline: https://firebase.google.com/docs/firestore/manage-data/transactions . Any transactional marker or bootstrap proposal must define offline/retry behavior and avoid external side effects inside retried callbacks.
+- IndexedDB transactions serialize overlapping readwrite work; they can auto-commit when no requests remain, and successful individual requests are not equivalent to transaction completion: https://developer.mozilla.org/en-US/docs/Web/API/IDBTransaction . If selected for the outbox, avoid holding a database transaction across network/token awaits and report success only after commit.
+
+- The HTML Standard explicitly says localStorage users should assume no cross-agent-cluster locking; a check followed by setItem is not a cross-tab compare-and-swap: https://html.spec.whatwg.org/multipage/webstorage.html . This informed the preference-race review; immutable queue payloads/tombstones are acceptable without an IndexedDB dependency.
+
+## Planning progress and handoff (2026-11-09)
+
+- Fable returned an original draft and three complete revisions; the latest complete text is saved as root `PLAN.md`, revision 4. The primary adversarially reviewed each version and recorded the remaining blocker in its status header. This is NOT user-approved or implementation-ready.
+- Major revisions corrected cross-instance reset fencing, dev-assignment writes during reset, immutable outbox/tombstone semantics and honest old-client cutover, single-flight marker writes, shared device push intent, non-reused registration preconditions, asynchronous preference overwrite races, invalid-token cleanup fencing, missing test coverage, and isolated verification that preserves user-generated assets.
+- One blocker remains: matching-state push reconciliation can return `unchanged` without a server mutation, so an older held enable/unregister can commit afterwards. Client convergence is insufficient if that older tab closes or loses its response. Fable was asked to revise the matching-state rule and add deterministic pre-commit interleaving tests; it did not return this final correction.
+- The CLI reported: `You've hit your 5-hour limit · resets 9:10pm (America/Vancouver)`. Do not silently substitute another model. Ask the user whether to resume Fable after reset or authorize another planner.
+- Primary operational metadata for resuming: Claude session `1a160f84-1f13-48b0-bda4-71243dc14479`, model `claude-fable-5-2`, effort `xhigh`, tools exactly `Read,Grep,Glob`, plan/restricted/safe modes, no MCP/skills/commands. The last submitted user instruction already contains the final counterexample and requests one complete replacement plan. Prior output and feedback are retained outside the repository; delegates must not read those paths.
+- Subsequent user request: have an Opus 5.5 xhigh subagent implement everything except the final push-notification race. That is the requested implementation scope; the final race is explicitly deferred. Preserve the plan's user-decision/approval gates before a write-capable handoff.
+- Opus availability preflight: explicit `--model claude-opus-5-5 --effort xhigh`, zero tools, safe/restricted/plan mode. CLI selected the requested model but returned a synthetic usage-limit response before inference: the same 5-hour limit, resetting 9:10pm America/Vancouver. No Opus implementation agent ran or edited files. Pi's catalog has no `claude-opus-5-5` alternative. Do not silently substitute another model or account.
+- No application code changed, and no application checks were rerun for planning. Historical audit results above are not verification of a future implementation. The primary owns eventual implementation diff review and every executed check, as the user explicitly requires.
+
+## Resumed task and latest user direction
+
+- The user now directs Fable to resolve the last push race and then Opus to implement the completed plan, with primary review/testing retained. This supersedes the earlier exclusion of the final race.
+- Latest explicit implementation effort override: **`claude-opus-5-5`, `--effort high`**, not xhigh. Fable remains `claude-fable-5-2`, xhigh, read/search only. No Opus implementation has started yet.
+- Fable completed revision 5 after the usage reset and recovery from sleep. CLI confirmed `claude-fable-5-2`, tools exactly `Glob,Grep,Read`, no MCP, plan permission mode; no delegate checks or edits occurred. The primary reviewed the complete final plan and confirmed the final fence: every successful reconcile writes a fresh epoch/revision even if desired state already matches; old held requests fail without their older realm running convergence.
+- Root `PLAN.md` now records **Status: APPROVED**, dated 2026-11-10, based on the user's explicit direction to finish Fable's last fix and then implement the plan, with the subsequent Opus **high** override. Scope includes all 22 bugs and the dev-FCM safeguard, recommended D1=A and D2–D7, but no production/deploy/live-FCM/data repair/dependency/Git authority. Manifest validation passed (24 creates, 74 modifies, 1 primary delete), full report-ID/risk coverage, no personal emails, protected hashes and whitespace checks. Production provider/account inspection remains unperformed and unauthorized.
+- A zero-tool Opus availability probe succeeded with an actual `claude-opus-5-5` response at explicit `--effort high`. The implementer has now been launched with the approved plan and latest user effort override. CLI initialization and actual response metadata confirm `claude-opus-5-5`, tools exactly `Edit,Glob,Grep,Read,Write`, no MCP, normal `acceptEdits` mode with no bypass. Safe mode, disabled settings/skills and tool filtering prevent inherited execution paths. The primary owns all code review and execution.
+- The primary saved protected-file hashes and prepared a disposable verification copy without `.env*`, local agent settings, private agent artifacts, logs, or existing generated service workers. Baseline on Node 22.15.0: lint exit 0; unit suite exit 0 (39 suites, 184 tests). These primary-executed baseline results are not future implementation verification.
+- The first resumed Fable output was interrupted by host sleep (the CLI explicitly reported computer sleep mid-response). The primary started a task-scoped `caffeinate -i` process and resumed the same read-only Fable session; it will be stopped after this task. Do not mistake partial streamed output for a complete reviewed plan.
+
+## Implementation and verification checkpoint (2026-11-10)
+
+- Opus completed the approved 24 creates and 74 modifications using `claude-opus-5-5` at explicit **high** effort. The primary deleted the obsolete admin assignment route. Both launches were confirmed by CLI session output; only Read/Grep/Glob/Edit/Write were used, with no out-of-manifest writes or forbidden reads found in the audit. No delegate executed checks.
+- Primary review reproduced a missing marker-teardown guard: an invalidated rejected write still started a confirmation read. Opus corrected generation/live-entry checks and added regression coverage. The exact primary probe changed from one unexpected confirmation read (exit 1) to zero (exit 0). The primary also returned the actual lint failure; Opus corrected the test's render-time capture and removed two unused lint suppressions.
+- Primary-executed automated results on Node 22.15.0, in the isolated copy: **lint exit 0; 50 unit/API suites / 422 tests passed; 9 emulator integration suites / 68 tests passed; production build exit 0; 48 Chromium E2E tests passed with no skips**. The generated worker exists and the removed custom notification tag is absent. Public build values were fake; credentials were excluded, emulator hosts explicit, and push dispatch hard-off.
+- Additional primary probes passed: 15 real-emulator rule assertions; 5 admission/reset foundation cases; three outbox interleavings; both matching-state push fences with an older request held before server commit and its realm cancelled before release. These are separate from the suite counts.
+- Scope/whitespace audit passed: exactly 24 new files and 74 tracked manifest modifications, approved deletion absent, no unexpected paths, no staged files. User-owned settings and all three pre-existing generated assets retain their recorded hashes.
+- **Owner-confirmed local Google popup:** the user reported, “Popup closed and chat loaded,” after using the prepared disposable stack in a normal browser. This verifies that local sign-in path; it is not production/provider-inventory or real-FCM verification. Headless popup-relay attempts timed out and are not reported as passing.
+- **Completed additional primary browser checks:** the final attached-stack probe passed all five assertions using the existing development auth helper: two tabs share one profile; one global message listener remains before/after assignment; reading on one isolated browser clears the other browser's badge; reset re-bootstraps open browsers without reload; a real reset failure after profile deletion displays the reset notice and the admin recovery button completes recovery. Zero uncaught page errors, zero attempted external Firebase requests, and zero unclassified console errors; two typing-cleanup denials and six intentionally induced bootstrap-503 responses were recorded. Fresh concurrent profile creation/seed is separately covered by the real-emulator foundation/integration tests.
+- Earlier extra-browser attempts failed on relay/login timing or overly broad selectors; they remain failed experiments, not retroactive passes. An after-begin-only failure left profiles intact and did not produce the expected loading notice in the emulator; the completed deleted-profile recovery check injects failure via the real `afterDelete` hook instead. No application-code change was made to force these probe outcomes.
+- Browser logs are not clean: post-teardown typing deletes are denied by the new session/reset fences, and the unchanged single-tab persistence setup falls back to memory with multiple tabs. No unlisted typing-helper/cache-policy changes were made to hide these observations; any additional remediation needs its own scoped plan.
+- The owner popup check and additional browser checks used the fresh owned emulator/dev-server stack in the disposable copy; only its disposable test accounts/data were prepared or reset. Process metadata and redacted test logs remain outside the repository. The primary shut down those owned test processes after verification; ports 8080, 9099, 4000 and 3000 were confirmed clear, and the temporary primary-only Jest probe was removed from the disposable copy. At the local-verification checkpoint, no production reads/writes, deployment, live FCM, production data repair, dependency changes, commit or push had occurred. Production provider/verified-email confirmation and real-device push remain separate owner-authorized rollout checks.
+- **Subsequent Git authorization:** the user requested a pushed draft PR containing the task changes for review. The primary is publishing the approved manifest plus the audit/plan/research records on `fix/bug-sweep-remediation`, based on current `origin/main` (tree-identical to the validated base after the workflow PR's squash merge). User-owned local settings and the three pre-existing generated workers remain excluded. This authorizes neither deployment nor a direct/force push to `main`.
+
+## Required plan qualities
+
+- Return one complete self-contained `PLAN.md` as text. It must be DRAFT, with adversarial review indicated, a one-line goal, exact create/modify/delete manifest, precise exported signatures/import paths/data shapes/SDK choices, primary-executed steps, verification, and user decisions with recommendations.
+- Group changes by shared root cause and sequence dependencies to avoid rewriting auth, routing, read state, or push multiple times. All 22 report IDs and the conditional risk need an explicit implementation/test disposition.
+- Name every test/document/config file that must change. Inspect proposed files. Include concrete expected regression assertions, not only 'add tests' or commands. Update architecture docs for changed contracts; distinguish deferred unrelated cleanup.
+- Plan for compatibility with current UUID profiles, existing messages/receipts/outbox data, development login, seed/init/reset helpers, and existing tests/mocks. If direct-write support changes, name affected test and dev paths.
+- Include fail-safe rollout/backfill/migration prerequisites separately from ordinary local implementation. No deploy, real Firebase access, data wipes, installs/dependencies, settings changes, or generated asset overwrites are authorized by this planning request.
+- Primary must review the plan adversarially and seek revisions for blockers, then obtain user approval before launching Opus. During implementation the primary reviews the full diff, executes checks on Node 22, and supplies real failures to the implementer for in-scope corrections.
+- Verification should cover unit/API/rules integration, required `__tests__/unit/PublicFeed_grouping.test.js`, build/PWA behavior, E2E and multi-user browser scenarios, plus resource/listener cleanup and cross-tab races. Only the primary executes these. Port/process checks and real-service authorization boundaries apply. Do not claim future tests pass.

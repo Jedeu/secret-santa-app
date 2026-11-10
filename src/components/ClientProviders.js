@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { RealtimeMessagesProvider } from '@/context/RealtimeMessagesContext';
+import { UserProvider } from '@/context/UserContext';
 
 const ToastContext = createContext({
     showToast: () => {}
@@ -85,10 +86,11 @@ function ToastViewport({ toasts, onDismiss }) {
  * This component has 'use client' directive and is imported by layout.js.
  *
  * Provider order (outermost to innermost):
- * 1. RealtimeMessagesProvider (consumes useUser internally)
+ * 1. UserProvider (single auth/profile owner; useUser() reads it)
+ * 2. RealtimeMessagesProvider (consumes useUser internally)
  *
- * Note: useUser() is called inside RealtimeMessagesProvider, not here.
- * This means auth state is fetched once per render tree.
+ * Auth state and the profile bootstrap therefore run once per render tree,
+ * however many components call useUser().
  *
  * @param {Object} props
  * @param {React.ReactNode} props.children
@@ -135,9 +137,11 @@ export default function ClientProviders({ children }) {
 
     return (
         <ToastContext.Provider value={contextValue}>
-            <RealtimeMessagesProvider>
-                {children}
-            </RealtimeMessagesProvider>
+            <UserProvider>
+                <RealtimeMessagesProvider>
+                    {children}
+                </RealtimeMessagesProvider>
+            </UserProvider>
             <ToastViewport toasts={toasts} onDismiss={dismissToast} />
         </ToastContext.Provider>
     );

@@ -4,10 +4,17 @@ import { firestore } from '@/lib/firebase-client';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { useUser } from '@/hooks/useUser';
 import { logListenerCreated, logListenerDestroyed, logSnapshotReceived } from '@/lib/firestore-listener-tracker';
-import { updateLastReadTimestamp as lastReadClientUpdate, getCachedTimestamp } from '@/lib/lastReadClient';
-import { getConversationId, getLegacyConversationId } from '@/lib/message-utils';
+import {
+    updateLastReadTimestamp as lastReadClientUpdate,
+    getCachedTimestamp,
+    flushPendingWrites,
+    resetLastReadState,
+} from '@/lib/lastReadClient';
+import { getLegacyConversationId } from '@/lib/message-utils';
 
 const RealtimeMessagesContext = createContext(null);
+
+const PERMISSION_RETRY_MS = 2000;
 
 export function useRealtimeMessagesContext() {
     const context = useContext(RealtimeMessagesContext);
@@ -44,23 +51,28 @@ const notifyLastReadChange = (userId, conversationId, timestamp) => {
 };
 
 /**
- * Update lastRead timestamp.
+ * Record that the user has observed messages up to `observedAt`.
  * Exported for backward compatibility with non-React consumers or static imports.
  *
  * @param {string} userId
  * @param {string} otherUserId
- * @param {string} [conversationId]
+ * @param {string|null} [conversationId]
+ * @param {string|null} [observedAt] - ISO timestamp of the latest observed message
+ * @returns {boolean} true when the marker advanced (subscribers are notified only then)
  */
-export const updateLastReadTimestamp = (userId, otherUserId, conversationId = null) => {
+export const updateLastReadTimestamp = (userId, otherUserId, conversationId = null, observedAt = null) => {
     // Falls back to legacy format if conversationId not provided
     const convId = conversationId || getLegacyConversationId(userId, otherUserId);
-    const now = new Date().toISOString();
 
     // Delegate to client utility for persistence
-    lastReadClientUpdate(userId, convId);
+    const accepted = lastReadClientUpdate(userId, convId, observedAt) === true;
 
-    // Notify subscribers (trigger UI updates)
-    notifyLastReadChange(userId, convId, now);
+    // Notify subscribers (trigger UI updates) only for accepted updates
+    if (accepted) {
+        notifyLastReadChange(userId, convId, observedAt);
+    }
+
+    return accepted;
 };
 
 /**
@@ -71,7 +83,6 @@ export const updateLastReadTimestamp = (userId, otherUserId, conversationId = nu
  * @returns {string} ISO timestamp
  */
 const getLastReadTimestamp = (userId, conversationId) => {
-    // Delegate to client utility which handles local cache and localStorage
     const timestamp = getCachedTimestamp(userId, conversationId);
     return timestamp || new Date(0).toISOString();
 };
@@ -80,19 +91,21 @@ const getLastReadTimestamp = (userId, conversationId) => {
  * RealtimeMessagesProvider
  *
  * Provides real-time message data to the entire app via Context.
- * MUST be a child of a component tree where useUser() can be called.
+ * MUST be rendered inside UserProvider (useUser()).
  *
  * Key behaviors:
  * 1. Waits for authentication before creating Firestore listener
  * 2. Creates exactly ONE listener for all messages (singleton pattern preserved)
- * 3. Handles React StrictMode without duplicate listeners
- * 4. Cleans up listener when auth is lost
+ * 3. Listeners are keyed on the user id, not the user object, so assignment
+ *    updates do not recreate them
+ * 4. Cleans up listener (and any pending retry) when auth is lost or on unmount
  *
  * @param {Object} props
  * @param {React.ReactNode} props.children
  */
 export function RealtimeMessagesProvider({ children }) {
     const { user, loading: authLoading } = useUser();
+    const userId = user?.id ?? null;
 
     // Internal State
     const [allMessages, setAllMessages] = useState([]);
@@ -100,39 +113,28 @@ export function RealtimeMessagesProvider({ children }) {
     const [allMessagesError, setAllMessagesError] = useState(null);
     const [allReactions, setAllReactions] = useState([]);
 
-    // Refs for StrictMode protection and listener management
+    // Refs for listener management
     const listenerRef = useRef(null);           // Firestore unsubscribe function
-    const listenerCreatedRef = useRef(false);   // Boolean flag to prevent double-creation
     const reactionsListenerRef = useRef(null);
-    const reactionsListenerCreatedRef = useRef(false);
-    const [authRetry, setAuthRetry] = useState(0); // Force effect re-run on error
+    const [messagesRetry, setMessagesRetry] = useState(0);
+    const [reactionsRetry, setReactionsRetry] = useState(0);
 
     useEffect(() => {
         // CRITICAL: Do not create listener until auth is confirmed
         if (authLoading) {
-            return; // Still loading auth state
+            return undefined; // Still loading auth state
         }
 
-        if (!user) {
-            // User logged out - clean up any existing listener
-            if (listenerRef.current) {
-                logListenerDestroyed('allMessages');
-                listenerRef.current();
-                listenerRef.current = null;
-            }
-            listenerCreatedRef.current = false;
+        if (!userId) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setAllMessages([]);
             setAllMessagesLoading(false);
-            return;
+            return undefined;
         }
 
-        // User is authenticated - set up listener if not already done
-        if (listenerCreatedRef.current) {
-            return; // Already created (StrictMode protection)
-        }
+        let cancelled = false;
+        let retryTimer = null;
 
-        listenerCreatedRef.current = true;
         setAllMessagesLoading(true);
 
         const messagesRef = collection(firestore, 'messages');
@@ -144,6 +146,7 @@ export function RealtimeMessagesProvider({ children }) {
             q,
             { includeMetadataChanges: false },
             (snapshot) => {
+                if (cancelled) return;
                 const msgs = [];
                 snapshot.forEach((doc) => msgs.push(doc.data()));
 
@@ -159,71 +162,51 @@ export function RealtimeMessagesProvider({ children }) {
                 setAllMessagesError(null);
             },
             (error) => {
+                if (cancelled) return;
                 console.error('Error in all-messages listener:', error);
                 setAllMessagesError(error);
                 setAllMessagesLoading(false);
 
-                // Reset flags to allow retry on next auth state change
                 if (error.code === 'permission-denied') {
                     console.warn('[Firestore] Permission denied - retrying in 2 seconds...');
-                    listenerCreatedRef.current = false;
                     listenerRef.current = null;
-
-                    // Retry after delay to allow auth propagation
-                    setTimeout(() => {
-                        // Trigger a re-eval by toggling a dummy state or just invalidating
-                        // Since we can't easily force the effect to re-run without state change,
-                        // we'll rely on the user interactions or eventual consistency.
-                        // BUT, to be proactive:
-                        setAllMessagesLoading(true); // This might not trigger effect if deps don't change
-
-                        // Better approach: Force effect re-run by updating a ref version? No.
-                        // We reset listenerCreatedRef to false.
-                        // If we are still mounted and authenticated, we want to try again.
-                        // But the effect dependencies [user, authLoading] haven't changed.
-                        // So the effect won't run again.
-
-                        // We need a forceUpdate mechanism.
-                        // Let's add a retry count to state.
-                        setAuthRetry(prev => prev + 1);
-                    }, 2000);
+                    retryTimer = setTimeout(() => {
+                        retryTimer = null;
+                        if (cancelled) return;
+                        setMessagesRetry(prev => prev + 1);
+                    }, PERMISSION_RETRY_MS);
                 }
             }
         );
 
         // Cleanup on unmount or auth change
         return () => {
+            cancelled = true;
+            if (retryTimer) {
+                clearTimeout(retryTimer);
+                retryTimer = null;
+            }
             if (listenerRef.current) {
                 logListenerDestroyed('allMessages');
                 listenerRef.current();
                 listenerRef.current = null;
             }
-            listenerCreatedRef.current = false;
         };
-    }, [user, authLoading, authRetry]);
+    }, [userId, authLoading, messagesRetry]);
 
     useEffect(() => {
         if (authLoading) {
-            return;
+            return undefined;
         }
 
-        if (!user) {
-            if (reactionsListenerRef.current) {
-                logListenerDestroyed('allReactions');
-                reactionsListenerRef.current();
-                reactionsListenerRef.current = null;
-            }
-            reactionsListenerCreatedRef.current = false;
+        if (!userId) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setAllReactions([]);
-            return;
+            return undefined;
         }
 
-        if (reactionsListenerCreatedRef.current) {
-            return;
-        }
-
-        reactionsListenerCreatedRef.current = true;
+        let cancelled = false;
+        let retryTimer = null;
 
         const reactionsRef = collection(firestore, 'reactions');
         const q = query(reactionsRef, orderBy('createdAt', 'asc'));
@@ -233,6 +216,7 @@ export function RealtimeMessagesProvider({ children }) {
             q,
             { includeMetadataChanges: false },
             (snapshot) => {
+                if (cancelled) return;
                 const reactions = [];
                 snapshot.forEach((reactionDoc) => reactions.push(reactionDoc.data()));
                 logSnapshotReceived(
@@ -244,27 +228,61 @@ export function RealtimeMessagesProvider({ children }) {
                 setAllReactions(reactions);
             },
             (error) => {
+                if (cancelled) return;
                 console.error('Error in all-reactions listener:', error);
                 if (error.code === 'permission-denied') {
                     console.warn('[Firestore] Reactions permission denied - retrying in 2 seconds...');
-                    reactionsListenerCreatedRef.current = false;
                     reactionsListenerRef.current = null;
-                    setTimeout(() => {
-                        setAuthRetry(prev => prev + 1);
-                    }, 2000);
+                    retryTimer = setTimeout(() => {
+                        retryTimer = null;
+                        if (cancelled) return;
+                        setReactionsRetry(prev => prev + 1);
+                    }, PERMISSION_RETRY_MS);
                 }
             }
         );
 
         return () => {
+            cancelled = true;
+            if (retryTimer) {
+                clearTimeout(retryTimer);
+                retryTimer = null;
+            }
             if (reactionsListenerRef.current) {
                 logListenerDestroyed('allReactions');
                 reactionsListenerRef.current();
                 reactionsListenerRef.current = null;
             }
-            reactionsListenerCreatedRef.current = false;
         };
-    }, [user, authLoading, authRetry]);
+    }, [userId, authLoading, reactionsRetry]);
+
+    // Best-effort read-marker flush when the page is hidden or unloaded;
+    // drop all read-marker state when the user changes or the provider unmounts.
+    useEffect(() => {
+        if (!userId || typeof window === 'undefined') {
+            return undefined;
+        }
+
+        const flush = () => {
+            flushPendingWrites().catch((error) => {
+                console.error('Error flushing lastRead markers:', error);
+            });
+        };
+        const handleVisibilityChange = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                flush();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('pagehide', flush);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('pagehide', flush);
+            resetLastReadState();
+        };
+    }, [userId]);
 
     const value = {
         allMessages,

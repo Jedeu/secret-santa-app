@@ -55,12 +55,17 @@ function extractSnapshotCallback(callArgs) {
     return { callback: null, errorCallback: null };
 }
 
-// Mock lastReadClient for cache priming tests
+// Mock lastReadClient (own-marker subscriptions replace one-shot priming reads)
 const mockFetchLastRead = jest.fn();
 const mockGetCachedTimestamp = jest.fn();
+const mockSubscribeToLastRead = jest.fn();
 jest.mock('@/lib/lastReadClient', () => ({
     getLastReadTimestamp: (...args) => mockFetchLastRead(...args),
     getCachedTimestamp: (...args) => mockGetCachedTimestamp(...args),
+    subscribeToLastRead: (...args) => mockSubscribeToLastRead(...args),
+    updateLastReadTimestamp: jest.fn(() => true),
+    flushPendingWrites: jest.fn(() => Promise.resolve()),
+    resetLastReadState: jest.fn(),
 }));
 
 
@@ -72,6 +77,8 @@ describe('Realtime Hooks with Context', () => {
         fetch.mockClear();
         mockFetchLastRead.mockClear();
         mockGetCachedTimestamp.mockClear();
+        mockSubscribeToLastRead.mockReset();
+        mockSubscribeToLastRead.mockReturnValue(() => { });
 
         // Default mock for fetchLastRead - returns epoch
         mockFetchLastRead.mockResolvedValue(new Date(0).toISOString());
@@ -276,7 +283,7 @@ describe('Realtime Hooks with Context', () => {
             });
         });
 
-        test('should fetch initial lastRead timestamps on mount', async () => {
+        test('should subscribe to both own lastRead markers on mount (no one-shot reads)', async () => {
             const userId = 'user1';
             const recipientId = 'user2';
             const gifterId = 'user3';
@@ -285,16 +292,6 @@ describe('Realtime Hooks with Context', () => {
             // santa_[santaId]_recipient_[recipientId] where sender is santa
             const expectedRecipientConvId = `santa_${userId}_recipient_${recipientId}`;
             const expectedSantaConvId = `santa_${gifterId}_recipient_${userId}`;
-
-            // Configure mock to return specific timestamps
-            const recipientLastRead = new Date('2025-01-01T12:00:00Z').toISOString();
-            const santaLastRead = new Date('2025-01-01T13:00:00Z').toISOString();
-
-            mockFetchLastRead.mockImplementation((uid, convId) => {
-                if (convId === expectedRecipientConvId) return Promise.resolve(recipientLastRead);
-                if (convId === expectedSantaConvId) return Promise.resolve(santaLastRead);
-                return Promise.resolve(new Date(0).toISOString());
-            });
 
             // Setup basic query mocks
             mockCollection.mockReturnValue({ path: 'messages' });
@@ -313,17 +310,60 @@ describe('Realtime Hooks with Context', () => {
                 return jest.fn();
             });
 
-            const { result } = renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId), { wrapper });
+            renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId), { wrapper });
 
-            // Wait for the primeCache effect to complete
             await waitFor(() => {
-                // fetchLastRead should be called for both conversations
-                expect(mockFetchLastRead).toHaveBeenCalledWith(userId, expectedRecipientConvId);
-                expect(mockFetchLastRead).toHaveBeenCalledWith(userId, expectedSantaConvId);
+                expect(mockSubscribeToLastRead).toHaveBeenCalledWith(userId, expectedRecipientConvId, expect.any(Function));
+                expect(mockSubscribeToLastRead).toHaveBeenCalledWith(userId, expectedSantaConvId, expect.any(Function));
             });
 
-            // Verify it was called exactly twice (once per conversation)
-            expect(mockFetchLastRead).toHaveBeenCalledTimes(2);
+            expect(mockSubscribeToLastRead).toHaveBeenCalledTimes(2);
+            expect(mockFetchLastRead).not.toHaveBeenCalled();
+        });
+
+        test('a remote marker callback recomputes the badge', async () => {
+            const userId = 'user1';
+            const recipientId = 'user2';
+            const gifterId = 'user3';
+            const recipientConvId = `santa_${userId}_recipient_${recipientId}`;
+            const messageTime = '2026-01-01T12:00:00.000Z';
+            const callbacks = new Map();
+            let marker = new Date(0).toISOString();
+
+            mockGetCachedTimestamp.mockImplementation(() => marker);
+            mockSubscribeToLastRead.mockImplementation((uid, convId, callback) => {
+                callbacks.set(convId, callback);
+                return () => { };
+            });
+
+            let allMessagesCallback;
+            mockOnSnapshot.mockImplementation((...args) => {
+                const { callback } = extractSnapshotCallback(args);
+                if (!allMessagesCallback) {
+                    allMessagesCallback = callback;
+                }
+                return jest.fn();
+            });
+
+            const { result } = renderHook(() => useRealtimeUnreadCounts(userId, recipientId, gifterId), { wrapper });
+            const messages = [{ id: 'm1', fromId: recipientId, toId: userId, timestamp: messageTime, conversationId: recipientConvId }];
+
+            await act(async () => {
+                allMessagesCallback({
+                    forEach: (cb) => messages.forEach(msg => cb({ data: () => msg })),
+                    size: 1,
+                    metadata: { fromCache: false },
+                    docChanges: () => []
+                });
+            });
+            expect(result.current.recipientUnread).toBe(1);
+
+            await act(async () => {
+                marker = messageTime;
+                callbacks.get(recipientConvId)(messageTime);
+            });
+
+            expect(result.current.recipientUnread).toBe(0);
         });
     });
 });

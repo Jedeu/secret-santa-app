@@ -51,7 +51,12 @@ export function authedDb(testEnv, userId, email) {
     return testEnv.authenticatedContext(userId, { email }).firestore();
 }
 
-export async function seedUser(testEnv, userId, email, name = userId) {
+/**
+ * Seed a users/{userId} profile. Unless `admitted: false`, also seed an active
+ * system/lifecycle (epoch 1) and an authIdentities/{userId} admission record, so the
+ * test auth uid (=== userId, see authedDb) is an admitted participant under the rules.
+ */
+export async function seedUser(testEnv, userId, email, name = userId, { admitted = true } = {}) {
     await testEnv.withSecurityRulesDisabled(async (context) => {
         const db = context.firestore();
         await setDoc(doc(db, 'users', userId), {
@@ -63,6 +68,20 @@ export async function seedUser(testEnv, userId, email, name = userId) {
             recipientId: null,
             gifterId: null,
         });
+        if (admitted) {
+            await setDoc(doc(db, 'system', 'lifecycle'), { epoch: 1, state: 'active' });
+            await setDoc(doc(db, 'authIdentities', userId), { uid: userId, email, userId, epoch: 1 });
+        }
+    });
+}
+
+/**
+ * Seed (or remap) an admission record: authIdentities/{authUid} -> userId at `epoch`.
+ */
+export async function seedIdentity(testEnv, authUid, userId, email, epoch = 1) {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await setDoc(doc(db, 'authIdentities', authUid), { uid: authUid, email, userId, epoch });
     });
 }
 

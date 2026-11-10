@@ -1,62 +1,50 @@
-const { initializeApp, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { APP_COLLECTIONS, getEmulatorFirestore } = require('./lib/emulator-firestore');
 
-// Initialize Firebase Admin for Firestore Emulator
-if (!getApps().length) {
-    initializeApp({
-        projectId: 'demo-secret-santa',
-    });
-}
+// Emulator only (exits 1 for a non-loopback FIRESTORE_EMULATOR_HOST).
+const db = getEmulatorFirestore();
 
-const db = getFirestore();
-db.settings({
-    host: 'localhost:8080',
-    ssl: false
-});
-
+// Prints ids, counts and assignment linkage only (no names, emails or message content).
 async function checkAllData() {
+    let exitCode = 0;
     try {
-        console.log('\n=== CHECKING ALL FIRESTORE DATA ===\n');
+        console.log('\n=== CHECKING EMULATOR DATA ===\n');
 
-        // List all collections
-        const collections = await db.listCollections();
-        console.log(`Found ${collections.length} collections:`);
-        collections.forEach(col => console.log(`  - ${col.id}`));
-        console.log('');
-
-        // Check messages collection
-        const messagesSnapshot = await db.collection('messages').get();
-        console.log(`Messages collection: ${messagesSnapshot.size} documents`);
-        if (messagesSnapshot.size > 0) {
-            messagesSnapshot.docs.forEach((doc, index) => {
-                const data = doc.data();
-                console.log(`\n  Message ${index + 1}:`);
-                console.log(`    Doc ID: ${doc.id}`);
-                console.log(`    From: ${data.fromId}`);
-                console.log(`    To: ${data.toId}`);
-                console.log(`    Content: ${data.content}`);
-                console.log(`    Timestamp: ${data.timestamp}`);
-            });
+        const lifecycleSnap = await db.collection('system').doc('lifecycle').get();
+        if (lifecycleSnap.exists) {
+            const { epoch, state } = lifecycleSnap.data();
+            console.log(`system/lifecycle: epoch ${epoch}, state ${state}`);
+        } else {
+            console.log('system/lifecycle: (missing)');
         }
         console.log('');
 
-        // Check users collection
+        for (const collectionName of APP_COLLECTIONS) {
+            const snapshot = await db.collection(collectionName).get();
+            console.log(`${collectionName}: ${snapshot.size} documents`);
+        }
+        console.log('');
+
         const usersSnapshot = await db.collection('users').get();
-        console.log(`Users collection: ${usersSnapshot.size} documents`);
-        if (usersSnapshot.size > 0) {
-            usersSnapshot.docs.forEach((doc, index) => {
-                const data = doc.data();
-                console.log(`  ${index + 1}. ${data.name} (${data.email})`);
-            });
-        }
+        console.log('=== USERS (id -> recipientId / gifterId) ===');
+        usersSnapshot.docs.forEach((doc) => {
+            const data = doc.data();
+            console.log(`  ${doc.id} -> recipient ${data.recipientId || '(none)'} / gifter ${data.gifterId || '(none)'}`);
+        });
         console.log('');
 
-        console.log('=== DONE ===\n');
+        const messagesSnapshot = await db.collection('messages').get();
+        console.log('=== MESSAGES (id: fromId -> toId, conversationId) ===');
+        messagesSnapshot.docs.forEach((doc) => {
+            const data = doc.data();
+            console.log(`  ${doc.id}: ${data.fromId} -> ${data.toId}, ${data.conversationId || '(no conversationId)'}`);
+        });
 
+        console.log('\n=== DONE ===\n');
     } catch (error) {
-        console.error('Error checking data:', error);
+        console.error('Error checking data:', error?.message || error);
+        exitCode = 1;
     } finally {
-        process.exit(0);
+        process.exit(exitCode);
     }
 }
 

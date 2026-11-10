@@ -287,4 +287,82 @@ describe('NotificationSoundRuntime', () => {
 
         expect(playMock).not.toHaveBeenCalled();
     });
+
+    test('an already-loaded mount takes a silent baseline, then chimes once for a new message', () => {
+        const existing = makeMessage({ id: '1', fromId: otherUserId, toId: currentUserId });
+        const { rerender } = render(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={currentUserId}
+                allMessages={[existing]}
+                allMessagesLoading={false}
+            />
+        );
+        expect(playMock).not.toHaveBeenCalled();
+
+        rerender(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={currentUserId}
+                allMessages={[existing, makeMessage({ id: '2', fromId: otherUserId, toId: currentUserId })]}
+                allMessagesLoading={false}
+            />
+        );
+
+        expect(playMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('a reload cycle (loading -> loaded with more messages) does not chime', () => {
+        const existing = makeMessage({ id: '1', fromId: otherUserId, toId: currentUserId });
+        const { rerender } = render(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={currentUserId}
+                allMessages={[existing]}
+                allMessagesLoading={false}
+            />
+        );
+
+        rerender(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={currentUserId}
+                allMessages={[]}
+                allMessagesLoading={true}
+            />
+        );
+        rerender(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={currentUserId}
+                allMessages={[existing, makeMessage({ id: '3', fromId: otherUserId, toId: currentUserId })]}
+                allMessagesLoading={false}
+            />
+        );
+
+        expect(playMock).not.toHaveBeenCalled();
+    });
+
+    test('a user change takes a fresh silent baseline', () => {
+        const forA = makeMessage({ id: '1', fromId: otherUserId, toId: currentUserId });
+        const { rerender } = render(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={currentUserId}
+                allMessages={[forA]}
+                allMessagesLoading={false}
+            />
+        );
+
+        rerender(
+            <NotificationSoundRuntime
+                soundEnabled={true}
+                currentUserId={thirdUserId}
+                allMessages={[forA, makeMessage({ id: '4', fromId: otherUserId, toId: thirdUserId })]}
+                allMessagesLoading={false}
+            />
+        );
+
+        expect(playMock).not.toHaveBeenCalled();
+    });
 });
