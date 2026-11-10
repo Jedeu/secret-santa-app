@@ -1,86 +1,67 @@
-const { initializeApp, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getEmulatorFirestore } = require('./lib/emulator-firestore');
 
-// Initialize Firebase Admin for Firestore Emulator
-if (!getApps().length) {
-    initializeApp({
-        projectId: 'demo-secret-santa',
-    });
+// Usage: node scripts/check_messages.js <santaUserId> <recipientUserId>
+const [santaUserId, recipientUserId] = process.argv.slice(2);
+
+if (!santaUserId || !recipientUserId) {
+    console.error('Usage: node scripts/check_messages.js <santaUserId> <recipientUserId>');
+    process.exit(1);
 }
 
-const db = getFirestore();
-db.settings({
-    host: 'localhost:8080',
-    ssl: false
-});
+// Emulator only (exits 1 for a non-loopback FIRESTORE_EMULATOR_HOST).
+const db = getEmulatorFirestore();
 
-const LOUIS_ID = '5dfc2873-2b9a-41ea-ba99-e3183a790c37';
-const JED_ID = 'd682a601-d636-45aa-a141-2073534c9354';
-
+// Prints ids, counts and assignment linkage only (no names, emails or message content).
 async function checkMessages() {
+    let exitCode = 0;
     try {
         console.log('\n=== CHECKING MESSAGES ===\n');
 
-        // Expected conversationId
-        const expectedConversationId = `santa_${LOUIS_ID}_recipient_${JED_ID}`;
+        const expectedConversationId = `santa_${santaUserId}_recipient_${recipientUserId}`;
         console.log('Expected conversationId:', expectedConversationId);
+
+        const [santaSnap, recipientSnap] = await db.getAll(
+            db.collection('users').doc(santaUserId),
+            db.collection('users').doc(recipientUserId)
+        );
+        const santa = santaSnap.exists ? santaSnap.data() : null;
+        const recipient = recipientSnap.exists ? recipientSnap.data() : null;
+        console.log('Santa exists:', !!santa, '| Recipient exists:', !!recipient);
+        console.log('Santa.recipientId matches:', santa?.recipientId === recipientUserId);
+        console.log('Recipient.gifterId matches:', recipient?.gifterId === santaUserId);
         console.log('');
 
-        // Get all messages
         const messagesSnapshot = await db.collection('messages').get();
         console.log(`Total messages in database: ${messagesSnapshot.size}`);
-        console.log('');
 
-        // Filter messages involving Louis and Jed
-        const louisJedMessages = messagesSnapshot.docs.filter(doc => {
+        const pairMessages = messagesSnapshot.docs.filter((doc) => {
             const data = doc.data();
-            return (data.fromId === LOUIS_ID && data.toId === JED_ID) ||
-                   (data.fromId === JED_ID && data.toId === LOUIS_ID);
+            return (data.fromId === santaUserId && data.toId === recipientUserId)
+                || (data.fromId === recipientUserId && data.toId === santaUserId);
         });
 
-        console.log(`Messages between Louis and Jed: ${louisJedMessages.length}`);
-        console.log('');
-
-        if (louisJedMessages.length > 0) {
-            console.log('=== MESSAGE DETAILS ===');
-            louisJedMessages.forEach((doc, index) => {
-                const data = doc.data();
-                console.log(`\nMessage ${index + 1}:`);
-                console.log('  Document ID:', doc.id);
-                console.log('  Message ID:', data.id);
-                console.log('  From:', data.fromId === LOUIS_ID ? 'Louis' : 'Jed');
-                console.log('  To:', data.toId === LOUIS_ID ? 'Louis' : 'Jed');
-                console.log('  Content:', data.content);
-                console.log('  Timestamp:', data.timestamp);
-                console.log('  ConversationId:', data.conversationId || '(not set)');
-                console.log('  Matches expected conversationId:', data.conversationId === expectedConversationId);
-            });
-        }
-
-        // Check for messages with the expected conversationId
-        const conversationMessages = messagesSnapshot.docs.filter(doc => {
-            return doc.data().conversationId === expectedConversationId;
+        console.log(`Messages between the two users: ${pairMessages.length}`);
+        pairMessages.forEach((doc, index) => {
+            const data = doc.data();
+            console.log(`\nMessage ${index + 1}:`);
+            console.log('  Document ID:', doc.id);
+            console.log('  Direction:', data.fromId === santaUserId ? 'santa -> recipient' : 'recipient -> santa');
+            console.log('  Timestamp:', data.timestamp);
+            console.log('  ConversationId:', data.conversationId || '(not set)');
+            console.log('  Matches expected conversationId:', data.conversationId === expectedConversationId);
         });
 
-        console.log(`\n=== MESSAGES WITH EXPECTED CONVERSATION ID ===`);
-        console.log(`Messages with conversationId "${expectedConversationId}": ${conversationMessages.length}`);
-
-        if (conversationMessages.length > 0) {
-            conversationMessages.forEach((doc, index) => {
-                const data = doc.data();
-                console.log(`\nMessage ${index + 1}:`);
-                console.log('  From:', data.fromId === LOUIS_ID ? 'Louis' : (data.fromId === JED_ID ? 'Jed' : 'Unknown'));
-                console.log('  Content:', data.content);
-                console.log('  Timestamp:', data.timestamp);
-            });
-        }
+        const conversationMessages = messagesSnapshot.docs.filter((doc) => (
+            doc.data().conversationId === expectedConversationId
+        ));
+        console.log(`\nMessages with the expected conversationId: ${conversationMessages.length}`);
 
         console.log('\n=== DONE ===\n');
-
     } catch (error) {
-        console.error('Error checking messages:', error);
+        console.error('Error checking messages:', error?.message || error);
+        exitCode = 1;
     } finally {
-        process.exit(0);
+        process.exit(exitCode);
     }
 }
 

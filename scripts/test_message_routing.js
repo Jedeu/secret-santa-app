@@ -1,87 +1,82 @@
-const { initializeApp, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
 const { v4: uuidv4 } = require('uuid');
+const { getEmulatorFirestore } = require('./lib/emulator-firestore');
 
-// Initialize Firebase Admin for Firestore Emulator
-if (!getApps().length) {
-    initializeApp({
-        projectId: 'demo-secret-santa',
-    });
+// Usage: node scripts/test_message_routing.js <santaUserId> <recipientUserId>
+const [santaUserId, recipientUserId] = process.argv.slice(2);
+
+if (!santaUserId || !recipientUserId) {
+    console.error('Usage: node scripts/test_message_routing.js <santaUserId> <recipientUserId>');
+    process.exit(1);
 }
 
-const db = getFirestore();
-db.settings({
-    host: 'localhost:8080',
-    ssl: false
-});
+// Emulator only (exits 1 for a non-loopback FIRESTORE_EMULATOR_HOST).
+const db = getEmulatorFirestore();
 
-const LOUIS_ID = '5dfc2873-2b9a-41ea-ba99-e3183a790c37';
-const JED_ID = 'd682a601-d636-45aa-a141-2073534c9354';
-
+// Prints ids, counts and assignment linkage only.
 async function testMessageRouting() {
+    let exitCode = 0;
     try {
         console.log('\n=== TESTING MESSAGE ROUTING ===\n');
 
-        // Generate the conversationId the same way the app does
-        const conversationId = `santa_${LOUIS_ID}_recipient_${JED_ID}`;
-        console.log('ConversationId:', conversationId);
-        console.log('');
+        // Same rule as /api/messages/send: santa -> recipient requires a reciprocal assignment.
+        const [santaSnap, recipientSnap] = await db.getAll(
+            db.collection('users').doc(santaUserId),
+            db.collection('users').doc(recipientUserId)
+        );
+        const santa = santaSnap.exists ? santaSnap.data() : null;
+        const recipient = recipientSnap.exists ? recipientSnap.data() : null;
 
-        // Create a test message from Louis to Jed (as if Louis sent it from his Recipient tab)
-        const testMessage = {
-            id: uuidv4(),
-            fromId: LOUIS_ID,
-            toId: JED_ID,
-            content: 'Test message from Louis to Jed',
-            timestamp: new Date().toISOString(),
-            conversationId: conversationId
-        };
-
-        console.log('Creating test message:');
-        console.log('  From: Louis');
-        console.log('  To: Jed');
-        console.log('  Content:', testMessage.content);
-        console.log('  ConversationId:', testMessage.conversationId);
-        console.log('');
-
-        // Add message to Firestore
-        const docRef = await db.collection('messages').add(testMessage);
-        console.log('Message created with document ID:', docRef.id);
-        console.log('');
-
-        // Verify the message was saved
-        const doc = await docRef.get();
-        if (doc.exists) {
-            console.log('✓ Message successfully saved to Firestore');
-            console.log('');
-
-            // Now query to verify it can be retrieved
-            const messagesSnapshot = await db.collection('messages')
-                .where('conversationId', '==', conversationId)
-                .get();
-
-            console.log(`Messages with conversationId "${conversationId}": ${messagesSnapshot.size}`);
-
-            if (messagesSnapshot.size > 0) {
-                console.log('✓ Message can be retrieved by conversationId');
-            } else {
-                console.log('✗ Message NOT found by conversationId query');
-            }
-        } else {
-            console.log('✗ Message was NOT saved');
+        if (!santa || !recipient
+            || santa.recipientId !== recipientUserId
+            || recipient.gifterId !== santaUserId) {
+            console.error('Refusing to write: the users are not reciprocally assigned as santa -> recipient.');
+            console.error('Santa exists:', !!santa, '| Recipient exists:', !!recipient);
+            console.error('Santa.recipientId matches:', santa?.recipientId === recipientUserId);
+            console.error('Recipient.gifterId matches:', recipient?.gifterId === santaUserId);
+            exitCode = 1;
+            return;
         }
 
-        console.log('\n=== TEST COMPLETE ===');
-        console.log('\nNext steps:');
-        console.log('1. Open the app as Jed');
-        console.log('2. Check the "Santa" tab');
-        console.log('3. You should see the test message from Louis');
-        console.log('');
+        const conversationId = `santa_${santaUserId}_recipient_${recipientUserId}`;
+        console.log('ConversationId:', conversationId);
 
+        const messageId = uuidv4();
+        const testMessage = {
+            id: messageId,
+            fromId: santaUserId,
+            toId: recipientUserId,
+            content: 'Routing test message',
+            timestamp: new Date().toISOString(),
+            conversationId,
+        };
+
+        const docRef = db.collection('messages').doc(messageId);
+        await docRef.create(testMessage);
+        console.log('Message created with document ID:', messageId);
+
+        const doc = await docRef.get();
+        if (!doc.exists) {
+            console.log('✗ Message was NOT saved');
+            exitCode = 1;
+            return;
+        }
+        console.log('✓ Message saved');
+
+        const messagesSnapshot = await db.collection('messages')
+            .where('conversationId', '==', conversationId)
+            .get();
+        console.log(`Messages with this conversationId: ${messagesSnapshot.size}`);
+        console.log(messagesSnapshot.size > 0
+            ? '✓ Message can be retrieved by conversationId'
+            : '✗ Message NOT found by conversationId query');
+
+        console.log('\n=== TEST COMPLETE ===');
+        console.log('\nNext step: sign in as the recipient and open the Santa tab.\n');
     } catch (error) {
-        console.error('Error during test:', error);
+        console.error('Error during test:', error?.message || error);
+        exitCode = 1;
     } finally {
-        process.exit(0);
+        process.exit(exitCode);
     }
 }
 

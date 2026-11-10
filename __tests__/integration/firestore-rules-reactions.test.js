@@ -40,7 +40,7 @@ describe('firestore rules: reactions', () => {
             content: 'hello',
             timestamp: new Date().toISOString(),
             conversationId: 'santa_user-a_recipient_user-b',
-            isSantaMsg: false,
+            isSantaMsg: true,
             fromName: 'User A',
             toName: 'User B',
         });

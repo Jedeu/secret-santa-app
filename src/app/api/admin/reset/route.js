@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { resetDatabase, ensureAllParticipants } from '@/lib/firestore';
+import { resetAndReseedParticipants } from '@/lib/firestore';
 import { PARTICIPANTS } from '@/lib/participants';
 import { auth as adminAuth } from '@/lib/firebase';
 import { isAdmin } from '@/lib/config';
+import { admissionErrorResponse } from '@/lib/participant-admission';
 
 export async function POST(request) {
     try {
@@ -24,11 +25,8 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 403 });
         }
 
-        // Reset the database
-        await resetDatabase();
-
-        // Re-create all participants
-        await ensureAllParticipants(PARTICIPANTS);
+        // Exclusive, fail-closed reset: begin (new epoch), delete, reseed, complete.
+        await resetAndReseedParticipants(PARTICIPANTS);
 
         return NextResponse.json({ success: true, message: 'Database reset and participants re-initialized' });
     } catch (error) {
@@ -42,6 +40,9 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
-        return NextResponse.json({ error: 'Failed to reset database' }, { status: 500 });
+        const mapped = admissionErrorResponse(error);
+        if (mapped) return mapped;
+
+        return NextResponse.json({ error: 'Reset did not complete. Run Reset again.' }, { status: 500 });
     }
 }

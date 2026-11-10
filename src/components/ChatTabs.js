@@ -5,9 +5,13 @@ import PublicFeed from '@/components/PublicFeed';
 /**
  * ChatTabs - Renders the appropriate chat view based on active tab
  *
+ * Each Chat is keyed by its tab and conversation, so drafts and per-chat state never
+ * follow a tab switch or an assignment change. PublicFeed is keyed by user id.
+ *
  * @param {Object} props
  * @param {'recipient'|'santa'|'feed'} props.activeTab - Currently active tab
  * @param {Object} props.currentUser - Current authenticated user
+ * @param {string|null} props.authUid - Firebase Auth uid that owns queued messages
  * @param {Object[]} props.allUsers - All users in the system
  * @param {Object[]} props.allMessages - All messages (for public feed)
  * @param {Object[]} props.recipientMessages - Messages for recipient conversation
@@ -22,6 +26,7 @@ import PublicFeed from '@/components/PublicFeed';
 export default function ChatTabs({
     activeTab,
     currentUser,
+    authUid = null,
     allUsers,
     allMessages,
     allReactions,
@@ -37,7 +42,9 @@ export default function ChatTabs({
     if (activeTab === 'recipient') {
         return (
             <Chat
+                key={'recipient:' + recipientConversationId}
                 currentUser={currentUser}
+                authUid={authUid}
                 otherUser={{
                     id: currentUser?.recipientId,
                     name: recipientUser?.name || 'Recipient'
@@ -54,7 +61,9 @@ export default function ChatTabs({
     if (activeTab === 'santa') {
         return (
             <Chat
+                key={'santa:' + santaConversationId}
                 currentUser={currentUser}
+                authUid={authUid}
                 otherUser={{
                     id: currentUser?.gifterId,
                     name: 'Santa'
@@ -71,6 +80,7 @@ export default function ChatTabs({
     if (activeTab === 'feed') {
         return (
             <PublicFeed
+                key={currentUser?.id}
                 messages={allMessages}
                 allReactions={allReactions}
                 allUsers={allUsers}

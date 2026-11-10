@@ -1,89 +1,52 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
-import { getConversationId, parseConversationId } from '@/lib/message-utils';
+import { buildAssignmentMap, resolveMessageConversation } from '@/lib/message-utils';
 import ReactionChips from '@/components/ReactionChips';
 
-function resolveLegacyRole(message, fromUser, toUser) {
-    if (typeof message.isSantaMsg === 'boolean') {
-        return { isSantaMsg: message.isSantaMsg, isAmbiguous: false };
-    }
+// Legacy per-browser key; no longer read (it was shared across accounts).
+const LEGACY_LAST_VIEWED_KEY = 'publicFeedLastViewed';
 
-    const fromIsSantaToTo = fromUser?.recipientId === message.toId;
-    const toIsSantaToFrom = toUser?.recipientId === message.fromId;
-
-    if (fromIsSantaToTo && !toIsSantaToFrom) {
-        return { isSantaMsg: true, isAmbiguous: false };
-    }
-    if (!fromIsSantaToTo && toIsSantaToFrom) {
-        return { isSantaMsg: false, isAmbiguous: false };
-    }
-
-    // Legacy rows in mutual cycles are directionally ambiguous.
-    // Keep sender identity visible instead of forcing a Santa label.
-    return { isSantaMsg: false, isAmbiguous: true };
+function isDocumentVisible() {
+    return typeof document === 'undefined' || document.visibilityState === 'visible';
 }
 
-function resolveLegacyConversation(message, role) {
-    if (!message?.fromId || !message?.toId) {
-        return {
-            conversationId: `legacy_${message?.id || Date.now()}`,
-            recipientId: message?.toId || null,
-            santaId: message?.fromId || null,
-        };
-    }
-
-    if (!role.isAmbiguous) {
-        const santaId = role.isSantaMsg ? message.fromId : message.toId;
-        const recipientId = role.isSantaMsg ? message.toId : message.fromId;
-        return {
-            conversationId: getConversationId(santaId, recipientId),
-            recipientId,
-            santaId,
-        };
-    }
-
-    const [santaId, recipientId] = [message.fromId, message.toId].sort();
-    return {
-        conversationId: getConversationId(santaId, recipientId),
-        recipientId,
-        santaId,
-    };
+function laterIso(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return new Date(b).getTime() > new Date(a).getTime() ? b : a;
 }
 
 export default function PublicFeed({ messages = [], allReactions = [], allUsers = [], userId }) {
-    const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = recipientId
-    const [lastViewed, setLastViewed] = useState(() => {
-        // Lazy initialization: Load from localStorage for backwards compatibility
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('publicFeedLastViewed');
-            if (saved) {
-                try {
-                    return JSON.parse(saved);
-                } catch {
-                    return {};
-                }
-            }
+    const [selectedThread, setSelectedThread] = useState(null); // null = list view, string = threadId
+    // Hydrated read markers only: { [threadId]: ISO timestamp of the latest observed message }.
+    // Threads without a hydrated marker show no unread badge.
+    const [markers, setMarkers] = useState({});
+    const markedRef = useRef({});
+
+    // Discard the legacy shared key without reading it.
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            window.localStorage.removeItem(LEGACY_LAST_VIEWED_KEY);
+        } catch {
+            // ignore storage errors
         }
-        return {};
-    });
-    // Group messages by conversationId to ensure threads are consolidated correctly.
+    }, []);
+
+    // Group messages by resolved conversation to ensure threads are consolidated correctly.
     const { threadsById, threadList } = useMemo(() => {
         const usersById = new Map(allUsers.map(user => [user.id, user]));
+        const assignments = buildAssignmentMap(allUsers);
         const threadsById = {};
         messages.forEach(rawMsg => {
             // Resolve users to determine direction and names
             const fromUser = usersById.get(rawMsg.fromId);
             const toUser = usersById.get(rawMsg.toId);
 
-            const parsedConversation = parseConversationId(rawMsg.conversationId);
-            const legacyRole = parsedConversation ? null : resolveLegacyRole(rawMsg, fromUser, toUser);
-            const legacyConversation = parsedConversation ? null : resolveLegacyConversation(rawMsg, legacyRole);
-
-            const isSantaMsg = parsedConversation
-                ? rawMsg.fromId === parsedConversation.santaId
-                : legacyRole.isSantaMsg;
-            const isAmbiguousLegacy = !parsedConversation && legacyRole.isAmbiguous;
+            const resolved = resolveMessageConversation(rawMsg, assignments);
+            const isSantaMsg = resolved.isSantaMsg;
+            const isAmbiguousLegacy = resolved.isAmbiguous;
 
             let fromName = rawMsg.fromName;
             let toName = rawMsg.toName;
@@ -106,16 +69,8 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                 toName
             };
 
-            let threadId;
-            let recipientName;
-
-            if (parsedConversation) {
-                threadId = msg.conversationId;
-                recipientName = usersById.get(parsedConversation.recipientId)?.name || 'Unknown';
-            } else {
-                threadId = legacyConversation.conversationId;
-                recipientName = usersById.get(legacyConversation.recipientId)?.name || 'Unknown';
-            }
+            const threadId = resolved.conversationId;
+            const recipientName = usersById.get(resolved.recipientId)?.name || 'Unknown';
 
             const stableThreadName = `🎁 ${recipientName}'s Gift Exchange`;
 
@@ -147,15 +102,15 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
 
     const threadIdsKey = threadList.map(thread => thread.id).join('|');
 
-    // Hydrate lastViewed from Firestore-backed lastRead documents on first load.
+    // Hydrate markers from Firestore-backed lastRead documents.
     useEffect(() => {
         const threadIds = threadIdsKey ? threadIdsKey.split('|') : [];
         if (!userId || threadIds.length === 0) return;
 
         let cancelled = false;
 
-        const hydrateLastViewed = async () => {
-            const remoteLastViewed = {};
+        const hydrateMarkers = async () => {
+            const remoteMarkers = {};
 
             await Promise.all(threadIds.map(async (threadId) => {
                 const publicFeedConversationId = `publicFeed_${threadId}`;
@@ -166,66 +121,97 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                 }
 
                 if (timestamp) {
-                    remoteLastViewed[threadId] = timestamp;
+                    remoteMarkers[threadId] = timestamp;
                 }
             }));
 
-            if (cancelled || Object.keys(remoteLastViewed).length === 0) {
+            if (cancelled || Object.keys(remoteMarkers).length === 0) {
                 return;
             }
 
-            setLastViewed(prev => {
+            setMarkers(prev => {
                 let changed = false;
                 const merged = { ...prev };
 
-                Object.entries(remoteLastViewed).forEach(([threadId, remoteTimestamp]) => {
-                    const localTimestamp = merged[threadId];
-                    if (!localTimestamp || new Date(remoteTimestamp) > new Date(localTimestamp)) {
-                        merged[threadId] = remoteTimestamp;
+                Object.entries(remoteMarkers).forEach(([threadId, remoteTimestamp]) => {
+                    const next = laterIso(merged[threadId], remoteTimestamp);
+                    if (next !== merged[threadId]) {
+                        merged[threadId] = next;
                         changed = true;
                     }
                 });
-
-                if (changed && typeof window !== 'undefined') {
-                    localStorage.setItem('publicFeedLastViewed', JSON.stringify(merged));
-                }
 
                 return changed ? merged : prev;
             });
         };
 
-        hydrateLastViewed();
+        hydrateMarkers();
 
         return () => {
             cancelled = true;
         };
     }, [userId, threadIdsKey]);
 
-    // Calculate unread count for each thread without mutating the memoized objects
+    // Calculate unread count for each hydrated thread without mutating the memoized objects
     const threadListWithUnread = useMemo(() => threadList.map(thread => {
-        const lastViewedTime = lastViewed[thread.id] || new Date(0).toISOString();
+        const marker = markers[thread.id];
+        if (!marker) {
+            return { ...thread, unreadCount: 0 };
+        }
+        const markerMs = new Date(marker).getTime();
         const unreadCount = thread.messages.filter(
-            msg => msg.timestamp > lastViewedTime
+            msg => new Date(msg.timestamp).getTime() > markerMs
         ).length;
         return { ...thread, unreadCount };
-    }), [threadList, lastViewed]);
+    }), [threadList, markers]);
 
-    // Handle viewing a thread - mark as read
-    const handleThreadClick = (threadId) => {
-        const now = new Date().toISOString();
-        const newLastViewed = { ...lastViewed, [threadId]: now };
-        setLastViewed(newLastViewed);
+    // Mark a thread read up to its latest message timestamp (the observed boundary).
+    const markThreadRead = useCallback((threadId) => {
+        const boundary = threadsById[threadId]?.lastMessage?.timestamp;
+        if (!threadId || !boundary) return;
+        if (markedRef.current[threadId] === boundary) return;
+        markedRef.current[threadId] = boundary;
 
-        // Update localStorage for backwards compatibility
-        localStorage.setItem('publicFeedLastViewed', JSON.stringify(newLastViewed));
+        setMarkers(prev => {
+            const next = laterIso(prev[threadId], boundary);
+            return next === prev[threadId] ? prev : { ...prev, [threadId]: next };
+        });
 
         // Write to Firestore (debounced) if user is authenticated
         if (userId) {
-            updateLastReadTimestamp(userId, `publicFeed_${threadId}`);
+            updateLastReadTimestamp(userId, `publicFeed_${threadId}`, boundary);
         }
+    }, [threadsById, userId]);
 
+    // Handle viewing a thread - mark as read
+    const handleThreadClick = (threadId) => {
+        markThreadRead(threadId);
         setSelectedThread(threadId);
     };
+
+    // While a thread is open: mark new messages read as they arrive (only while visible),
+    // and catch up when the tab becomes visible again.
+    const selectedLatestTimestamp = selectedThread
+        ? threadsById[selectedThread]?.lastMessage?.timestamp || null
+        : null;
+
+    useEffect(() => {
+        if (!selectedThread || !selectedLatestTimestamp) return undefined;
+
+        if (isDocumentVisible()) {
+            markThreadRead(selectedThread);
+        }
+
+        const onVisibility = () => {
+            if (isDocumentVisible()) {
+                markThreadRead(selectedThread);
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [selectedThread, selectedLatestTimestamp, markThreadRead]);
 
     return (
         <div className="card" style={{

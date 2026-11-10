@@ -36,30 +36,35 @@ export default function NotificationSoundRuntime({
     allMessages = [],
     allMessagesLoading = false,
 }) {
-    const isHydratedRef = useRef(false);
+    // User id whose message baseline has been captured (null = not hydrated).
+    const hydratedUserRef = useRef(null);
     const prevMessagesRef = useRef([]);
     const lastChimeTimeRef = useRef(0);
-    const previousLoadingRef = useRef(allMessagesLoading);
 
     useEffect(() => {
+        // No user: reset.
         if (!currentUserId) {
-            isHydratedRef.current = false;
+            hydratedUserRef.current = null;
             prevMessagesRef.current = [];
-            previousLoadingRef.current = allMessagesLoading;
             return;
         }
 
-        const loadingFinished = previousLoadingRef.current && !allMessagesLoading;
-        previousLoadingRef.current = allMessagesLoading;
+        // User changed: un-hydrate.
+        if (hydratedUserRef.current !== null && hydratedUserRef.current !== currentUserId) {
+            hydratedUserRef.current = null;
+        }
 
-        if (!isHydratedRef.current && loadingFinished) {
+        // Loading: un-hydrate and wait for the loaded list.
+        if (allMessagesLoading) {
+            hydratedUserRef.current = null;
+            return;
+        }
+
+        // First loaded state for this user: silent baseline.
+        if (hydratedUserRef.current !== currentUserId) {
             prevMessagesRef.current = allMessages;
-            isHydratedRef.current = true;
+            hydratedUserRef.current = currentUserId;
             logSoundDebug('suppressed', { reason: 'initial-hydration' });
-            return;
-        }
-
-        if (!isHydratedRef.current) {
             return;
         }
 

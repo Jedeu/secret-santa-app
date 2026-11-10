@@ -2,7 +2,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
 import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
-import { firestore } from '../../src/lib/firebase-client';
 import { onSnapshot } from 'firebase/firestore';
 
 // Mock dependencies
@@ -32,15 +31,20 @@ jest.mock('../../src/hooks/useUser', () => ({
     }))
 }));
 
-// Mock lastReadClient
+// Mock lastReadClient (accepts every valid update)
 jest.mock('../../src/lib/lastReadClient', () => ({
-    updateLastReadTimestamp: jest.fn(),
+    updateLastReadTimestamp: jest.fn((userId, conversationId, observedAt) => Boolean(userId && conversationId && observedAt)),
     getLastReadTimestamp: jest.fn(() => Promise.resolve(new Date(0).toISOString())),
     getCachedTimestamp: jest.fn(() => new Date(0).toISOString()),
-    subscribeToLastRead: jest.fn(() => () => { })
+    subscribeToLastRead: jest.fn(() => () => { }),
+    flushPendingWrites: jest.fn(() => Promise.resolve()),
+    resetLastReadState: jest.fn(),
 }));
 
-import { updateLastReadTimestamp as mockUpdateLastRead, getLastReadTimestamp as mockGetLastRead } from '../../src/lib/lastReadClient';
+import {
+    updateLastReadTimestamp as mockUpdateLastRead,
+    subscribeToLastRead as mockSubscribeToLastRead,
+} from '../../src/lib/lastReadClient';
 
 describe('Unread Count Optimization', () => {
     beforeEach(() => {
@@ -51,10 +55,9 @@ describe('Unread Count Optimization', () => {
         <RealtimeMessagesProvider>{children}</RealtimeMessagesProvider>
     );
 
-    it('should update lastRead timestamp without triggering full listener recreation', () => {
-        // This verify that updating lastRead calls the client utility
-        updateLastReadTimestamp('user1', 'user2');
-        expect(mockUpdateLastRead).toHaveBeenCalled();
+    it('should update lastRead timestamp through the client utility and report acceptance', () => {
+        expect(updateLastReadTimestamp('user1', 'user2', null, '2026-01-01T00:00:00.000Z')).toBe(true);
+        expect(mockUpdateLastRead).toHaveBeenCalledWith('user1', 'user1_user2', '2026-01-01T00:00:00.000Z');
     });
 
     it('should not recreate listeners when lastRead changes', async () => {
@@ -66,32 +69,26 @@ describe('Unread Count Optimization', () => {
             { wrapper }
         );
 
-        // Wait for primeCache to settle
         await waitFor(() => {
-            expect(mockGetLastRead).toHaveBeenCalled();
+            expect(mockSubscribeToLastRead).toHaveBeenCalled();
         });
 
         // Provider creates two listeners (messages + reactions).
-        // The hook itself should not create additional listeners.
+        // Own-marker subscriptions go through lastReadClient, not this onSnapshot.
         expect(onSnapshot).toHaveBeenCalledTimes(2);
         const initialCallCount = onSnapshot.mock.calls.length;
 
-        // Simulate user marking messages as read
         act(() => {
-            updateLastReadTimestamp('user1', 'recipient1');
+            updateLastReadTimestamp('user1', 'recipient1', null, '2026-01-01T00:00:00.000Z');
         });
 
-        // Listeners should NOT be recreated
         expect(onSnapshot.mock.calls.length).toBe(initialCallCount);
         expect(unsubscribeMock).not.toHaveBeenCalled();
 
         unmount();
     });
 
-    it('should derive unread counts from context messages', async () => {
-        // This relies on the Provider's allMessages state.
-        // Since we mock onSnapshot, we need to simulate the callback to populate state.
-
+    it('should derive unread counts from context messages (legacy rows routed by assignment)', async () => {
         let snapshotCallback;
         onSnapshot.mockImplementation((query, options, cb) => {
             if (!snapshotCallback) {
@@ -105,15 +102,12 @@ describe('Unread Count Optimization', () => {
             { wrapper }
         );
 
-        // Wait for primeCache to settle
         await waitFor(() => {
-            expect(mockGetLastRead).toHaveBeenCalled();
+            expect(mockSubscribeToLastRead).toHaveBeenCalled();
         });
 
-        // Initially 0
         expect(result.current.recipientUnread).toBe(0);
 
-        // Inject messages via the captured Provider listener callback
         act(() => {
             if (snapshotCallback) {
                 const mockMessages = [
@@ -130,7 +124,7 @@ describe('Unread Count Optimization', () => {
             }
         });
 
-        // Now should have 2 unread
         expect(result.current.recipientUnread).toBe(2);
+        expect(result.current.santaUnread).toBe(0);
     });
 });

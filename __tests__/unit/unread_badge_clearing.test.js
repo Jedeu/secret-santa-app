@@ -1,8 +1,7 @@
 /** @jest-environment jsdom */
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useRealtimeUnreadCounts, updateLastReadTimestamp } from '../../src/hooks/useRealtimeMessages';
-import { RealtimeMessagesProvider } from '../../src/context/RealtimeMessagesContext';
-import { firestore } from '../../src/lib/firebase-client';
+import { RealtimeMessagesProvider, useRealtimeMessagesContext } from '../../src/context/RealtimeMessagesContext';
 import { onSnapshot } from 'firebase/firestore';
 import { getConversationId } from '../../src/lib/message-utils';
 
@@ -33,13 +32,22 @@ jest.mock('../../src/hooks/useUser', () => ({
     }))
 }));
 
-// Mock lastReadClient (Stateful)
+// Stateful lastReadClient mock: accepts only advancing, valid observed timestamps.
 const mockLastReadStore = new Map();
+const mockMarkerCallbacks = new Map();
 
 jest.mock('../../src/lib/lastReadClient', () => ({
-    updateLastReadTimestamp: jest.fn((userId, conversationId) => {
+    updateLastReadTimestamp: jest.fn((userId, conversationId, observedAt) => {
+        if (!userId || !conversationId || typeof observedAt !== 'string' || Number.isNaN(Date.parse(observedAt))) {
+            return false;
+        }
         const key = `${userId}_${conversationId}`;
-        mockLastReadStore.set(key, new Date().toISOString());
+        const current = mockLastReadStore.get(key);
+        if (current && Date.parse(observedAt) <= Date.parse(current)) {
+            return false;
+        }
+        mockLastReadStore.set(key, observedAt);
+        return true;
     }),
     getLastReadTimestamp: jest.fn((userId, conversationId) => {
         const key = `${userId}_${conversationId}`;
@@ -49,23 +57,15 @@ jest.mock('../../src/lib/lastReadClient', () => ({
         const key = `${userId}_${conversationId}`;
         return mockLastReadStore.get(key) || new Date(0).toISOString();
     }),
-    subscribeToLastRead: jest.fn(() => () => { })
+    subscribeToLastRead: jest.fn((userId, conversationId, callback) => {
+        mockMarkerCallbacks.set(`${userId}_${conversationId}`, callback);
+        return () => mockMarkerCallbacks.delete(`${userId}_${conversationId}`);
+    }),
+    flushPendingWrites: jest.fn(() => Promise.resolve()),
+    resetLastReadState: jest.fn(),
 }));
 
-import { updateLastReadTimestamp as mockUpdateLastRead, getLastReadTimestamp as mockGetLastRead } from '../../src/lib/lastReadClient';
-
-/**
- * Helper to extract the callback from onSnapshot calls
- */
-function extractSnapshotCallback(callArgs) {
-    if (typeof callArgs[1] === 'object' && typeof callArgs[2] === 'function') {
-        return { callback: callArgs[2] };
-    }
-    if (typeof callArgs[1] === 'function') {
-        return { callback: callArgs[1] };
-    }
-    return { callback: null };
-}
+import { subscribeToLastRead as mockSubscribeToLastRead } from '../../src/lib/lastReadClient';
 
 // Helper to create mock snapshot
 function createMockSnapshot(messages) {
@@ -86,19 +86,17 @@ describe('Unread Badge Clearing', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        mockLastReadStore.clear(); // Reset simple store
+        mockLastReadStore.clear();
+        mockMarkerCallbacks.clear();
 
-        // Reset snapshot callbacks
         providerSnapshotCallback = null;
 
-        // Mock onSnapshot to capture callbacks
         onSnapshot.mockImplementation((query, options, callback) => {
-            // Provider creates messages + reactions listeners.
-            // First callback corresponds to messages.
+            // Provider creates messages + reactions listeners. First is messages.
             if (!providerSnapshotCallback) {
                 providerSnapshotCallback = callback;
             }
-            return jest.fn(); // unsubscribe function
+            return jest.fn();
         });
     });
 
@@ -106,355 +104,213 @@ describe('Unread Badge Clearing', () => {
         <RealtimeMessagesProvider>{children}</RealtimeMessagesProvider>
     );
 
+    async function renderCounts(userId = 'user1', recipientId = 'recipient1', gifterId = 'santa1') {
+        const rendered = renderHook(() => ({
+            counts: useRealtimeUnreadCounts(userId, recipientId, gifterId),
+            context: useRealtimeMessagesContext(),
+        }), { wrapper });
+        await waitFor(() => {
+            expect(mockSubscribeToLastRead).toHaveBeenCalled();
+        });
+        return rendered;
+    }
+
+    function deliver(messages) {
+        act(() => {
+            if (providerSnapshotCallback) {
+                providerSnapshotCallback(createMockSnapshot(messages));
+            }
+        });
+    }
+
+    test('subscribes to both own markers', async () => {
+        await renderCounts();
+
+        expect(mockSubscribeToLastRead).toHaveBeenCalledWith('user1', recipientConvId, expect.any(Function));
+        expect(mockSubscribeToLastRead).toHaveBeenCalledWith('user1', santaConvId, expect.any(Function));
+    });
+
     describe('Badge appears when new message arrives', () => {
         it('should show unread count when messages arrive after lastRead', async () => {
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
+            const { result } = await renderCounts();
 
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
+            deliver([{ fromId: 'recipient1', toId: 'user1', timestamp: new Date().toISOString(), conversationId: recipientConvId }]);
 
-            // Simulate messages arriving that are newer than lastRead (epoch)
-            act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: new Date().toISOString(),
-                            conversationId: recipientConvId
-                        }
-                    ]));
-                }
-            });
-
-            expect(result.current.recipientUnread).toBe(1);
+            expect(result.current.counts.recipientUnread).toBe(1);
         });
 
         it('should show correct count for multiple unread messages', async () => {
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
-
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
+            const { result } = await renderCounts();
 
             const now = new Date();
-            act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: new Date(now.getTime() - 1000).toISOString(),
-                            conversationId: recipientConvId
-                        },
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: new Date(now.getTime() - 500).toISOString(),
-                            conversationId: recipientConvId
-                        },
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: now.toISOString(),
-                            conversationId: recipientConvId
-                        }
-                    ]));
-                }
-            });
+            deliver([
+                { fromId: 'recipient1', toId: 'user1', timestamp: new Date(now.getTime() - 1000).toISOString(), conversationId: recipientConvId },
+                { fromId: 'recipient1', toId: 'user1', timestamp: new Date(now.getTime() - 500).toISOString(), conversationId: recipientConvId },
+                { fromId: 'recipient1', toId: 'user1', timestamp: now.toISOString(), conversationId: recipientConvId },
+            ]);
 
-            expect(result.current.recipientUnread).toBe(3);
+            expect(result.current.counts.recipientUnread).toBe(3);
         });
     });
 
     describe('Badge clears when user visits tab', () => {
-        it('should clear badge immediately when updateLastReadTimestamp is called', async () => {
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
+        it('should clear badge immediately when the observed boundary is recorded', async () => {
+            const { result } = await renderCounts();
+            const messageTime = new Date().toISOString();
 
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
+            deliver([{ fromId: 'recipient1', toId: 'user1', timestamp: messageTime, conversationId: recipientConvId }]);
+            expect(result.current.counts.recipientUnread).toBe(1);
 
-            const messageTime = new Date();
-
-            // First, simulate a message arriving
             act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: messageTime.toISOString(),
-                            conversationId: recipientConvId
-                        }
-                    ]));
-                }
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId, messageTime);
             });
 
-            expect(result.current.recipientUnread).toBe(1);
-
-            // Now simulate user visiting the tab (calls updateLastReadTimestamp)
-            // This should trigger recalculation with updated lastRead
-            act(() => {
-                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
-            });
-
-            // Badge should be cleared because lastRead is now >= message timestamp
-            expect(result.current.recipientUnread).toBe(0);
+            expect(result.current.counts.recipientUnread).toBe(0);
         });
 
         it('should clear santa badge when visiting santa tab', async () => {
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
+            const { result } = await renderCounts();
+            const messageTime = new Date().toISOString();
 
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
+            deliver([{ fromId: 'santa1', toId: 'user1', timestamp: messageTime, conversationId: santaConvId }]);
+            expect(result.current.counts.santaUnread).toBe(1);
 
-            const messageTime = new Date();
-
-            // Simulate santa message arriving
             act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        {
-                            fromId: 'santa1',
-                            toId: 'user1',
-                            timestamp: messageTime.toISOString(),
-                            conversationId: santaConvId
-                        }
-                    ]));
-                }
+                updateLastReadTimestamp('user1', 'santa1', santaConvId, messageTime);
             });
 
-            expect(result.current.santaUnread).toBe(1);
+            expect(result.current.counts.santaUnread).toBe(0);
+        });
 
-            // User visits santa tab
+        it('a remote marker callback clears the badge (read on another device)', async () => {
+            const { result } = await renderCounts();
+            const messageTime = new Date().toISOString();
+
+            deliver([{ fromId: 'recipient1', toId: 'user1', timestamp: messageTime, conversationId: recipientConvId }]);
+            expect(result.current.counts.recipientUnread).toBe(1);
+
             act(() => {
-                updateLastReadTimestamp('user1', 'santa1', santaConvId);
+                mockLastReadStore.set(`user1_${recipientConvId}`, messageTime);
+                mockMarkerCallbacks.get(`user1_${recipientConvId}`)(messageTime);
             });
 
-            expect(result.current.santaUnread).toBe(0);
+            expect(result.current.counts.recipientUnread).toBe(0);
+        });
+
+        it('a rejected (non-advancing) update does not notify subscribers', async () => {
+            const { result } = await renderCounts();
+            const later = '2026-01-02T00:00:00.000Z';
+            const earlier = '2026-01-01T00:00:00.000Z';
+            const listener = jest.fn();
+            const unsubscribe = result.current.context.subscribeToLastReadChanges(listener);
+
+            act(() => {
+                expect(updateLastReadTimestamp('user1', 'recipient1', recipientConvId, later)).toBe(true);
+            });
+            expect(listener).toHaveBeenCalledTimes(1);
+
+            act(() => {
+                expect(updateLastReadTimestamp('user1', 'recipient1', recipientConvId, earlier)).toBe(false);
+                expect(updateLastReadTimestamp('user1', 'recipient1', recipientConvId, null)).toBe(false);
+            });
+            expect(listener).toHaveBeenCalledTimes(1);
+            unsubscribe();
         });
     });
 
-    describe('Badge respects conversation ID matching', () => {
-        it('should not count messages with wrong conversationId', async () => {
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
+    describe('Badge respects conversation routing', () => {
+        it('should not count messages with a mismatched explicit conversationId', async () => {
+            const { result } = await renderCounts();
 
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
+            deliver([{
+                fromId: 'recipient1',
+                toId: 'user1',
+                timestamp: new Date().toISOString(),
+                conversationId: 'santa_wrong_recipient_wrong'
+            }]);
 
-            act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: new Date().toISOString(),
-                            conversationId: 'santa_wrong_recipient_wrong' // Wrong conversation
-                        }
-                    ]));
-                }
-            });
+            expect(result.current.counts.recipientUnread).toBe(0);
+        });
 
-            // Should not count because conversationId doesn't match
-            expect(result.current.recipientUnread).toBe(0);
+        it("a mutual pair's legacy row counts in one tab only", async () => {
+            const { result } = await renderCounts('user1', 'peer', 'peer');
+
+            deliver([{ id: 'legacy-1', fromId: 'peer', toId: 'user1', timestamp: new Date().toISOString() }]);
+
+            expect(result.current.counts.recipientUnread + result.current.counts.santaUnread).toBe(1);
         });
     });
 
     describe('Works for both Santa and Recipient tabs', () => {
         it('should track both counts independently', async () => {
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
+            const { result } = await renderCounts();
+            const now = new Date().toISOString();
 
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
+            deliver([
+                { fromId: 'recipient1', toId: 'user1', timestamp: now, conversationId: recipientConvId },
+                { fromId: 'santa1', toId: 'user1', timestamp: now, conversationId: santaConvId },
+                { fromId: 'santa1', toId: 'user1', timestamp: now, conversationId: santaConvId },
+            ]);
 
-            const now = new Date();
+            expect(result.current.counts.recipientUnread).toBe(1);
+            expect(result.current.counts.santaUnread).toBe(2);
 
-            // Simulate both messages arriving via single provider stream
             act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        // Recipient message
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: now.toISOString(),
-                            conversationId: recipientConvId
-                        },
-                        // Santa messages
-                        {
-                            fromId: 'santa1',
-                            toId: 'user1',
-                            timestamp: now.toISOString(),
-                            conversationId: santaConvId
-                        },
-                        {
-                            fromId: 'santa1',
-                            toId: 'user1',
-                            timestamp: now.toISOString(),
-                            conversationId: santaConvId
-                        }
-                    ]));
-                }
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId, now);
             });
 
-            expect(result.current.recipientUnread).toBe(1);
-            expect(result.current.santaUnread).toBe(2);
+            expect(result.current.counts.recipientUnread).toBe(0);
+            expect(result.current.counts.santaUnread).toBe(2);
 
-            // Clear only recipient badge
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
+                updateLastReadTimestamp('user1', 'santa1', santaConvId, now);
             });
 
-            expect(result.current.recipientUnread).toBe(0);
-            expect(result.current.santaUnread).toBe(2); // Still has santa messages
-
-            // Clear santa badge
-            act(() => {
-                updateLastReadTimestamp('user1', 'santa1', santaConvId);
-            });
-
-            expect(result.current.recipientUnread).toBe(0);
-            expect(result.current.santaUnread).toBe(0);
+            expect(result.current.counts.recipientUnread).toBe(0);
+            expect(result.current.counts.santaUnread).toBe(0);
         });
     });
 
     describe('Badge clears when new message arrives while viewing tab', () => {
-        it('should clear badge when new message arrives while user is viewing the tab', async () => {
-            // Use fake timers to control time precisely
-            jest.useFakeTimers();
-            const baseTime = new Date('2024-12-01T10:00:00.000Z');
-            jest.setSystemTime(baseTime);
+        it('marks up to the newest observed message, so a later message is unread until observed', async () => {
+            const { result } = await renderCounts();
+            const first = '2024-12-01T10:00:00.000Z';
+            const second = '2024-12-01T10:00:01.000Z';
 
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
-
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
-
-            // T0: User views the tab (calls updateLastReadTimestamp)
+            deliver([{ fromId: 'recipient1', toId: 'user1', timestamp: first, conversationId: recipientConvId }]);
             act(() => {
-                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId, first);
             });
+            expect(result.current.counts.recipientUnread).toBe(0);
 
-            // T1: Advance time by 1 second, then a message arrives
-            jest.setSystemTime(new Date(baseTime.getTime() + 1000));
-            const messageTime = new Date(); // This is T0 + 1 second
+            deliver([
+                { fromId: 'recipient1', toId: 'user1', timestamp: first, conversationId: recipientConvId },
+                { fromId: 'recipient1', toId: 'user1', timestamp: second, conversationId: recipientConvId },
+            ]);
+            expect(result.current.counts.recipientUnread).toBe(1);
 
             act(() => {
-                if (providerSnapshotCallback) {
-                    providerSnapshotCallback(createMockSnapshot([
-                        {
-                            fromId: 'recipient1',
-                            toId: 'user1',
-                            timestamp: messageTime.toISOString(),
-                            conversationId: recipientConvId
-                        }
-                    ]));
-                }
+                updateLastReadTimestamp('user1', 'recipient1', recipientConvId, second);
             });
-
-            // Badge shows 1 because message timestamp (T1) > lastRead (T0)
-            expect(result.current.recipientUnread).toBe(1);
-
-            // T2: Advance time by another second, simulate Chat's useEffect re-running
-            jest.setSystemTime(new Date(baseTime.getTime() + 2000));
-            act(() => {
-                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
-            });
-
-            // Badge should now be cleared because lastRead (T2) >= message timestamp (T1)
-            expect(result.current.recipientUnread).toBe(0);
-
-            jest.useRealTimers();
+            expect(result.current.counts.recipientUnread).toBe(0);
         });
 
         it('should handle rapid sequential messages while viewing', async () => {
-            // Use fake timers to control time precisely
-            jest.useFakeTimers();
-            const baseTime = new Date('2024-12-01T10:00:00.000Z');
-            jest.setSystemTime(baseTime);
+            const { result } = await renderCounts();
+            const base = Date.parse('2024-12-01T10:00:00.000Z');
+            const messages = [];
 
-            const { result } = renderHook(() =>
-                useRealtimeUnreadCounts('user1', 'recipient1', 'santa1'),
-                { wrapper }
-            );
-
-            // Wait for primeCache to settle
-            await waitFor(() => {
-                expect(mockGetLastRead).toHaveBeenCalled();
-            });
-
-            // T0: User starts viewing
-            act(() => {
-                updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
-            });
-
-            // Simulate 3 rapid messages at T1, T2, T3
-            // After each message, updateLastReadTimestamp is called (simulating Chat's useEffect)
             for (let i = 1; i <= 3; i++) {
-                // Advance time for message arrival
-                jest.setSystemTime(new Date(baseTime.getTime() + i * 100));
-                const messageTime = new Date();
+                const timestamp = new Date(base + i * 100).toISOString();
+                messages.push({ fromId: 'recipient1', toId: 'user1', timestamp, conversationId: recipientConvId });
+                deliver([...messages]);
 
                 act(() => {
-                    if (providerSnapshotCallback) {
-                        providerSnapshotCallback(createMockSnapshot([
-                            {
-                                fromId: 'recipient1',
-                                toId: 'user1',
-                                timestamp: messageTime.toISOString(),
-                                conversationId: recipientConvId
-                            }
-                        ]));
-                    }
+                    updateLastReadTimestamp('user1', 'recipient1', recipientConvId, timestamp);
                 });
 
-                // Message arrives, badge would be 1 (message is newer than previous lastRead)
-                // But immediately, updateLastReadTimestamp is called (Chat's useEffect)
-                // Advance time slightly to ensure lastRead > message timestamp
-                jest.setSystemTime(new Date(baseTime.getTime() + i * 100 + 1));
-                act(() => {
-                    updateLastReadTimestamp('user1', 'recipient1', recipientConvId);
-                });
-
-                // Badge should be 0 because we just called updateLastReadTimestamp
-                expect(result.current.recipientUnread).toBe(0);
+                expect(result.current.counts.recipientUnread).toBe(0);
             }
-
-            jest.useRealTimers();
         });
     });
 });

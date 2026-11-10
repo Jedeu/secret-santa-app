@@ -17,6 +17,7 @@ import {
 } from '@/lib/message-outbox';
 import { setTyping, clearTyping } from '@/lib/typing-client';
 import { toggleReaction } from '@/lib/reactions-client';
+import { getLatestMessageTimestamp } from '@/lib/message-utils';
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -56,6 +57,7 @@ function formatRelativeTime(timestamp) {
 
 export default function Chat({
     currentUser,
+    authUid = null,
     otherUser,
     isSantaChat,
     unreadCount,
@@ -80,6 +82,9 @@ export default function Chat({
     const otherLastReadAt = useOtherUserLastRead(otherUser.id, conversationId);
     const isOtherTyping = useTypingIndicator(conversationId, otherUser.id);
     const { showToast } = useToast();
+    // Read markers record the latest message the user has actually observed,
+    // never "now" (a message stamped later than the marker stays unread).
+    const latestObservedAt = getLatestMessageTimestamp(messages);
 
     useEffect(() => {
         const syncOutbox = () => {
@@ -114,12 +119,12 @@ export default function Chat({
     // Gate on visibility: a background tab must not clear the badge (see visibilitychange
     // effect below, which flushes the read marker once the tab is foregrounded again).
     useEffect(() => {
-        if (!isDocumentVisible()) return;
+        if (!isDocumentVisible() || !latestObservedAt) return;
         // IMPORTANT: Use the conversationId passed from parent (new format)
         // NOT getLegacyConversationId which would cause format mismatch
-        updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
+        updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId, latestObservedAt);
         lastReadRef.current = Date.now();
-    }, [currentUser.id, otherUser.id, messages, conversationId]);
+    }, [currentUser.id, otherUser.id, messages, conversationId, latestObservedAt]);
 
     const scrollToBottom = (behavior = 'smooth') => {
         bottomRef.current?.scrollIntoView({ behavior });
@@ -139,11 +144,11 @@ export default function Chat({
         if (chatContainer) {
             const isAtBottom = isNearBottom(chatContainer);
             wasNearBottomRef.current = isAtBottom;
-            if (isAtBottom) {
+            if (isAtBottom && latestObservedAt) {
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
                 if (now - lastReadRef.current > 2000) {
-                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
+                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId, latestObservedAt);
                     lastReadRef.current = now;
                 }
             }
@@ -153,19 +158,19 @@ export default function Chat({
     useEffect(() => {
         // Check if content fits in viewport (no scroll needed) -> Mark as read.
         // Skip in a background tab so a hidden chat never clears its own badge.
-        if (!isDocumentVisible()) return;
+        if (!isDocumentVisible() || !latestObservedAt) return;
         const chatContainer = bottomRef.current?.parentElement;
         if (chatContainer) {
             if (chatContainer.scrollHeight <= chatContainer.clientHeight) {
                 // Debounce: only update if > 2 seconds since last update
                 const now = Date.now();
                 if (now - lastReadRef.current > 2000) {
-                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
+                    updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId, latestObservedAt);
                     lastReadRef.current = now;
                 }
             }
         }
-    }, [messages, currentUser.id, otherUser.id, conversationId]);
+    }, [messages, currentUser.id, otherUser.id, conversationId, latestObservedAt]);
 
     useEffect(() => {
         // Auto-scroll if I sent the latest message OR if user was already near bottom.
@@ -197,6 +202,7 @@ export default function Chat({
 
         try {
             enqueueMessage({
+                ownerUid: authUid,
                 fromUserId: currentUser.id,
                 toId: otherUser.id,
                 conversationId,
@@ -204,7 +210,7 @@ export default function Chat({
             });
             setNewMessage('');
             scrollToBottom('auto');
-            drainOutboxForUser({ fromUserId: currentUser.id }).catch((error) => {
+            drainOutboxForUser({ ownerUid: authUid, fromUserId: currentUser.id }).catch((error) => {
                 console.error('Outbox drain failed after enqueue:', error);
             });
         } catch (error) {
@@ -224,7 +230,7 @@ export default function Chat({
             return;
         }
 
-        drainOutboxForUser({ fromUserId: currentUser.id }).catch((error) => {
+        drainOutboxForUser({ ownerUid: authUid, fromUserId: currentUser.id }).catch((error) => {
             console.error('Outbox drain failed after manual retry:', error);
         });
     };
@@ -299,7 +305,8 @@ export default function Chat({
             // Tab was foregrounded: flush the read marker for messages that arrived
             // while hidden. The messages effect is visibility-gated and won't fire on
             // its own until the next messages change, so do it here.
-            updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId);
+            if (!latestObservedAt) return;
+            updateLastReadTimestamp(currentUser.id, otherUser.id, conversationId, latestObservedAt);
             lastReadRef.current = Date.now();
         };
 
@@ -307,7 +314,7 @@ export default function Chat({
         return () => {
             document.removeEventListener('visibilitychange', onVisibility);
         };
-    }, [currentUser.id, otherUser.id, conversationId]);
+    }, [currentUser.id, otherUser.id, conversationId, latestObservedAt]);
 
     useEffect(() => {
         return () => {

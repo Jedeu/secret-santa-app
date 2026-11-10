@@ -1,3 +1,5 @@
+> Resolved by the bug-sweep PLAN.md: Option A (variant and endpoint removed).
+
 # Plan 5: AdminPanel `full` Variant — Product Decision (Backlog §5, surfaced by PR #55)
 
 ## Goal

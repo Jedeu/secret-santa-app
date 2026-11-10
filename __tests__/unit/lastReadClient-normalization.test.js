@@ -6,24 +6,25 @@ const mockDoc = jest.fn();
 const mockGetDoc = jest.fn();
 const mockSetDoc = jest.fn();
 const mockOnSnapshot = jest.fn();
-const mockServerTimestamp = jest.fn(() => ({ __type: 'serverTimestamp' }));
+const mockFromDate = jest.fn((date) => ({ __type: 'Timestamp', __iso: date.toISOString() }));
 
 jest.mock('firebase/firestore', () => ({
     doc: (...args) => mockDoc(...args),
     getDoc: (...args) => mockGetDoc(...args),
     setDoc: (...args) => mockSetDoc(...args),
     onSnapshot: (...args) => mockOnSnapshot(...args),
-    serverTimestamp: (...args) => mockServerTimestamp(...args),
+    Timestamp: { fromDate: (...args) => mockFromDate(...args) },
 }));
 
 jest.mock('@/lib/firebase-client', () => ({
     firestore: { _isMock: true },
+    clientAuth: { currentUser: { uid: 'uid-1' } },
 }));
 
 import {
-    clearCache,
     getCachedTimestamp,
     getLastReadTimestamp,
+    resetLastReadState,
     subscribeToLastRead,
     updateLastReadTimestamp,
 } from '@/lib/lastReadClient';
@@ -32,8 +33,9 @@ describe('lastReadClient normalization boundary', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         jest.useFakeTimers();
-        clearCache();
+        resetLastReadState();
         mockDoc.mockReturnValue('lastReadDocRef');
+        mockSetDoc.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -69,52 +71,46 @@ describe('lastReadClient normalization boundary', () => {
         expect(getCachedTimestamp('user1', 'conv2')).toBe(expectedIso);
     });
 
-    test('subscribeToLastRead uses fallback cache value when serverTimestamp is temporarily null', () => {
+    test('subscribeToLastRead keeps the cached value when the remote value is temporarily null', async () => {
         const seed = '2026-02-12T19:00:00.000Z';
-        updateLastReadTimestamp('user1', 'conv3');
-        // Override optimistic cache with deterministic seed value for this test.
-        clearCache();
-        // seed cache via getDoc path
         mockGetDoc.mockResolvedValueOnce({
             exists: () => true,
             data: () => ({ lastReadAt: seed }),
         });
+        await getLastReadTimestamp('user1', 'conv3');
 
-        return getLastReadTimestamp('user1', 'conv3').then(() => {
-            let snapshotCallback;
-            mockOnSnapshot.mockImplementation((_docRef, onNext) => {
-                snapshotCallback = onNext;
-                return jest.fn();
-            });
-
-            const onValue = jest.fn();
-            subscribeToLastRead('user1', 'conv3', onValue);
-
-            snapshotCallback({
-                exists: () => true,
-                data: () => ({ lastReadAt: null }),
-            });
-
-            expect(onValue).toHaveBeenCalledWith(seed);
-            expect(getCachedTimestamp('user1', 'conv3')).toBe(seed);
+        let snapshotCallback;
+        mockOnSnapshot.mockImplementation((_docRef, onNext) => {
+            snapshotCallback = onNext;
+            return jest.fn();
         });
+
+        const onValue = jest.fn();
+        subscribeToLastRead('user1', 'conv3', onValue);
+
+        snapshotCallback({
+            exists: () => true,
+            data: () => ({ lastReadAt: null }),
+        });
+
+        expect(onValue).toHaveBeenCalledWith(seed);
+        expect(getCachedTimestamp('user1', 'conv3')).toBe(seed);
     });
 
-    test('updateLastReadTimestamp writes serverTimestamp while keeping optimistic ISO cache', async () => {
-        updateLastReadTimestamp('user1', 'conv4');
+    test('updateLastReadTimestamp writes a Timestamp of exactly the observed message time', async () => {
+        const observedAt = '2026-02-12T20:15:30.123Z';
+        expect(updateLastReadTimestamp('user1', 'conv4', observedAt)).toBe(true);
 
-        const optimistic = getCachedTimestamp('user1', 'conv4');
-        expect(typeof optimistic).toBe('string');
+        expect(getCachedTimestamp('user1', 'conv4')).toBe(observedAt);
         expect(mockSetDoc).not.toHaveBeenCalled();
 
         jest.advanceTimersByTime(2000);
-        await Promise.resolve();
 
-        expect(mockServerTimestamp).toHaveBeenCalled();
-        expect(mockSetDoc).toHaveBeenCalledWith('lastReadDocRef', expect.objectContaining({
+        expect(mockFromDate).toHaveBeenCalledWith(new Date(observedAt));
+        expect(mockSetDoc).toHaveBeenCalledWith('lastReadDocRef', {
             userId: 'user1',
             conversationId: 'conv4',
-            lastReadAt: { __type: 'serverTimestamp' },
-        }));
+            lastReadAt: { __type: 'Timestamp', __iso: observedAt },
+        });
     });
 });

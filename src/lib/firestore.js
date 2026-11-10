@@ -1,5 +1,12 @@
 import { firestore } from './firebase';
-import { v4 as uuidv4 } from 'uuid';
+import {
+    toTitleCase,
+    ensureParticipantProfiles,
+    beginReset,
+    assertResetOwner,
+    assertLifecycleActive,
+    completeReset,
+} from './participant-admission';
 
 /**
  * Server-side Firestore operations for the Secret Santa app.
@@ -7,16 +14,24 @@ import { v4 as uuidv4 } from 'uuid';
  * No server-side caching in this serverless environment.
  */
 
-// --- Name Normalization ---
-// Normalize names to Title Case for consistent storage and querying
-function toTitleCase(name) {
-    if (!name) return '';
-    return name
-        .trim()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-}
+// Every collection the app writes, in reset-deletion order. Keep in sync with
+// firestore.rules, PUSH_TOKENS_COLLECTION in src/lib/push-server.js and
+// scripts/lib/emulator-firestore.js. system/lifecycle is never deleted.
+export const APP_COLLECTIONS = [
+    'authIdentities',
+    'participantIndex',
+    'users',
+    'messages',
+    'lastRead',
+    'typing',
+    'reactions',
+    'pushTokens',
+];
+
+// Deletes per reset transaction (well under Firestore's 500-write limit).
+const RESET_DELETE_BATCH_SIZE = 400;
+
+const noop = async () => {};
 
 // --- Users ---
 
@@ -54,62 +69,84 @@ export async function getAllUsers() {
     return users;
 }
 
-// Batch update for pairing
-export async function batchUpdateUsers(users) {
-    const batch = firestore.batch();
-
-    users.forEach(user => {
-        const ref = firestore.collection('users').doc(user.id);
-        batch.update(ref, {
-            recipientId: user.recipientId,
-            gifterId: user.gifterId
+/**
+ * Assign pairs atomically: reads every user inside one transaction (fenced on the
+ * active lifecycle), asks buildUpdates for the new pairs and writes them.
+ * buildUpdates(users) returns null (no writes) or [{ id, recipientId, gifterId }].
+ */
+export async function assignUsersInTransaction(buildUpdates) {
+    return firestore.runTransaction(async (tx) => {
+        await assertLifecycleActive(tx);
+        const usersCollection = firestore.collection('users');
+        const snapshot = await tx.get(usersCollection);
+        const users = snapshot.docs.map((doc) => {
+            const data = doc.data() || {};
+            return { ...data, id: data.id ?? doc.id };
         });
-    });
 
-    await batch.commit();
+        const updates = buildUpdates(users);
+        if (!updates) {
+            return { usersFound: users.length, updated: 0 };
+        }
+
+        updates.forEach((update) => {
+            tx.update(usersCollection.doc(update.id), {
+                recipientId: update.recipientId,
+                gifterId: update.gifterId,
+            });
+        });
+
+        return { usersFound: users.length, updated: updates.length };
+    });
 }
 
 // --- Participant Management ---
 
-// Ensure all participants from the hardcoded list exist in the database
-// This should be called during app initialization
+// Ensure all participants from the hardcoded list exist in the database.
+// Requires an active lifecycle; conflicts fail closed with PROFILE_CONFLICT.
 export async function ensureAllParticipants(participants) {
-    // For Firestore
-    for (const participant of participants) {
-        const existing = await getUserByEmail(participant.email);
-
-        if (!existing) {
-            const newUser = {
-                id: uuidv4(),
-                name: participant.name,
-                email: participant.email,
-                oauthId: null,
-                image: null,
-                recipientId: null,
-                gifterId: null
-            };
-            await createUser(newUser);
-        }
-    }
+    return ensureParticipantProfiles(participants);
 }
 
 // --- Admin ---
 
-// Firestore allows at most 500 operations per WriteBatch.
-const MAX_BATCH_OPERATIONS = 500;
-
-export async function resetDatabase() {
-    // Every collection the app writes. Keep in sync with firestore.rules and
-    // PUSH_TOKENS_COLLECTION in src/lib/push-server.js.
-    const collections = ['users', 'messages', 'lastRead', 'typing', 'reactions', 'pushTokens'];
-    for (const collectionName of collections) {
-        const snapshot = await firestore.collection(collectionName).get();
-        for (let i = 0; i < snapshot.docs.length; i += MAX_BATCH_OPERATIONS) {
-            const batch = firestore.batch();
-            snapshot.docs.slice(i, i + MAX_BATCH_OPERATIONS).forEach((doc) => {
-                batch.delete(doc.ref);
+async function deleteAppCollections(resetId) {
+    for (const collectionName of APP_COLLECTIONS) {
+        // Repeat owner-checked delete transactions until the collection is empty.
+        let deleted = 0;
+        do {
+            deleted = await firestore.runTransaction(async (tx) => {
+                await assertResetOwner(tx, resetId);
+                const snapshot = await tx.get(
+                    firestore.collection(collectionName).limit(RESET_DELETE_BATCH_SIZE)
+                );
+                snapshot.docs.forEach((doc) => tx.delete(doc.ref));
+                return snapshot.docs.length;
             });
-            await batch.commit();
-        }
+        } while (deleted > 0);
     }
+}
+
+/**
+ * Exclusive, fail-closed reset of every app collection. On error the lifecycle stays
+ * 'resetting' (no finally); recovery is running reset again. Hooks are test barriers.
+ */
+export async function resetDatabase({ afterBegin = noop } = {}) {
+    const { resetId } = await beginReset();
+    await afterBegin();
+    await deleteAppCollections(resetId);
+    await completeReset(resetId);
+}
+
+export async function resetAndReseedParticipants(
+    participants,
+    { afterBegin = noop, afterDelete = noop, afterReseed = noop } = {}
+) {
+    const { resetId } = await beginReset();
+    await afterBegin();
+    await deleteAppCollections(resetId);
+    await afterDelete();
+    await ensureParticipantProfiles(participants, { resetId });
+    await afterReseed();
+    await completeReset(resetId);
 }

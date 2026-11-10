@@ -244,11 +244,10 @@ async function seedTestData(page: Page): Promise<void> {
 }
 
 /**
- * Assigns Secret Santas via the admin API
- * Requires admin authentication
+ * Assigns Secret Santas via the dev-only assignment API
  */
 async function assignSecretSantas(page: Page): Promise<void> {
-    const response = await page.request.post('/api/admin/assign');
+    const response = await page.request.post('/api/dev/assign');
     if (!response.ok()) {
         const error = await response.text();
         console.warn('Assignment may have failed or already done:', error);

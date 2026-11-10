@@ -30,6 +30,13 @@ describe('Participants Configuration', () => {
             });
         });
 
+        test('every email is canonical: trimmed, lowercase and free of "/" (usable as a participantIndex doc id)', () => {
+            PARTICIPANTS.forEach(participant => {
+                expect(participant.email).toBe(participant.email.trim().toLowerCase());
+                expect(participant.email).not.toContain('/');
+            });
+        });
+
         test('should have unique emails', () => {
             const emails = PARTICIPANTS.map(p => p.email);
             const uniqueEmails = new Set(emails);

@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { auth as adminAuth, firestore } from '@/lib/firebase';
 import { sendIncomingMessagePush } from '@/lib/push-server';
+import {
+    verifyRequestToken,
+    runFencedTransaction,
+    admissionErrorResponse,
+} from '@/lib/participant-admission';
+import {
+    resolveAuthorizedConversationId,
+    matchesStoredMessage,
+} from '@/lib/message-utils';
 
 const MAX_WRITE_ATTEMPTS = 3;
 const WRITE_RETRY_DELAY_MS = 120;
@@ -19,19 +28,18 @@ const TRANSIENT_FIRESTORE_CODES = new Set([
     14,
 ]);
 
-const ALREADY_EXISTS_CODES = new Set([
-    'already-exists',
-    6,
-]);
-
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function getBearerToken(request) {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return null;
+/**
+ * Typed route error raised inside the transaction; never retried.
+ */
+class SendRouteError extends Error {
+    constructor(status, body) {
+        super(body?.error || 'Send failed');
+        this.name = 'SendRouteError';
+        this.status = status;
+        this.body = body;
     }
-    return authHeader.substring(7);
 }
 
 function normalizeErrorCode(error) {
@@ -45,7 +53,7 @@ function normalizeErrorCode(error) {
         return null;
     }
 
-    // Handles firestore/already-exists style codes as well as plain already-exists.
+    // Handles firestore/unavailable style codes as well as plain unavailable.
     if (code.includes('/')) {
         return code.split('/').pop();
     }
@@ -73,11 +81,10 @@ function isCodeMatch(error, expectedCodes) {
 }
 
 function isTransientFirestoreError(error) {
+    if (error instanceof SendRouteError || error?.isAdmissionError) {
+        return false;
+    }
     return isCodeMatch(error, TRANSIENT_FIRESTORE_CODES);
-}
-
-function isAlreadyExistsError(error) {
-    return isCodeMatch(error, ALREADY_EXISTS_CODES);
 }
 
 function wait(ms) {
@@ -95,93 +102,25 @@ function isUUIDLike(value) {
     return UUID_V4_REGEX.test(value);
 }
 
-function toComparableValue(value) {
-    return value === undefined ? null : value;
-}
-
-function isImmutableMessageMatch(existingMessage, incomingMessage) {
-    return (
-        existingMessage?.id === incomingMessage.id &&
-        existingMessage?.fromId === incomingMessage.fromId &&
-        existingMessage?.toId === incomingMessage.toId &&
-        existingMessage?.content === incomingMessage.content &&
-        toComparableValue(existingMessage?.conversationId) === toComparableValue(incomingMessage.conversationId) &&
-        toComparableValue(existingMessage?.clientMessageId) === toComparableValue(incomingMessage.clientMessageId) &&
-        toComparableValue(existingMessage?.clientCreatedAt) === toComparableValue(incomingMessage.clientCreatedAt)
-    );
-}
-
-async function writeMessageWithIdempotency(messageRef, messageData) {
-    let attempt = 0;
-
-    while (attempt < MAX_WRITE_ATTEMPTS) {
-        attempt += 1;
-
-        try {
-            await messageRef.create(messageData);
-            return {
-                created: true,
-                message: messageData,
-            };
-        } catch (error) {
-            if (isAlreadyExistsError(error)) {
-                const existingSnapshot = await messageRef.get();
-                if (!existingSnapshot.exists) {
-                    throw error;
-                }
-
-                const existingMessage = existingSnapshot.data();
-
-                if (isImmutableMessageMatch(existingMessage, messageData)) {
-                    return {
-                        created: false,
-                        message: existingMessage,
-                        replayed: true,
-                    };
-                }
-
-                return {
-                    created: false,
-                    conflict: true,
-                    message: existingMessage,
-                };
-            }
-
-            if (!isTransientFirestoreError(error) || attempt >= MAX_WRITE_ATTEMPTS) {
-                throw error;
-            }
-
-            await wait(WRITE_RETRY_DELAY_MS * attempt);
-        }
-    }
-
-    throw new Error('Message write attempts exhausted');
-}
-
 export async function POST(request) {
     try {
         if (!adminAuth || !firestore) {
             return NextResponse.json({ error: 'Messaging service unavailable' }, { status: 503 });
         }
 
-        const token = getBearerToken(request);
-        if (!token) {
-            return NextResponse.json({ error: 'Unauthorized: No token provided' }, { status: 401 });
-        }
-
-        const decodedToken = await adminAuth.verifyIdToken(token);
-        const senderEmail = decodedToken?.email;
-
-        if (!senderEmail) {
-            return NextResponse.json({ error: 'Unauthorized: Invalid token' }, { status: 401 });
-        }
+        const decodedToken = await verifyRequestToken(request);
 
         const body = await request.json();
         const toId = typeof body?.toId === 'string' ? body.toId.trim() : '';
         const content = typeof body?.content === 'string' ? body.content.trim() : '';
-        const conversationId = typeof body?.conversationId === 'string' ? body.conversationId.trim() : null;
+        const requestedConversationId = typeof body?.conversationId === 'string' && body.conversationId.trim()
+            ? body.conversationId.trim()
+            : null;
         const clientMessageId = typeof body?.clientMessageId === 'string' ? body.clientMessageId.trim() : '';
         const clientCreatedAt = typeof body?.clientCreatedAt === 'string' ? body.clientCreatedAt.trim() : '';
+        const senderUserId = typeof body?.senderUserId === 'string' && body.senderUserId.trim()
+            ? body.senderUserId.trim()
+            : null;
 
         if (!toId) {
             return NextResponse.json({ error: 'Recipient is required' }, { status: 400 });
@@ -203,49 +142,88 @@ export async function POST(request) {
             return NextResponse.json({ error: 'clientCreatedAt must be an ISO timestamp' }, { status: 400 });
         }
 
-        const senderSnapshot = await firestore.collection('users')
-            .where('email', '==', senderEmail.toLowerCase())
-            .limit(1)
-            .get();
-
-        if (senderSnapshot.empty) {
-            return NextResponse.json({ error: 'Unauthorized sender' }, { status: 403 });
-        }
-
-        const sender = senderSnapshot.docs[0].data();
-        const recipientDoc = await firestore.collection('users').doc(toId).get();
-
-        if (!recipientDoc.exists) {
-            return NextResponse.json({ error: 'Recipient not found' }, { status: 400 });
-        }
-
+        // Generated outside the transaction so retries keep the same id.
         const messageId = clientMessageId || uuidv4();
-        const messageData = {
-            id: messageId,
-            fromId: sender.id,
-            toId,
-            content,
-            timestamp: new Date().toISOString(),
-            conversationId: conversationId || null,
-            ...(clientMessageId ? { clientMessageId } : {}),
-            ...(clientCreatedAt ? { clientCreatedAt } : {}),
+
+        const work = async (tx, { user: sender }) => {
+            const recipientRef = firestore.collection('users').doc(toId);
+            const messageRef = firestore.collection('messages').doc(messageId);
+            const [recipientSnap, messageSnap] = await tx.getAll(recipientRef, messageRef);
+
+            if (senderUserId && senderUserId !== sender.id) {
+                throw new SendRouteError(403, {
+                    error: 'Sender does not match the signed-in account',
+                    code: 'SENDER_MISMATCH',
+                });
+            }
+
+            if (messageSnap.exists) {
+                const existing = messageSnap.data();
+                const matches = matchesStoredMessage(existing, {
+                    id: messageId,
+                    fromId: sender.id,
+                    toId,
+                    content,
+                    clientMessageId: clientMessageId || null,
+                    clientCreatedAt: clientCreatedAt || null,
+                    requestedConversationId,
+                });
+                if (matches) {
+                    return { kind: 'replayed', message: existing };
+                }
+                throw new SendRouteError(409, { error: 'Message id conflict' });
+            }
+
+            if (!recipientSnap.exists) {
+                throw new SendRouteError(400, { error: 'Recipient not found' });
+            }
+
+            const recipientData = recipientSnap.data() || {};
+            const recipient = { ...recipientData, id: recipientData.id ?? recipientSnap.id };
+            const resolved = resolveAuthorizedConversationId(sender, recipient, requestedConversationId);
+            if (resolved.error) {
+                throw new SendRouteError(400, {
+                    error: 'Invalid conversation for this recipient',
+                    code: resolved.error,
+                });
+            }
+
+            const message = {
+                id: messageId,
+                fromId: sender.id,
+                toId,
+                content,
+                timestamp: new Date().toISOString(),
+                conversationId: resolved.conversationId,
+                ...(clientMessageId ? { clientMessageId } : {}),
+                ...(clientCreatedAt ? { clientCreatedAt } : {}),
+            };
+            tx.create(messageRef, message);
+            return { kind: 'created', message };
         };
 
-        const messageRef = firestore.collection('messages').doc(messageId);
-        const writeResult = await writeMessageWithIdempotency(messageRef, messageData);
-
-        if (writeResult.conflict) {
-            return NextResponse.json({ error: 'Message id conflict' }, { status: 409 });
+        let result = null;
+        let attempt = 0;
+        while (!result) {
+            attempt += 1;
+            try {
+                result = await runFencedTransaction(decodedToken, work);
+            } catch (error) {
+                if (!isTransientFirestoreError(error) || attempt >= MAX_WRITE_ATTEMPTS) {
+                    throw error;
+                }
+                await wait(WRITE_RETRY_DELAY_MS * attempt);
+            }
         }
 
         // Fail-open push strategy: message delivery succeeds even if push dispatch fails.
         // Replayed idempotent requests intentionally skip push to avoid duplicate notifications.
-        if (writeResult.created) {
+        if (result.kind === 'created') {
             try {
                 await sendIncomingMessagePush({
-                    toUserId: toId,
-                    conversationId,
-                    fromUserId: sender.id,
+                    toUserId: result.message.toId,
+                    conversationId: result.message.conversationId,
+                    fromUserId: result.message.fromId,
                 });
             } catch (pushError) {
                 console.error('Push dispatch failed:', pushError);
@@ -254,10 +232,17 @@ export async function POST(request) {
 
         return NextResponse.json({
             success: true,
-            message: writeResult.message,
-            ...(writeResult.replayed ? { replayed: true } : {}),
+            message: result.message,
+            ...(result.kind === 'replayed' ? { replayed: true } : {}),
         });
     } catch (error) {
+        if (error instanceof SendRouteError) {
+            return NextResponse.json(error.body, { status: error.status });
+        }
+
+        const mapped = admissionErrorResponse(error);
+        if (mapped) return mapped;
+
         console.error('Send message failed:', error);
 
         if (error?.code === 'auth/id-token-expired' || error?.code === 'auth/argument-error') {

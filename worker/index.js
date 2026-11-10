@@ -1,5 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app';
-import { getMessaging, onBackgroundMessage } from 'firebase/messaging/sw';
+import { getMessaging } from 'firebase/messaging/sw';
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -20,21 +20,10 @@ function hasMessagingConfig() {
 
 if (hasMessagingConfig()) {
     const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-    const messaging = getMessaging(app);
-
-    onBackgroundMessage(messaging, (payload) => {
-        const notificationBody = payload?.data?.notificationBody
-            || payload?.notification?.body
-            || 'You have a new message';
-
-        self.registration.showNotification('Secret Santa', {
-            body: notificationBody,
-            icon: '/icons/icon-192x192.png',
-            badge: '/icons/icon-192x192.png',
-            tag: 'secret-santa-message',
-            data: { url: '/' },
-        });
-    });
+    // Initializing messaging lets the FCM SDK display the server-provided
+    // notification payload (title, body, icon, badge, conversation tag) on its own.
+    // No custom background handler: a second, app-rendered notification would duplicate it.
+    getMessaging(app);
 }
 
 self.addEventListener('notificationclick', (event) => {

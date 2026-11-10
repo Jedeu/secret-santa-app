@@ -1,10 +1,9 @@
 'use client';
-import { firestore } from '@/lib/firebase-client';
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { firestore, clientAuth } from '@/lib/firebase-client';
+import { doc, getDoc, setDoc, onSnapshot, Timestamp } from 'firebase/firestore';
 
 /**
  * Client-side Firestore operations for lastRead tracking.
- * Uses debouncing to minimize writes and reduce Firestore quota usage.
  *
  * Data schema:
  * Collection: 'lastRead'
@@ -12,35 +11,248 @@ import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/fires
  * Fields:
  *   - userId: string
  *   - conversationId: string (legacy format or new format, or "publicFeed_threadId")
- *   - lastReadAt: Firestore server timestamp (normalized to ISO string in client reads)
+ *   - lastReadAt: Timestamp = the latest message timestamp the user has observed (monotonic)
+ *
+ * Writes are debounced and single-flight per key: at most one setDoc per key is in
+ * flight; later observations only raise the pending entry's observedAt.
  */
 
-// Debounce map to batch rapid updates
-const pendingWrites = new Map();  // key -> { timeout, data }
-const DEBOUNCE_MS = 2000;  // Wait 2 seconds before writing
-
-// In-memory cache for lastRead timestamps
-const lastReadCache = new Map();
+const DEBOUNCE_MS = 2000;
+// Delays before the first and second retries; the third consecutive failure drops the entry.
+const RETRY_DELAYS_MS = [5000, 15000, 60000];
+const MAX_FAILURES = 3;
 const EPOCH_ISO = new Date(0).toISOString();
 
-function normalizeLastReadValue(rawValue, fallback = EPOCH_ISO) {
+// Module state
+let cache = new Map();        // key -> ISO (local view, never moves backwards)
+let remoteSeen = new Map();   // key -> ISO (max remote value observed)
+let pending = new Map();      // key -> Entry
+let stateGeneration = 0;
+let nextEntryId = 1;
+
+function toMs(iso) {
+    return Date.parse(iso);
+}
+
+function isValidIso(value) {
+    return typeof value === 'string' && value.length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+function normalizeLastReadValue(rawValue) {
     if (rawValue && typeof rawValue.toDate === 'function') {
         return rawValue.toDate().toISOString();
     }
 
-    if (typeof rawValue === 'string' && rawValue) {
+    if (isValidIso(rawValue)) {
         return rawValue;
     }
 
-    return fallback;
+    return null;
+}
+
+function maxIso(a, b) {
+    if (a === undefined || a === null) return b;
+    if (b === undefined || b === null) return a;
+    return toMs(b) > toMs(a) ? b : a;
+}
+
+function makeKey(userId, conversationId) {
+    return `${userId}_${conversationId}`;
+}
+
+function clearTimers(entry) {
+    if (entry.debounceTimer) {
+        clearTimeout(entry.debounceTimer);
+        entry.debounceTimer = null;
+    }
+    if (entry.retryTimer) {
+        clearTimeout(entry.retryTimer);
+        entry.retryTimer = null;
+    }
+}
+
+function deleteEntry(entry) {
+    clearTimers(entry);
+    if (pending.get(entry.key) === entry) {
+        pending.delete(entry.key);
+    }
+}
+
+function armDebounce(entry) {
+    if (entry.debounceTimer) {
+        clearTimeout(entry.debounceTimer);
+    }
+    entry.debounceTimer = setTimeout(() => {
+        entry.debounceTimer = null;
+        if (pending.get(entry.key) !== entry || entry.inFlight) return;
+        startWrite(entry);
+    }, DEBOUNCE_MS);
+}
+
+function armRetry(entry, delayMs) {
+    if (entry.retryTimer) {
+        clearTimeout(entry.retryTimer);
+    }
+    entry.retryTimer = setTimeout(() => {
+        entry.retryTimer = null;
+        if (pending.get(entry.key) !== entry || entry.inFlight) return;
+        startWrite(entry);
+    }, delayMs);
+}
+
+/**
+ * Max-merge a remote value into remoteSeen and the cache; drop a pending entry that
+ * is not in flight and is already covered by the remote value.
+ */
+function mergeRemote(key, remote) {
+    if (remote) {
+        remoteSeen.set(key, maxIso(remoteSeen.get(key), remote));
+        cache.set(key, maxIso(cache.get(key), remote));
+        const entry = pending.get(key);
+        if (entry && !entry.inFlight && toMs(entry.observedAt) <= toMs(remote)) {
+            deleteEntry(entry);
+        }
+    } else if (!cache.has(key)) {
+        cache.set(key, EPOCH_ISO);
+    }
+    return cache.get(key) ?? EPOCH_ISO;
+}
+
+/**
+ * The only place a write result is applied.
+ */
+function settle(token, outcome) {
+    if (token.generation !== stateGeneration) return;
+    const entry = pending.get(token.key);
+    if (!entry || entry.entryId !== token.entryId) return;
+
+    entry.inFlight = false;
+
+    if (outcome === 'ok' || outcome === 'superseded') {
+        entry.retries = 0;
+        if (outcome === 'ok') {
+            remoteSeen.set(token.key, maxIso(remoteSeen.get(token.key), token.written));
+        }
+        if (toMs(entry.observedAt) > toMs(token.written)) {
+            if (entry.flushRequested) {
+                return startWrite(entry);
+            }
+            armDebounce(entry);
+        } else {
+            deleteEntry(entry);
+        }
+        return undefined;
+    }
+
+    // failed
+    if (toMs(entry.observedAt) > toMs(token.written)) {
+        entry.retries = 0;
+        armDebounce(entry);
+        return undefined;
+    }
+
+    entry.retries += 1;
+    if (entry.retries >= MAX_FAILURES) {
+        console.error('Dropping lastRead update after repeated failures:', token.key);
+        deleteEntry(entry);
+        return undefined;
+    }
+    armRetry(entry, RETRY_DELAYS_MS[Math.min(entry.retries - 1, RETRY_DELAYS_MS.length - 1)]);
+    return undefined;
+}
+
+/**
+ * True only while the write described by `token` is still the live in-flight write:
+ * same state generation and the same pending entry (not a replacement for the key).
+ */
+function isTokenLive(token) {
+    if (token.generation !== stateGeneration) return false;
+    const entry = pending.get(token.key);
+    return !!entry && entry.entryId === token.entryId && entry.inFlight === true;
+}
+
+async function handleRejection(token, error) {
+    // Invalidated (reset, or the entry was replaced): no logging, no confirmation read,
+    // no retry and no state change.
+    if (!isTokenLive(token)) return undefined;
+
+    if (error?.code !== 'permission-denied') {
+        console.error('Error updating lastRead timestamp:', error);
+        return settle(token, 'failed');
+    }
+
+    // A denied write may simply be older than the stored marker (monotonic rule).
+    const seen = remoteSeen.get(token.key);
+    if (seen !== undefined && toMs(seen) >= toMs(token.written)) {
+        return settle(token, 'superseded');
+    }
+
+    try {
+        const snapshot = await getDoc(doc(firestore, 'lastRead', token.key));
+        // Invalidated while confirming: apply nothing.
+        if (!isTokenLive(token)) return undefined;
+        const remote = snapshot.exists() ? normalizeLastReadValue(snapshot.data()?.lastReadAt) : null;
+        if (remote) {
+            remoteSeen.set(token.key, maxIso(remoteSeen.get(token.key), remote));
+            cache.set(token.key, maxIso(cache.get(token.key), remote));
+        }
+        if (remote && toMs(remote) >= toMs(token.written)) {
+            return settle(token, 'superseded');
+        }
+    } catch (confirmError) {
+        if (!isTokenLive(token)) return undefined;
+        console.error('Error confirming lastRead marker:', confirmError);
+    }
+    return settle(token, 'failed');
+}
+
+/**
+ * Start a write for an entry (never while in flight). Returns a promise that resolves
+ * once this write (and any immediate flush-requested follow-up) has settled, or null
+ * when nothing was started.
+ */
+function startWrite(entry) {
+    if (entry.inFlight) return null;
+    clearTimers(entry);
+
+    const currentUid = clientAuth?.currentUser?.uid ?? null;
+    if (currentUid !== entry.ownerUid) {
+        deleteEntry(entry);
+        return null;
+    }
+
+    const token = {
+        key: entry.key,
+        entryId: entry.entryId,
+        generation: stateGeneration,
+        written: entry.observedAt,
+    };
+    entry.inFlight = true;
+    entry.flushRequested = false;
+
+    let writePromise;
+    try {
+        writePromise = setDoc(doc(firestore, 'lastRead', entry.key), {
+            userId: entry.userId,
+            conversationId: entry.conversationId,
+            lastReadAt: Timestamp.fromDate(new Date(token.written)),
+        });
+    } catch (error) {
+        writePromise = Promise.reject(error);
+    }
+
+    return Promise.resolve(writePromise).then(
+        () => settle(token, 'ok'),
+        (error) => handleRejection(token, error)
+    ).catch((error) => {
+        console.error('Error settling lastRead write:', error);
+    });
 }
 
 /**
  * Get the last read timestamp for a conversation.
  * Returns from cache first if available, otherwise fetches from Firestore.
  *
- * @param {string} userId - Current user's ID
- * @param {string} conversationId - The conversation ID (legacy or new format)
  * @returns {Promise<string>} - ISO timestamp string, or epoch if not found
  */
 export async function getLastReadTimestamp(userId, conversationId) {
@@ -48,91 +260,76 @@ export async function getLastReadTimestamp(userId, conversationId) {
         return EPOCH_ISO;
     }
 
-    const key = `${userId}_${conversationId}`;
+    const key = makeKey(userId, conversationId);
 
-    // Return cached value if available
-    if (lastReadCache.has(key)) {
-        return lastReadCache.get(key);
+    if (cache.has(key)) {
+        return cache.get(key);
     }
 
+    const generation = stateGeneration;
     try {
-        const docRef = doc(firestore, 'lastRead', key);
-        const snapshot = await getDoc(docRef);
-
-        // A local marker may have been written while the fetch was in flight
-        // (e.g. the user opened the chat, marking it read). Never let the
-        // fetched value move the cache backwards, or the unread badge would
-        // re-inflate for a conversation the user is already viewing.
-        const existing = lastReadCache.get(key);
-
-        if (!snapshot.exists()) {
-            if (existing !== undefined) {
-                return existing;
-            }
-            lastReadCache.set(key, EPOCH_ISO);
-            return EPOCH_ISO;
+        const snapshot = await getDoc(doc(firestore, 'lastRead', key));
+        if (generation !== stateGeneration) {
+            return cache.get(key) ?? EPOCH_ISO;
         }
-
-        const timestamp = normalizeLastReadValue(snapshot.data()?.lastReadAt, existing || EPOCH_ISO);
-        if (existing !== undefined && new Date(existing) > new Date(timestamp)) {
-            return existing;
-        }
-        lastReadCache.set(key, timestamp);
-        return timestamp;
+        const remote = snapshot.exists() ? normalizeLastReadValue(snapshot.data()?.lastReadAt) : null;
+        return mergeRemote(key, remote);
     } catch (error) {
         console.error('Error fetching lastRead timestamp:', error);
-        return lastReadCache.get(key) || EPOCH_ISO;
+        return cache.get(key) ?? EPOCH_ISO;
     }
 }
 
 /**
- * Update the last read timestamp for a conversation.
- * Debounced to reduce Firestore writes (max 1 write per 2 seconds per conversation).
+ * Record that the user has observed messages up to `observedAt` (a message timestamp).
+ * Returns true only when the value advanced the local marker.
  *
- * @param {string} userId - Current user's ID
- * @param {string} conversationId - The conversation ID
- * @returns {void}
+ * @param {string} userId
+ * @param {string} conversationId
+ * @param {string} observedAt - ISO timestamp of the latest observed message
+ * @returns {boolean}
  */
-export function updateLastReadTimestamp(userId, conversationId) {
-    if (!firestore || !userId || !conversationId) return;
+export function updateLastReadTimestamp(userId, conversationId, observedAt) {
+    if (!firestore || !userId || !conversationId || !isValidIso(observedAt)) return false;
 
-    const key = `${userId}_${conversationId}`;
-    const now = new Date().toISOString();
-
-    // Update local cache immediately for responsive UI
-    lastReadCache.set(key, now);
-
-    // Clear existing timeout if any
-    if (pendingWrites.has(key)) {
-        clearTimeout(pendingWrites.get(key).timeout);
+    const key = makeKey(userId, conversationId);
+    const cached = cache.get(key);
+    if (cached !== undefined && toMs(observedAt) <= toMs(cached)) {
+        return false;
     }
 
-    // Set new debounced write
-    const timeout = setTimeout(async () => {
-        try {
-            const docRef = doc(firestore, 'lastRead', key);
-            await setDoc(docRef, {
-                userId,
-                conversationId,
-                lastReadAt: serverTimestamp()
-            });
-            pendingWrites.delete(key);
-        } catch (error) {
-            console.error('Error updating lastRead timestamp:', error);
-            pendingWrites.delete(key);
-        }
-    }, DEBOUNCE_MS);
+    cache.set(key, observedAt);
 
-    pendingWrites.set(key, { timeout, data: now });
+    let entry = pending.get(key);
+    if (!entry) {
+        entry = {
+            entryId: nextEntryId++,
+            key,
+            userId,
+            conversationId,
+            observedAt,
+            ownerUid: clientAuth?.currentUser?.uid ?? null,
+            debounceTimer: null,
+            retryTimer: null,
+            inFlight: false,
+            flushRequested: false,
+            retries: 0,
+        };
+        pending.set(key, entry);
+    } else if (toMs(observedAt) > toMs(entry.observedAt)) {
+        entry.observedAt = observedAt;
+    }
+
+    if (!entry.inFlight && !entry.retryTimer) {
+        armDebounce(entry);
+    }
+
+    return true;
 }
 
 /**
- * Subscribe to real-time updates for a lastRead document.
- * Used to sync across tabs/devices.
+ * Subscribe to real-time updates for one lastRead document (own markers, cross-device).
  *
- * @param {string} userId - Current user's ID
- * @param {string} conversationId - The conversation ID
- * @param {Function} callback - Called with ISO timestamp when updated
  * @returns {Function} - Unsubscribe function
  */
 export function subscribeToLastRead(userId, conversationId, callback) {
@@ -140,72 +337,74 @@ export function subscribeToLastRead(userId, conversationId, callback) {
         return () => {};
     }
 
-    const key = `${userId}_${conversationId}`;
-    const docRef = doc(firestore, 'lastRead', key);
+    const key = makeKey(userId, conversationId);
+    const generation = stateGeneration;
+    let active = true;
 
-    return onSnapshot(docRef, (snapshot) => {
-        if (snapshot.exists()) {
-            const fallback = lastReadCache.get(key) || EPOCH_ISO;
-            const normalized = normalizeLastReadValue(snapshot.data()?.lastReadAt, fallback);
-            lastReadCache.set(key, normalized);
-            callback(normalized);
-        } else {
-            const defaultValue = lastReadCache.get(key) || EPOCH_ISO;
-            lastReadCache.set(key, defaultValue);
-            callback(defaultValue);
+    const unsubscribe = onSnapshot(doc(firestore, 'lastRead', key), (snapshot) => {
+        if (!active || generation !== stateGeneration) return;
+        const remote = snapshot.exists() ? normalizeLastReadValue(snapshot.data()?.lastReadAt) : null;
+        const merged = mergeRemote(key, remote);
+        try {
+            callback(merged);
+        } catch (error) {
+            console.error('Error in lastRead subscriber callback:', error);
         }
     }, (error) => {
         console.error('Error in lastRead listener:', error);
     });
+
+    return () => {
+        active = false;
+        if (typeof unsubscribe === 'function') {
+            unsubscribe();
+        }
+    };
 }
 
 /**
- * Flush all pending writes immediately.
- * Useful before page unload to ensure data is saved.
+ * Start pending writes now. In-flight entries are flagged to write again immediately
+ * when they settle. Resolves when the writes started here settle (best effort; no
+ * shutdown guarantee).
  *
  * @returns {Promise<void>}
  */
 export async function flushPendingWrites() {
-    const promises = [];
+    const started = [];
+    Array.from(pending.values()).forEach((entry) => {
+        if (entry.inFlight) {
+            entry.flushRequested = true;
+            return;
+        }
+        const promise = startWrite(entry);
+        if (promise) started.push(promise);
+    });
+    await Promise.all(started);
+}
 
-    for (const [key, { timeout }] of pendingWrites) {
-        clearTimeout(timeout);
-        const [userId, ...rest] = key.split('_');
-        const conversationId = rest.join('_'); // Handle underscore in conversationId
-
-        const docRef = doc(firestore, 'lastRead', key);
-        promises.push(
-            setDoc(docRef, {
-                userId,
-                conversationId,
-                lastReadAt: serverTimestamp()
-            }).catch(error => {
-                console.error('Error flushing lastRead:', error);
-            })
-        );
-    }
-
-    pendingWrites.clear();
-    await Promise.all(promises);
+/**
+ * Drop all state (auth change / sign-out). Results of in-flight writes are ignored.
+ */
+export function resetLastReadState() {
+    stateGeneration += 1;
+    pending.forEach((entry) => clearTimers(entry));
+    pending = new Map();
+    cache = new Map();
+    remoteSeen = new Map();
 }
 
 /**
  * Clear the in-memory cache.
- * Useful for testing or when user signs out.
+ * Useful for testing.
  */
 export function clearCache() {
-    lastReadCache.clear();
+    cache.clear();
 }
 
 /**
  * Get the cached value for a key without fetching from Firestore.
  * Returns undefined if not in cache.
- *
- * @param {string} userId - Current user's ID
- * @param {string} conversationId - The conversation ID
- * @returns {string|undefined} - Cached timestamp or undefined
  */
 export function getCachedTimestamp(userId, conversationId) {
-    const key = `${userId}_${conversationId}`;
-    return lastReadCache.get(key);
+    return cache.get(makeKey(userId, conversationId));
 }

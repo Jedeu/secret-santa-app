@@ -86,12 +86,12 @@ Production requires these environment variables:
 - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
 - `NEXT_PUBLIC_FIREBASE_VAPID_KEY` — FCM Web Push public key
 
+`PUSH_DISPATCH_ENABLED` (server, optional): `false` always disables push dispatch, `true` always enables it. Leave it unset or `false` for local development.
+
 Push notifications run through Firebase Cloud Messaging using the server Admin
 credentials, so there is no separate web-push private key.
 
-Firestore security rules live in `firestore.rules` and are hardened
-(per-collection field allowlists, sender-identity checks, delete disabled). Deploy
-them alongside the app.
+Firestore security rules live in `firestore.rules`. They admit only server-admitted participants and deny client creation of users and messages. Deploy the app before the rules, and ask participants to reload open tabs.
 
 ## Architecture
 

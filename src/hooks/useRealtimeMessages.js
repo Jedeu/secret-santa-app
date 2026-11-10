@@ -1,6 +1,10 @@
 'use client';
 import { useState, useMemo, useEffect } from 'react';
-import { getConversationId } from '@/lib/message-utils';
+import {
+    getConversationId,
+    buildViewerAssignmentMap,
+    resolveMessageConversation
+} from '@/lib/message-utils';
 import { useRealtimeMessagesContext } from '@/context/RealtimeMessagesContext';
 import {
     getLastReadTimestamp as fetchLastRead,
@@ -109,7 +113,11 @@ export function useOtherUserLastRead(otherUserId, conversationId) {
  * Instead, we filter client-side using the latest lastRead from cache.
  * This allows badges to clear immediately when updateLastReadTimestamp is called.
  *
- * Uses refs to prevent listener recreation on StrictMode double-mount.
+ * A message counts for a tab only when it is addressed to the user, comes from that
+ * tab's partner, and resolveMessageConversation (with the viewer's own assignments)
+ * routes it to that tab's conversation, so a mutual pair's legacy row counts once.
+ *
+ * Own read markers are kept live through doc subscriptions (cross-device clearing).
  *
  * @param {string} userId - Current user's ID
  * @param {string} recipientId - User's recipient ID
@@ -117,7 +125,7 @@ export function useOtherUserLastRead(otherUserId, conversationId) {
  * @returns {Object} - Object with recipientUnread and santaUnread counts
  */
 export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
-    const { allMessages, subscribeToLastReadChanges, getLastReadTimestamp } = useRealtimeMessagesContext();
+    const { allMessages, subscribeToLastReadChanges } = useRealtimeMessagesContext();
 
     // Track updates to lastRead timestamps to trigger re-calculation
     const [lastReadTick, setLastReadTick] = useState(0);
@@ -126,22 +134,26 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
     const recipientConvId = recipientId ? getConversationId(userId, recipientId) : null;
     const santaConvId = gifterId ? getConversationId(gifterId, userId) : null;
 
-    // [NEW] Effect to prime the cache from Firestore on mount
+    const viewerAssignments = useMemo(
+        () => buildViewerAssignmentMap({ id: userId, recipientId, gifterId }),
+        [userId, recipientId, gifterId]
+    );
+
+    // Live own-marker subscriptions (replace one-shot priming reads)
     useEffect(() => {
-        if (!userId) return;
+        if (!userId) return undefined;
 
-        const primeCache = async () => {
-            // Fetch both concurrently
-            const promises = [];
-            if (recipientConvId) promises.push(fetchLastRead(userId, recipientConvId));
-            if (santaConvId) promises.push(fetchLastRead(userId, santaConvId));
+        const unsubscribers = [];
+        [recipientConvId, santaConvId].forEach((convId) => {
+            if (!convId) return;
+            unsubscribers.push(subscribeToLastRead(userId, convId, () => {
+                setLastReadTick(tick => tick + 1);
+            }));
+        });
 
-            await Promise.all(promises);
-            // Force re-calculation after cache update
-            setLastReadTick(tick => tick + 1);
+        return () => {
+            unsubscribers.forEach((unsubscribe) => unsubscribe());
         };
-
-        primeCache();
     }, [userId, recipientConvId, santaConvId]);
 
     useEffect(() => {
@@ -173,18 +185,16 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         // Ensure re-calculation when tick changes
         void lastReadTick;
 
-        // Filter messages: FROM recipient TO user
+        // Filter messages: FROM recipient TO user, routed to this conversation
         // Using allMessages from Context
         return allMessages.filter(msg => {
             if (msg.fromId !== recipientId || msg.toId !== userId) return false;
 
-            // Strict conversation check if message has one (prevents double counting in mutual circles)
-            // If msg.conversationId is missing (legacy), we rely on fromId/toId
-            if (msg.conversationId && msg.conversationId !== convId) return false;
+            if (resolveMessageConversation(msg, viewerAssignments).conversationId !== convId) return false;
 
             return new Date(msg.timestamp).getTime() > new Date(lastRead).getTime();
         }).length;
-    }, [userId, recipientId, recipientConvId, allMessages, lastReadTick]);
+    }, [userId, recipientId, recipientConvId, allMessages, lastReadTick, viewerAssignments]);
 
     // Derived Santa Unread Count
     const santaUnread = useMemo(() => {
@@ -199,18 +209,16 @@ export function useRealtimeUnreadCounts(userId, recipientId, gifterId) {
         // Ensure re-calculation when tick changes
         void lastReadTick;
 
-        // Filter messages: FROM santa TO user
+        // Filter messages: FROM santa TO user, routed to this conversation
         // Using allMessages from Context
         return allMessages.filter(msg => {
             if (msg.fromId !== gifterId || msg.toId !== userId) return false;
 
-            // Match recipient logic: enforce conversationId only when present.
-            // Legacy messages without conversationId should still count.
-            if (msg.conversationId && msg.conversationId !== expectedConvId) return false;
+            if (resolveMessageConversation(msg, viewerAssignments).conversationId !== expectedConvId) return false;
 
             return new Date(msg.timestamp).getTime() > new Date(santaLastRead).getTime();
         }).length;
-    }, [userId, gifterId, santaConvId, allMessages, lastReadTick]);
+    }, [userId, gifterId, santaConvId, allMessages, lastReadTick, viewerAssignments]);
 
     return { recipientUnread, santaUnread };
 }

@@ -1,14 +1,17 @@
 'use client';
-import { signInWithPopup, signOut as firebaseSignOut, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase-client';
+import { signOutCurrentUser } from '@/lib/sign-out';
 import { useToast } from '@/components/ClientProviders';
+import AdminPanel from '@/components/AdminPanel';
 
 /**
  * AuthGuard - Handles authentication UI states
  *
  * Shows appropriate UI based on auth state:
- * - Loading: Shows loading spinner
+ * - Loading: Shows loading spinner (plus a reset notice and admin Reset while a reset runs)
  * - Access Denied: Shows error and sign-out button
+ * - Other auth errors: Generic card with "Try again" and "Sign out"
  * - Not authenticated: Shows sign-in button
  * - Authenticated: Renders children
  *
@@ -16,9 +19,12 @@ import { useToast } from '@/components/ClientProviders';
  * @param {boolean} props.isLoading - Whether auth is still loading
  * @param {Object|null} props.currentUser - Current authenticated user or null
  * @param {Object|null} props.authError - Auth error object with code and message
+ * @param {string|null} [props.notice] - 'RESET_IN_PROGRESS' while an admin reset is running
+ * @param {string|null} [props.authEmail] - Signed-in Firebase Auth email
+ * @param {Function} [props.onRetry] - Re-run the profile bootstrap
  * @param {React.ReactNode} props.children - Content to render when authenticated
  */
-export default function AuthGuard({ isLoading, currentUser, authError, children }) {
+export default function AuthGuard({ isLoading, currentUser, authError, notice = null, authEmail = null, onRetry, children }) {
     const { showToast } = useToast();
 
     // Handle sign in with Google
@@ -41,7 +47,9 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
 
     // Handle sign out
     const handleSignOut = () => {
-        firebaseSignOut(clientAuth);
+        signOutCurrentUser().catch((error) => {
+            console.error('Sign out error:', error);
+        });
     };
 
     // Loading state
@@ -50,6 +58,16 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
             <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
                 <div className="card login-card">
                     <p style={{ textAlign: 'center' }}>Loading...</p>
+                    {notice === 'RESET_IN_PROGRESS' && (
+                        <>
+                            <p className="text-muted" style={{ textAlign: 'center', marginTop: '12px' }}>
+                                A reset is in progress. If this persists, an admin can run Reset again.
+                            </p>
+                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+                                <AdminPanel userEmail={authEmail} onResetComplete={onRetry} />
+                            </div>
+                        </>
+                    )}
                 </div>
             </main>
         );
@@ -71,6 +89,34 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
                         className="btn"
                         onClick={handleSignOut}
                         style={{ width: '100%' }}
+                    >
+                        Sign out
+                    </button>
+                </div>
+            </main>
+        );
+    }
+
+    // Any other auth/profile error
+    if (authError) {
+        return (
+            <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                <div className="card login-card">
+                    <h1 className="title">Something went wrong</h1>
+                    <p className="text-muted" style={{ textAlign: 'center', marginBottom: '20px' }}>
+                        {authError.message || 'We could not load your profile.'}
+                    </p>
+                    <button
+                        className="btn"
+                        onClick={() => { if (onRetry) onRetry(); }}
+                        style={{ width: '100%', marginBottom: '10px' }}
+                    >
+                        Try again
+                    </button>
+                    <button
+                        className="btn"
+                        onClick={handleSignOut}
+                        style={{ width: '100%', background: 'var(--surface-highlight)' }}
                     >
                         Sign out
                     </button>
@@ -117,4 +163,4 @@ export default function AuthGuard({ isLoading, currentUser, authError, children 
 }
 
 // Export helper functions for use in other components
-export { firebaseSignOut as signOut };
+export { signOutCurrentUser as signOut };

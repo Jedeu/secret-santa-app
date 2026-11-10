@@ -42,6 +42,7 @@ jest.mock('@/lib/message-outbox', () => ({
     drainOutboxForUser: jest.fn(() => Promise.resolve({ delivered: 0, retried: 0, failed: 0, skipped: 0 })),
     retryOutboxMessage: jest.fn(() => true),
     clearDeliveredOrExpired: jest.fn(),
+    cancelOutboxDrains: jest.fn(),
 }));
 
 // Mock fetch

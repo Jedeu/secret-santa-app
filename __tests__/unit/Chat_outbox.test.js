@@ -64,10 +64,11 @@ describe('Chat outbox behavior', () => {
         subscribeOutbox.mockReturnValue(jest.fn());
     });
 
-    test('enqueue-first send clears input and triggers outbox drain', () => {
+    test('enqueue-first send clears input and triggers outbox drain with the owner uid', () => {
         render(
             <Chat
                 currentUser={currentUser}
+                authUid="uid-1"
                 otherUser={otherUser}
                 isSantaChat={false}
                 unreadCount={0}
@@ -81,14 +82,30 @@ describe('Chat outbox behavior', () => {
         fireEvent.click(screen.getByText('Send'));
 
         expect(enqueueMessage).toHaveBeenCalledWith({
+            ownerUid: 'uid-1',
             fromUserId: 'user1',
             toId: 'user2',
             conversationId,
             content: 'Queued hello'
         });
-        expect(drainOutboxForUser).toHaveBeenCalledWith({ fromUserId: 'user1' });
+        expect(drainOutboxForUser).toHaveBeenCalledWith({ ownerUid: 'uid-1', fromUserId: 'user1' });
         expect(input.value).toBe('');
-        expect(updateLastReadTimestamp).toHaveBeenCalledWith('user1', 'user2', conversationId);
+    });
+
+    test('with no messages the read marker is not touched', () => {
+        render(
+            <Chat
+                currentUser={currentUser}
+                authUid="uid-1"
+                otherUser={otherUser}
+                isSantaChat={false}
+                unreadCount={0}
+                messages={[]}
+                conversationId={conversationId}
+            />
+        );
+
+        expect(updateLastReadTimestamp).not.toHaveBeenCalled();
     });
 
     test('renders pending outbox bubble in conversation', () => {
@@ -132,6 +149,7 @@ describe('Chat outbox behavior', () => {
         render(
             <Chat
                 currentUser={currentUser}
+                authUid="uid-1"
                 otherUser={otherUser}
                 isSantaChat={false}
                 unreadCount={0}
@@ -146,6 +164,6 @@ describe('Chat outbox behavior', () => {
             fromUserId: 'user1',
             clientMessageId: 'msg-failed',
         });
-        expect(drainOutboxForUser).toHaveBeenCalledWith({ fromUserId: 'user1' });
+        expect(drainOutboxForUser).toHaveBeenCalledWith({ ownerUid: 'uid-1', fromUserId: 'user1' });
     });
 });

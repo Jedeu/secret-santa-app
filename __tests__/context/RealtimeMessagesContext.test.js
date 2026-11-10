@@ -2,21 +2,30 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, act, waitFor } from '@testing-library/react';
-import { RealtimeMessagesProvider, useRealtimeMessagesContext } from '@/context/RealtimeMessagesContext';
+import { render, renderHook, screen, act, waitFor } from '@testing-library/react';
+import {
+    RealtimeMessagesProvider,
+    useRealtimeMessagesContext,
+    updateLastReadTimestamp,
+} from '@/context/RealtimeMessagesContext';
 import { useUser } from '@/hooks/useUser';
+import {
+    updateLastReadTimestamp as mockClientUpdate,
+    flushPendingWrites as mockFlushPendingWrites,
+    resetLastReadState as mockResetLastReadState,
+} from '@/lib/lastReadClient';
 
 // Mock methods
 const mockOnSnapshot = jest.fn();
 const mockQuery = jest.fn();
 const mockCollection = jest.fn();
 const mockOrderBy = jest.fn();
-const mockWhere = jest.fn(); // Added missing mock
+const mockWhere = jest.fn();
 
 jest.mock('firebase/firestore', () => ({
     collection: (...args) => mockCollection(...args),
     query: (...args) => mockQuery(...args),
-    where: (...args) => mockWhere(...args), // Added missing mock
+    where: (...args) => mockWhere(...args),
     onSnapshot: (...args) => mockOnSnapshot(...args),
     orderBy: (...args) => mockOrderBy(...args),
 }));
@@ -37,7 +46,9 @@ jest.mock('@/lib/firestore-listener-tracker', () => ({
 
 jest.mock('@/lib/lastReadClient', () => ({
     updateLastReadTimestamp: jest.fn(),
-    getCachedTimestamp: jest.fn().mockReturnValue('1970-01-01T00:00:00.000Z')
+    getCachedTimestamp: jest.fn().mockReturnValue('1970-01-01T00:00:00.000Z'),
+    flushPendingWrites: jest.fn(() => Promise.resolve()),
+    resetLastReadState: jest.fn(),
 }));
 
 // Test Consumer Component
@@ -47,7 +58,6 @@ function TestConsumer() {
         <div>
             <div data-testid="loading">{context.allMessagesLoading.toString()}</div>
             <div data-testid="msg-count">{context.allMessages.length}</div>
-            <button onClick={() => context.updateLastReadTimestamp('u1', 'u2')}>Update Last Read</button>
         </div>
     );
 }
@@ -62,6 +72,13 @@ function extractSnapshotCallback(callArgs) {
     return { callback: null, errorCallback: null };
 }
 
+function renderProvider() {
+    return render(
+        <RealtimeMessagesProvider>
+            <TestConsumer />
+        </RealtimeMessagesProvider>
+    );
+}
 
 describe('RealtimeMessagesContext', () => {
     beforeEach(() => {
@@ -71,17 +88,15 @@ describe('RealtimeMessagesContext', () => {
         mockQuery.mockReturnValue('mockQuery');
     });
 
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     test('should wait for auth before loading', async () => {
         useUser.mockReturnValue({ user: null, loading: true });
 
-        render(
-            <RealtimeMessagesProvider>
-                <TestConsumer />
-            </RealtimeMessagesProvider>
-        );
+        renderProvider();
 
-        // Initially loading should be true (default state)
-        // But since auth is loading, it stays true
         expect(screen.getByTestId('loading')).toHaveTextContent('true');
         expect(mockOnSnapshot).not.toHaveBeenCalled();
     });
@@ -98,17 +113,12 @@ describe('RealtimeMessagesContext', () => {
             return jest.fn();
         });
 
-        render(
-            <RealtimeMessagesProvider>
-                <TestConsumer />
-            </RealtimeMessagesProvider>
-        );
+        renderProvider();
 
         await waitFor(() => {
             expect(mockOnSnapshot).toHaveBeenCalled();
         });
 
-        // Simulate data
         await act(async () => {
             snapshotCallback({
                 forEach: (cb) => [{ data: () => ({ id: 1 }) }].forEach(cb),
@@ -122,8 +132,114 @@ describe('RealtimeMessagesContext', () => {
         expect(screen.getByTestId('loading')).toHaveTextContent('false');
     });
 
+    test('a new user object with the same id does not recreate listeners', async () => {
+        useUser.mockReturnValue({ user: { id: 'u1', recipientId: null }, loading: false });
+
+        const { rerender } = renderProvider();
+        await waitFor(() => {
+            expect(mockOnSnapshot).toHaveBeenCalledTimes(2); // messages + reactions
+        });
+
+        useUser.mockReturnValue({ user: { id: 'u1', recipientId: 'u2' }, loading: false });
+        rerender(
+            <RealtimeMessagesProvider>
+                <TestConsumer />
+            </RealtimeMessagesProvider>
+        );
+
+        expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
+    });
+
+    test('a permission-denied retry timer does not fire after unmount', async () => {
+        jest.useFakeTimers();
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+
+        const errorCallbacks = [];
+        mockOnSnapshot.mockImplementation((...args) => {
+            errorCallbacks.push(extractSnapshotCallback(args).errorCallback);
+            return jest.fn();
+        });
+
+        const { unmount } = renderProvider();
+        expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
+
+        act(() => {
+            errorCallbacks.forEach((callback) => callback({ code: 'permission-denied' }));
+        });
+
+        unmount();
+        act(() => {
+            jest.advanceTimersByTime(5000);
+        });
+
+        expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
+        console.error.mockRestore();
+        console.warn.mockRestore();
+    });
+
+    test('a permission-denied error retries after 2 seconds while mounted', async () => {
+        jest.useFakeTimers();
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+
+        const errorCallbacks = [];
+        mockOnSnapshot.mockImplementation((...args) => {
+            errorCallbacks.push(extractSnapshotCallback(args).errorCallback);
+            return jest.fn();
+        });
+
+        renderProvider();
+        act(() => {
+            errorCallbacks[0]({ code: 'permission-denied' });
+        });
+        act(() => {
+            jest.advanceTimersByTime(2000);
+        });
+
+        expect(mockOnSnapshot).toHaveBeenCalledTimes(3);
+        console.error.mockRestore();
+        console.warn.mockRestore();
+    });
+
+    test('flushes markers on pagehide and resets read state on unmount', () => {
+        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+
+        const { unmount } = renderProvider();
+        act(() => {
+            window.dispatchEvent(new Event('pagehide'));
+        });
+        expect(mockFlushPendingWrites).toHaveBeenCalled();
+
+        unmount();
+        expect(mockResetLastReadState).toHaveBeenCalled();
+    });
+
+    test('updateLastReadTimestamp notifies subscribers only when the client accepted the update', () => {
+        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+        const wrapper = ({ children }) => (
+            <RealtimeMessagesProvider>{children}</RealtimeMessagesProvider>
+        );
+        const { result } = renderHook(() => useRealtimeMessagesContext(), { wrapper });
+
+        const listener = jest.fn();
+        const unsubscribe = result.current.subscribeToLastReadChanges(listener);
+
+        mockClientUpdate.mockReturnValueOnce(false);
+        expect(updateLastReadTimestamp('u1', 'u2', 'conv-1', '2026-01-01T00:00:00.000Z')).toBe(false);
+        expect(listener).not.toHaveBeenCalled();
+
+        mockClientUpdate.mockReturnValueOnce(true);
+        expect(updateLastReadTimestamp('u1', 'u2', 'conv-1', '2026-01-02T00:00:00.000Z')).toBe(true);
+        expect(mockClientUpdate).toHaveBeenLastCalledWith('u1', 'conv-1', '2026-01-02T00:00:00.000Z');
+        expect(listener).toHaveBeenCalledWith('u1', 'conv-1', '2026-01-02T00:00:00.000Z');
+
+        unsubscribe();
+    });
+
     test('should error if used outside provider', () => {
-        // Suppress console.error for this test (React logs errors for boundary)
         const spy = jest.spyOn(console, 'error').mockImplementation(() => { });
 
         expect(() => {

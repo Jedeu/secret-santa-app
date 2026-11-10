@@ -1,16 +1,17 @@
 'use client';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { signOut as firebaseSignOut } from 'firebase/auth';
 import { collection, getDocs } from 'firebase/firestore';
-import { clientAuth, firestore } from '@/lib/firebase-client';
+import { firestore } from '@/lib/firebase-client';
 import { useUser } from '@/hooks/useUser';
+import { useAdminReset } from '@/hooks/useAdminReset';
+import { signOutCurrentUser } from '@/lib/sign-out';
 import {
     useRealtimeUnreadCounts,
     useRealtimeAllMessages,
     useRealtimeAllMessagesLoading,
     useRealtimeAllReactions
 } from '@/hooks/useRealtimeMessages';
-import { getConversationId, filterMessages } from '@/lib/message-utils';
+import { getConversationId, filterMessages, buildViewerAssignmentMap } from '@/lib/message-utils';
 import { getParticipantNames } from '@/lib/participants';
 
 // Component imports
@@ -25,9 +26,24 @@ import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 import MessageOutboxRuntime from '@/components/MessageOutboxRuntime';
 import NotificationSoundRuntime from '@/components/NotificationSoundRuntime';
 
+function handleSignOut() {
+    signOutCurrentUser().catch((error) => {
+        console.error('Sign out error:', error);
+    });
+}
+
 export default function Home() {
     // Authentication state
-    const { user: currentUser, loading: isLoading, error: authError, refreshUser } = useUser();
+    const {
+        user: currentUser,
+        authUid,
+        authEmail,
+        loading: isLoading,
+        error: authError,
+        notice,
+        refreshUser
+    } = useUser();
+    const handleAdminReset = useAdminReset({ onComplete: refreshUser });
 
     // UI state
     const [allUsers, setAllUsers] = useState([]);
@@ -55,11 +71,20 @@ export default function Home() {
         santa: unreadData.santaUnread || 0
     };
 
+    // The viewer's own assignments decide which conversation a legacy row belongs to.
+    const viewerId = currentUser?.id ?? null;
+    const viewerRecipientId = currentUser?.recipientId ?? null;
+    const viewerGifterId = currentUser?.gifterId ?? null;
+    const viewerAssignments = useMemo(
+        () => buildViewerAssignmentMap({ id: viewerId, recipientId: viewerRecipientId, gifterId: viewerGifterId }),
+        [viewerId, viewerRecipientId, viewerGifterId]
+    );
+
     // Helper to filter messages for specific conversation
     // IMPORTANT: Memoized with useCallback to ensure useMemo dependencies are correct
     const getConversationMessages = useCallback((userId, otherId, conversationId) => {
-        return filterMessages(allMessages, userId, otherId, conversationId);
-    }, [allMessages]);
+        return filterMessages(allMessages, userId, otherId, conversationId, viewerAssignments);
+    }, [allMessages, viewerAssignments]);
 
     // Memoize conversation IDs
     const recipientConversationId = useMemo(() =>
@@ -124,9 +149,16 @@ export default function Home() {
     }, [soundEnabled]);
 
     return (
-        <AuthGuard isLoading={isLoading} currentUser={currentUser} authError={authError}>
-            <PushNotificationsRuntime currentUser={currentUser} />
-            <MessageOutboxRuntime currentUser={currentUser} />
+        <AuthGuard
+            isLoading={isLoading}
+            currentUser={currentUser}
+            authError={authError}
+            notice={notice}
+            authEmail={authEmail}
+            onRetry={refreshUser}
+        >
+            <PushNotificationsRuntime currentUser={currentUser} authUid={authUid} />
+            <MessageOutboxRuntime currentUser={currentUser} authUid={authUid} />
             <NotificationSoundRuntime
                 soundEnabled={soundEnabled}
                 currentUserId={currentUser?.id}
@@ -149,9 +181,9 @@ export default function Home() {
                             activeTab={activeTab}
                             onTabChange={setActiveTab}
                             unreadCounts={unreadCounts}
-                            pushControl={<PushNotificationsControl compact />}
-                            onSignOut={() => firebaseSignOut(clientAuth)}
-                            onReset={refreshUser}
+                            pushControl={<PushNotificationsControl compact authUid={authUid} />}
+                            onSignOut={handleSignOut}
+                            onReset={handleAdminReset}
                         />
                     </div>
 
@@ -183,10 +215,10 @@ export default function Home() {
                                 >
                                     {soundEnabled ? '🔊' : '🔇'}
                                 </button>
-                                <PushNotificationsControl compact />
-                                <AdminPanel userEmail={currentUser?.email} variant="compact" onResetComplete={refreshUser} />
+                                <PushNotificationsControl compact authUid={authUid} />
+                                <AdminPanel userEmail={currentUser?.email} onResetComplete={refreshUser} />
                                 <button
-                                    onClick={() => firebaseSignOut(clientAuth)}
+                                    onClick={handleSignOut}
                                     style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}
                                 >
                                     Sign out
@@ -205,6 +237,7 @@ export default function Home() {
                         <ChatTabs
                             activeTab={activeTab}
                             currentUser={currentUser}
+                            authUid={authUid}
                             allUsers={allUsers}
                             allMessages={allMessages}
                             allReactions={allReactions}

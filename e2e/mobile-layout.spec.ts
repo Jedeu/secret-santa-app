@@ -17,8 +17,8 @@ test.use({ viewport: { width: 375, height: 667 } }); // Force Mobile Viewport (i
 async function seedAndAssign(page: Page): Promise<void> {
     // Seed users
     await page.request.post('/api/dev/seed');
-    // Assign users (triggers random assignment)
-    await page.request.post('/api/admin/assign');
+    // Assign users (triggers random assignment; dev-only route)
+    await page.request.post('/api/dev/assign');
 }
 
 test.describe('Mobile Layout', () => {
