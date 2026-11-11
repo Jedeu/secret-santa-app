@@ -1,19 +1,20 @@
 /**
- * Tests for /api/admin/reset - exclusive, fail-closed reset + participant reseed
+ * Tests for /api/admin/reset - retired: always 410 RESET_RETIRED, no Firestore access.
  */
 
 import { POST } from '@/app/api/admin/reset/route';
-import * as firestore from '@/lib/firestore';
-import { auth as adminAuth } from '@/lib/firebase';
+import { firestore, auth as adminAuth } from '@/lib/firebase';
 import { ADMIN_EMAILS } from '@/lib/config';
-import { AdmissionError } from '@/lib/participant-admission';
 
-jest.mock('@/lib/firestore');
-jest.mock('@/lib/participants', () => ({
-    PARTICIPANTS: [
-        { name: 'Alice', email: 'alice@example.com' },
-        { name: 'Bob', email: 'bob@example.com' }
-    ]
+jest.mock('@/lib/firebase', () => ({
+    firestore: {
+        collection: jest.fn(),
+        runTransaction: jest.fn(),
+        getAll: jest.fn(),
+    },
+    auth: {
+        verifyIdToken: jest.fn(),
+    },
 }));
 
 const ADMIN_EMAIL = ADMIN_EMAILS[0];
@@ -23,74 +24,37 @@ function createRequest(withToken = true) {
         method: 'POST',
         headers: {
             get: (name) => (withToken && name === 'Authorization' ? 'Bearer fake-token' : null)
-        }
+        },
+        json: async () => ({}),
     };
 }
 
 describe('POST /api/admin/reset', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        adminAuth.verifyIdToken.mockResolvedValue({ uid: 'admin-uid', email: ADMIN_EMAIL, email_verified: true });
     });
 
-    test('resets and reseeds participants for an admin, with no hooks', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ uid: 'admin-uid', email: ADMIN_EMAIL });
-        firestore.resetAndReseedParticipants.mockResolvedValue();
-
-        const res = await POST(createRequest());
+    test.each([
+        ['with an admin token', true],
+        ['without a token', false],
+    ])('returns 410 RESET_RETIRED %s', async (_label, withToken) => {
+        const res = await POST(createRequest(withToken));
         const data = await res.json();
 
-        expect(res.status).toBe(200);
-        expect(data.success).toBe(true);
-        expect(data.message).toMatch(/re-initialized/i);
-
-        expect(firestore.resetAndReseedParticipants).toHaveBeenCalledTimes(1);
-        const args = firestore.resetAndReseedParticipants.mock.calls[0];
-        expect(args).toHaveLength(1);
-        expect(args[0]).toEqual([
-            { name: 'Alice', email: 'alice@example.com' },
-            { name: 'Bob', email: 'bob@example.com' }
-        ]);
-        expect(firestore.resetDatabase).not.toHaveBeenCalled();
-        expect(firestore.ensureAllParticipants).not.toHaveBeenCalled();
+        expect(res.status).toBe(410);
+        expect(data).toEqual({
+            error: 'Reset has been retired. Use Close year and Start new year.',
+            code: 'RESET_RETIRED',
+        });
     });
 
-    test('should deny access to non-admin users', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ uid: 'user-uid', email: 'not-admin@example.com' });
+    test('touches neither Firestore nor token verification', async () => {
+        await POST(createRequest());
 
-        const res = await POST(createRequest());
-        const data = await res.json();
-
-        expect(res.status).toBe(403);
-        expect(data.error).toMatch(/Admin access required/);
-        expect(firestore.resetAndReseedParticipants).not.toHaveBeenCalled();
-    });
-
-    test('should deny access when not authenticated', async () => {
-        const res = await POST(createRequest(false));
-
-        expect(res.status).toBe(401);
-        expect(firestore.resetAndReseedParticipants).not.toHaveBeenCalled();
-    });
-
-    test('maps RESET_SUPERSEDED to 409', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ uid: 'admin-uid', email: ADMIN_EMAIL });
-        firestore.resetAndReseedParticipants.mockRejectedValue(new AdmissionError('RESET_SUPERSEDED'));
-
-        const res = await POST(createRequest());
-        const data = await res.json();
-
-        expect(res.status).toBe(409);
-        expect(data.code).toBe('RESET_SUPERSEDED');
-    });
-
-    test('other failures return 500 asking to run Reset again', async () => {
-        adminAuth.verifyIdToken.mockResolvedValue({ uid: 'admin-uid', email: ADMIN_EMAIL });
-        firestore.resetAndReseedParticipants.mockRejectedValue(new Error('Database error'));
-
-        const res = await POST(createRequest());
-        const data = await res.json();
-
-        expect(res.status).toBe(500);
-        expect(data.error).toBe('Reset did not complete. Run Reset again.');
+        expect(adminAuth.verifyIdToken).not.toHaveBeenCalled();
+        expect(firestore.collection).not.toHaveBeenCalled();
+        expect(firestore.runTransaction).not.toHaveBeenCalled();
+        expect(firestore.getAll).not.toHaveBeenCalled();
     });
 });

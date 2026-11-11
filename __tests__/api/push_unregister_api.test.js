@@ -98,8 +98,8 @@ describe('POST /api/push/unregister', () => {
         expect(data.code).toBe('STALE_REGISTRATION');
     });
 
-    test('maps RESET_IN_PROGRESS to 503', async () => {
-        unregisterPushToken.mockRejectedValue(new AdmissionError('RESET_IN_PROGRESS'));
+    test('maps SERVICE_UNAVAILABLE to 503', async () => {
+        unregisterPushToken.mockRejectedValue(new AdmissionError('SERVICE_UNAVAILABLE'));
 
         const res = await POST(createRequest({
             token: 'auth-token',

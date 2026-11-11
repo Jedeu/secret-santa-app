@@ -64,10 +64,10 @@ Always run `npm run emulators` before starting development. The emulators must b
 User authentication is a server-mediated handshake:
 1. Users sign in with Google OAuth via Firebase Auth.
 2. `src/context/UserContext.js` is the single auth/profile owner (`useUser()` reads it). It POSTs the ID token to `/api/auth/bootstrap`.
-3. `src/lib/participant-admission.js` checks the email against `src/lib/participants.js` (and `email_verified` outside development), then atomically resolves or creates the UUID profile and writes a server-only `authIdentities/{authUid}` record.
-4. Firestore rules admit only callers whose admission record matches the current `system/lifecycle` epoch. Unauthorized emails get ACCESS_DENIED.
+3. `src/lib/participant-admission.js` reads `system/lifecycle`, checks the email against that year's roster in `src/lib/participants.js` (and `email_verified` outside development), then atomically resolves or creates the UUID profile in that year's `users` collection and writes a server-only `authIdentities/{authUid}` record. In a closed year it links an existing profile but never creates one.
+4. Firestore rules admit only callers whose admission record matches the current `system/lifecycle` epoch. Emails not on the active year's roster get ACCESS_DENIED.
 
-Clients never create `users` documents. After an admin reset, open clients re-bootstrap automatically. To remove a participant mid-season, remove them from the list and delete their `authIdentities` document.
+Clients never create `users` documents. Profile UUIDs are new every year. Open clients watch `system/lifecycle` and re-bootstrap after a server-confirmed Close or Start. To remove a participant mid-season, remove them from that year's roster and delete their `authIdentities` document.
 
 ### Dual Firebase Configuration
 
@@ -79,10 +79,11 @@ Both auto-detect development mode and connect to emulators at 127.0.0.1.
 
 ### Participant Management
 
-Participants are defined in `src/lib/participants.js` as the source of truth:
-- Hardcoded array of `{ name, email }` objects
-- Helper functions: `getParticipantEmail()`, `getParticipantName()`, `getParticipantNames()`
-- Used for authorization, recipient selection, and initial seeding
+`src/lib/participants.js` is the source of truth:
+- `PARTICIPANTS`: registry of every known `{ name, email }`
+- `YEAR_ROSTERS`: who takes part in each year; a year with no roster cannot be started and admits nobody
+- Helpers: `getRoster()`, `getRosterName()`, `getRosterEmail()`, `getRosterNames()`, `isKnownParticipantEmail()`, `getNextRosterYear()`
+- Used for authorization, recipient selection, and seeding each new year
 
 ### Message Architecture
 
@@ -99,6 +100,8 @@ Key utilities in `src/lib/message-utils.js`:
 - `filterMessages(messages, currentUserId, otherUserId, targetConversationId)`: Filters and time-sorts messages for a specific chat. Routing is decided by resolveMessageConversation: explicit conversationId, then legacy isSantaMsg, then the known assignment, then a canonical fallback (santa = smaller id) only for genuinely ambiguous rows.
 
 ### Data Model
+
+**Year storage:** the 2025 exchange lives in the root collections `users`, `messages`, `reactions`, `lastRead`, `typing`. Every later year lives in `years/{year}/…` with the same five collection names and document shapes. Build paths only with `src/lib/year-paths.js`. The app never writes to a closed year.
 
 **users collection:**
 ```javascript
@@ -146,15 +149,17 @@ Firestore rules additionally permit the **legacy** fields `isSantaMsg`, `fromNam
 
 **pushTokens collection**: Web Push subscription storage, managed server-side by `src/lib/push-server.js`.
 
-**Server-only collections** (clients cannot read or write them): `authIdentities/{authUid}` `{ uid, email, userId, epoch, createdAt, updatedAt }`; `participantIndex/{email}` `{ email, userId, epoch, createdAt }`; `system/lifecycle` `{ epoch, state, resetId, resetStartedAt, updatedAt }`. `pushTokens` documents carry `authUid`, `revision` and `epoch`; push mutations must present the `epoch` and `revision` returned by `/api/push/status`.
+**Server-written collections**: `authIdentities/{authUid}` `{ uid, email, userId, epoch, createdAt, updatedAt }`; `participantIndex/{email}` `{ email, userId, epoch, createdAt }` (clients cannot read either); `system/lifecycle` `{ epoch, state: 'active'|'closed', year, closedYears, startedAt, closedAt, updatedAt }` (readable by accounts that have been admitted, never writable by clients; a missing `year` means 2025; the server treats any other shape as unavailable and writes nothing). `pushTokens` documents carry `authUid`, `revision` and `epoch`; push mutations must present the `epoch` and `revision` returned by `/api/push/status`.
 
 ### API Routes
 
 Auth conventions: routes verify a Firebase **Bearer ID token** (`Authorization: Bearer <token>`) via the Admin SDK. Admin checks go through `isAdmin(email)` in `src/lib/config.js` (single source of truth — the admin email is no longer duplicated inline). Routes under `/api/dev/*` are hard-disabled outside `NODE_ENV=development`.
 
-- **POST /api/auth/bootstrap**: Resolve or create the caller's profile and admission record. Requires a Bearer token.
-- **POST /api/init**: Initialize all participants from the hardcoded list. No auth in development; requires an admin Bearer token in production.
-- **POST /api/admin/reset**: Delete all data and reset the app. Requires admin Bearer token. Exclusive and fail-closed: if it does not complete, run it again.
+- **POST /api/auth/bootstrap**: Resolve or create the caller's profile and admission record; returns the user plus `year`, `yearState`, `epoch`, `closedYears`. Requires a Bearer token. Clients send `X-Secret-Santa-Client: 2`; without it the route answers only while the active year is 2025.
+- **POST /api/init**: Seed the active year's roster. No auth in development; requires an admin Bearer token in production. Refused in a closed year.
+- **POST /api/admin/reset**: Retired. Always returns 410 `RESET_RETIRED`.
+- **POST /api/admin/year/close**: Body `{ year }`. Makes that year read-only in one transaction. Admin only; idempotent.
+- **POST /api/admin/year/start**: Body `{ fromYear, targetYear }`. Requires `fromYear` closed and a roster for `targetYear`; creates the new year's profiles and bumps the epoch in one transaction. Admin only; idempotent.
 - **POST /api/dev/assign**: Dev-only assignment helper. 403 outside development.
 - **POST /api/dev/inject-message**: Dev-only message injection for testing. 403 outside development.
 - **POST /api/dev/seed**: Dev-only seed data from the participants list. 403 outside development.
@@ -176,7 +181,9 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - `src/app/page.js`: Main app UI with tabbed interface (Recipient/Santa/Public Feed)
 - `src/components/Chat.js`: Chat component with emoji picker and markdown support
 - `src/components/PublicFeed.js`: Public message feed grouped by conversation
-- `src/lib/firestore.js`: Firestore operations (ensureAllParticipants, assignSecretSantas, etc.)
+- `src/lib/firestore.js`: Server helpers (`ensureAllParticipants`, `assignUsersInTransaction`)
+- `src/lib/year-paths.js`: Year storage layout and lifecycle interpretation (pure; shared by client and server)
+- `src/components/ArchiveViewer.js`: Read-only view of closed years
 - `firebase.json`: Emulator configuration
 - `firestore.rules`: Firestore security rules (authoritative; summarized under Important Notes)
 - `AGENTS.md`: Agent workflow contract (roles, approval loop, safety boundaries)
@@ -194,7 +201,9 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
   - `allow delete: if false` on users/messages/lastRead. `messages` also deny `update`; `users` and `lastRead` allow only the specific updates the rules check. `typing` and `reactions` let a signed-in user delete their own docs. A catch-all denies every other collection.
 - Push dispatch: PUSH_DISPATCH_ENABLED=false always disables it and =true always enables it; unset means production only, and never when an emulator host is configured. The emulators do not emulate FCM.
 - The message outbox stores one localStorage entry per queued message under secret-santa-message-outbox-v2:*; the v1 key is read-only legacy input. Tabs running an older build must reload before the outbox fixes apply.
-- **Anonymity is a trust model, not a hard guarantee.** The Public Feed and Santa/Recipient split hide identities in the UI, but `messages` are readable by any signed-in participant (rules `allow read: if isSignedIn()`), so identities are technically discoverable by a determined participant inspecting raw data. Treat anonymity as social convention enforced by the client.
+- Year lifecycle: `Close year` and `Start new year` are the only season transitions. The app has no bulk reset or deletion of year data and never writes to a closed year; the open year keeps its normal writes (messages, pairing claims, read markers, and adding or removing typing and reaction documents). Both admin routes require `YEAR_TRANSITIONS_ENABLED=true` outside development.
+- Firestore rules allow reads of the current year and of earlier years listed in `closedYears`, never a later year, and writes only in the single open year.
+- **Anonymity is a trust model, not a hard guarantee.** The Public Feed and Santa/Recipient split hide identities in the UI for the open year, but `messages` are readable by any admitted participant, so identities are technically discoverable by inspecting raw data. Closing a year reveals its pairings to all admitted participants in the archive. Treat anonymity as social convention enforced by the client.
 
 ## Workflows & Guidelines
 

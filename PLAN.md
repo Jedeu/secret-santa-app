@@ -1,780 +1,1144 @@
-# PLAN: Bug-Sweep Remediation (BUG_REPORT.md #1–#22 + development-push risk)
+# PLAN.md — Annual close, read-only archives and new-year start
 
-**Status: APPROVED** — revision 5; primary adversarial review complete, 2026-11-10. The user directed Fable to finish the final race and then have Opus implement the plan, subsequently specifying **Opus 5.5 at high effort**. Approval covers all 22 bugs, the conditional development-FCM safeguard, and this plan's recommended choices D1=A and D2–D7 as written. No production access, deployment, live FCM dispatch, data repair, or dependencies are authorized. Git publication is authorized separately below.
+## Status
 
-**Primary review evidence:** The remaining matching-state race is resolved by an unconditional conditional-register/fresh-revision fence on every successful reconciliation, with deterministic before-server-commit tests in both directions and no dependence on the older tab. Reset/admission, queue migration, markers, cleanup, SDK boundaries, manifest and verification were adversarially reviewed. All 24 create, 74 modify and 1 primary-delete paths, coverage of IDs 1–22 plus Risk, absence of personal emails, protected-file hashes and whitespace checks were validated. Baseline lint and 184 unit tests passed in a disposable copy; these are NOT verification of the not-yet-implemented fixes. The planner ran no checks. Production account/provider confirmation remains an unauthorized rollout prerequisite.
+**Status: APPROVED — revision 4; adversarial review complete (2026-11-10), no blocking objections.** The user approved this reviewed plan with “Yes” on 2026-11-10 in response to the explicit request for Opus implementation approval. Approval covers the exact code/docs/tests manifest and primary-owned deletions, including the unsafe seed script. It does not authorize any read, write, deploy, credential change or live Close/Start action against a real Firebase or hosting project. Fable drafted and revised this plan; the primary reviewed revision 3 in full and every change in revision 4. Implementation is complete locally; primary-executed verification results are recorded below. No deployment, production data access or live Close/Start action has occurred.
 
-**Implementation checkpoint (2026-11-10):** Approved code scope implemented by Opus 5.5 HIGH, including the primary's in-scope marker/lint corrections and primary-owned route deletion. Primary automated checks passed: lint, 422 unit/API tests, 68 emulator integration tests, build/worker assertions and 48 Chromium E2E tests. Scope, whitespace and protected hashes passed. **Additional local browser checks passed:** shared profile across tabs, stable global-listener count across assignment, cross-browser read-marker propagation, open-client reset recovery, and recovery from a forced failure after profile deletion. The owner separately confirmed that the local Google popup closes and the chat loads in a normal browser. Earlier headless relay/tooling failures remain recorded as failed attempts, not passes; this does not verify production or real FCM. Browser typing-cleanup denials/cache warnings remain recorded, not hidden. See `RESEARCH.md` for evidence and limitations. No production or real FCM validation has occurred.
+## Implementation and verification checkpoint (2026-11-11)
 
-**Gates (separate, in order):** primary final review → user approval recorded by the primary → implementer `claude-opus-5-5` at HIGH effort (latest user direction) edits only manifest files → primary diff review → primary-executed checks. No production access, deploy, data migration, dependency change or real FCM dispatch is authorized.
+- Opus implemented all **20 creates and 64 modifications**; primary completed the **4 approved deletions**. Model/tool/scope audit passed. No unlisted implementation files or owner changes were modified.
+- Verification ran from a disposable copy with **Node 22.15.0**, isolated credentials/configuration, explicit local emulator addresses and push dispatch disabled. Existing installed direct dependency versions match the lockfile. Original generated service-worker assets and user-owned settings remain byte-identical to baseline.
+- **Passed:** lint; production build; **699 unit/API tests** (57 suites); **56 real-emulator rules tests** (5 suites); **127 integration tests** (10 suites, two consecutive full passing runs); **48 Chromium E2E tests**; diff/new-file whitespace, manifest/reference, SDK-boundary and approved-rules equality checks.
+- **Initial integration attempt failed:** 126 passed, one concurrent seed/admission test returned `INVALID_ARGUMENT: Transaction is invalid or closed`, with credential-metadata discovery warnings. After disabling metadata discovery in the isolated verification environment (`METADATA_SERVER_DETECTION=none`), the focused 5-test suite and both complete integration reruns passed. No application source change was made to hide or mask this attempt; it remains recorded as a failed run.
+- **Supplemental browser verification passed:** server-acknowledged messages and UI reactions in both years; three already-open sessions become read-only; preserved static archived message/reaction; fresh UUIDs without reload; the excluded already-open session loses access; archive access before current-year recipient selection; new-year delivery reaches the recipient through the correct scoped namespace; 2025 users/messages/reactions remain deeply equal; Reset returns 410. Zero external browser requests, uncaught page errors or unexpected console errors. Three expected first-admission listener warnings and one expected admission-denial response were recorded.
+- Two earlier supplemental probe attempts failed (a first-row reaction-picker/header pointer overlap in unchanged components, then initial dev-login setup navigation). The final probe used lower synthetic fixture rows and pre-created emulator accounts/server-admission setup, with normal physical UI clicks. The unlisted Chat/ReactionPicker/dev-login files were not changed. Existing multi-tab persistence fallback warnings also remain visible in E2E logs.
+- All owned verification processes were stopped; ports **8080, 9099, 4000 and 3000** were clear at this checkpoint. No staging, commit, push, production access, credential change, deployment or live year transition had been performed. Google production sign-in and real push notifications were not verified.
 
-## Git publication authorization (2026-11-10)
+## Git publication authorization (2026-11-11)
 
-After local verification, the user requested a pushed draft PR for review. This authorizes the primary to commit the approved task changes plus `BUG_REPORT.md`, `PLAN.md` and `RESEARCH.md`, push a new review branch, and open a draft PR targeting `main`. It does not authorize deployment, a direct push to `main`, force-pushing, or including the pre-existing local settings/generated workers. The review branch starts from current `origin/main`, whose tree is identical to the validated implementation base (the earlier workflow change was squash-merged).
+The owner requested a draft pull request for review. This authorizes the primary to commit the task's explicit manifest plus PLAN.md/RESEARCH.md on a feature branch, push that branch and open a **draft** PR against main. Keep pre-existing user-owned settings and generated assets out. It does not authorize a direct push to main, deployment, production data access, credential changes or live Close/Start actions. Publication-ready research omits private local/session operational metadata; application code remains identical to the verified snapshot.
 
 ## Goal
-Fix all 22 audited defects and the dev-FCM risk through six shared-root changes, preserving existing UUIDs, messages, markers and queued drafts.
 
-## Data model
-Server-only collections (catch-all rule denies clients):
-- `system/lifecycle`: `{ epoch: number ≥ 1, state: 'active'|'resetting', resetId: string|null, resetStartedAt: string|null, updatedAt: string }`
-- `authIdentities/{authUid}`: `{ uid, email, userId, epoch, createdAt, updatedAt }`
-- `participantIndex/{emailKey}`: `{ email, userId, epoch, createdAt }`, `emailKey = email.trim().toLowerCase()`
-- `pushTokens/{sha256(token)}` gains `authUid`, `revision` (random id replaced on every mutation; absent ≡ `null`), `epoch`, optional `invalid: true`
+Add two reusable admin actions, **Close year** and **Start new year**, so that 2025 becomes a read-only browsable archive and 2026 starts clean with the 2026 roster, with no bulk reset of year data and no way to mutate a closed year through the new app.
 
-Unchanged: `users`, `messages`. `lastRead.lastReadAt` stays a `Timestamp` meaning "latest observed message timestamp".
+## Confirmed scope (not open)
 
-## Exact manifest
+- Existing data is 2025; the next year is 2026. Close and Start are separate, explicit admin actions.
+- Archive in place: root collections stay as 2025; later years live under `years/{year}/…`.
+- Profile UUIDs are new every year. Close and Start are each one atomic transaction.
+- Pairings of a year are revealed in its archive from the moment it is closed.
+- The 2026 roster is the 2025 registry minus Jana. She loses app access when 2026 starts; there is no archive-only role. Her 2025 records stay visible to admitted participants.
+- Manual recipient selection is kept. Automatic assignment is deferred. Archive browsing never depends on `recipientId`.
+- The destructive Reset is retired. Old installed clients must reload once 2026 starts. There is no Reopen action.
 
-**Create — source**
-- `src/lib/participant-admission.js` — Admin (`@/lib/firebase`); must not import `@/lib/firestore`
-- `src/app/api/auth/bootstrap/route.js` — Admin
-- `src/app/api/push/status/route.js` — Admin
-- `src/context/UserContext.js` — Client (`@/lib/firebase-client`)
-- `src/lib/sign-out.js` — Client
-- `src/hooks/useAdminReset.js` — Client
-- `scripts/lib/emulator-firestore.js` — Admin, CommonJS, `require('firebase-admin/*')` only; no `@/` or `src/` imports
+**What is and is not guaranteed.** The new app has no bulk reset or deletion of year data, and it never writes to a closed year: the server refuses and the rules deny. The open year keeps its normal writes, including pairing claims, read markers, and adding or removing typing and reaction documents. None of this protects against Admin SDK or console operations, or against older deployments that still hold valid Admin credentials; the rollout makes neutralizing those a precondition for Close. Emulator wipe helpers stay destructive by design and are only for emulators the primary started.
 
-**Create — tests:** `__tests__/lib/participant_admission.test.js`, `__tests__/api/auth_bootstrap_api.test.js`, `__tests__/api/push_status_api.test.js`, `__tests__/api/dev_assign_api.test.js`, `__tests__/integration/participant-admission.test.js`, `__tests__/integration/reset-fencing.test.js`, `__tests__/integration/firestore-rules-admission.test.js`, `__tests__/integration/push-registration.test.js`, `__tests__/unit/firebase_client_config.test.js`, `__tests__/unit/worker_push_display.test.js`, `__tests__/unit/ChatTabs_draft_isolation.test.js`, `__tests__/unit/PublicFeed_read_state.test.js`, `__tests__/unit/useAdminReset.test.js`, `__tests__/unit/emulator_scripts_config.test.js`, `__tests__/unit/message_outbox_cross_realm.test.js`, `e2e/admission-and-reset.spec.ts`, `e2e/outbox-cross-tab.spec.ts`.
+## Architecture
 
-**Modify — source:** `firestore.rules`; `worker/index.js`; `src/lib/{firestore,firebase-client,message-utils,message-outbox,lastReadClient,push-client,push-server}.js`; `src/hooks/{useUser,useRealtimeMessages}.js`; `src/context/RealtimeMessagesContext.js`; `src/components/{ClientProviders,AuthGuard,AdminPanel,RecipientSelector,ChatTabs,Chat,PublicFeed,MessageOutboxRuntime,PushNotificationsRuntime,PushNotificationsControl,NotificationSoundRuntime}.js`; `src/app/page.js`; `src/app/api/{messages/send,push/register,push/unregister,admin/reset,init,dev/seed,dev/inject-message,dev/assign}/route.js`; `scripts/{wipe_db,check_all_data,check_messages,test_message_routing}.js`.
-
-**Modify — tests:** `__tests__/setup.js`; `__tests__/integration/{helpers/firestore-rules-test-utils.js,firestore-rules-lastRead.test.js,firestore-rules-reactions.test.js,README.md}`; `__tests__/lib/{firestore,push_server}.test.js`; `__tests__/api/{admin_reset_enhanced,send_message_api,push_register_api,push_unregister_api}.test.js`; `__tests__/context/RealtimeMessagesContext.test.js`; `__tests__/unit/{useUser_realtime,message_outbox,outbox_retry_delivery,MessageOutboxRuntime,Chat_outbox,Chat_unread,lastReadClient,lastReadClient-normalization,unread_badge_clearing,unread_logic,realtime_hooks,PublicFeed_lastViewed_sync,message_routing,NotificationSoundRuntime,push_client,PushNotificationsControl,PushNotificationsRuntime,admin_ui,app_flows,RecipientSelector,participants}.test.js`; `e2e/{mobile-layout,unread-badge}.spec.ts`. (`useUser_realtime` is rewritten in place against `UserProvider`; `PublicFeed_lastViewed_sync` keeps its filename.)
-
-**Modify — docs:** `CLAUDE.md`, `README.md`, `plans/05-admin-assign-decision.md`.
-
-**Delete (primary-executed, only if D1 = A):** `src/app/api/admin/assign/route.js`. If D1 = C, it moves to Modify and its `getAllUsers` + `batchUpdateUsers` pair becomes the same `assignUsersInTransaction` call as the dev route.
-
-**Inspected, expected unaffected (primary confirms by running):** `auth_timing`, `read-receipts`, `Sidebar`, `PublicFeed_grouping`, `firestore_participants`, `init`, `firestore-rules-typing`, `layout_metadata`, `typing-client`, `reactions-client`, `ReactionChips`, `next_config_pwa`, `package_scripts_build`, `pwa_manifest_assets` tests and the remaining e2e specs.
-
-**Not in this change:** `docs/runtime-verification.md` (unread; may be stale afterwards), `scripts/seed_users.js`, `src/components/Sidebar.js`, `src/lib/firebase.js`, `package.json` and lockfile, CI, `.claude/settings*.json`, generated `public/sw.js`, `public/workbox-*.js`, `public/worker-*.js`.
-
-## Phase 1 — Admission, lifecycle, reset, rules (#1 #6 #8 #4)
-
-### `src/lib/participant-admission.js`
-```js
-export class AdmissionError extends Error {}           // fields: code, status
-export function toTitleCase(name): string
-export function normalizeEmail(email): string
-export function requiresVerifiedEmail(): boolean       // process.env.NODE_ENV !== 'development'
-export function getBearerToken(request): string|null
-export async function verifyRequestToken(request): Promise<DecodedIdToken>
-export function assertAdmissibleToken(decoded): { uid, email, name }
-export async function admitParticipant(decoded): Promise<{ user, created: boolean }>
-export async function resolveParticipant(decoded, { verifyIndex = false } = {}): Promise<{ uid, email, user, epoch }>
-export async function runFencedTransaction(decoded, work): Promise<any>
-export async function ensureParticipantProfiles(participants, { resetId = null } = {}): Promise<{ created, linked, existing }>
-export async function beginReset(): Promise<{ resetId, epoch }>
-export async function assertResetOwner(tx, resetId): Promise<void>
-export async function assertLifecycleActive(tx): Promise<{ epoch }>
-export async function completeReset(resetId): Promise<void>
-export function admissionErrorResponse(error): NextResponse|null
-```
-Codes: `UNAUTHENTICATED` 401; `ACCESS_DENIED`, `EMAIL_NOT_VERIFIED` 403; `PROFILE_CONFLICT`, `RESET_SUPERSEDED` 409; `RESET_IN_PROGRESS`, `SERVICE_UNAVAILABLE` 503. `PROFILE_CONFLICT`'s message is generic (no counts or identifiers).
-
-- **`assertAdmissibleToken`** (pure, every path): requires `uid`; email passing `normalizeEmail` (non-empty, no `/`); `getParticipantName(email)` non-null; `email_verified === true` when `requiresVerifiedEmail()`.
-- **`assertLifecycleActive(tx)`**: missing doc → `SERVICE_UNAVAILABLE`; not `active` → `RESET_IN_PROGRESS`.
-- **Validity predicate** (used by `resolveParticipant` and `runFencedTransaction`): lifecycle exists and `active` (else `RESET_IN_PROGRESS`); identity exists with matching `uid`, `email`, `epoch === lifecycle.epoch`; `users/{identity.userId}` exists with `normalizeEmail(user.email) === email`. Otherwise "admission required".
-- **`admitParticipant`** — one transaction, reads first:
-  1. `tx.getAll(lifecycle, index, identity)`. Lifecycle missing → created `{ epoch: 1, state: 'active', resetId: null, resetStartedAt: null }`; `resetting` → `RESET_IN_PROGRESS`.
-  2. Index exists: `index.epoch !== epoch`, user missing, or stored email not exactly canonical → `PROFILE_CONFLICT`.
-  3. Index missing: `tx.get(usersCollection)` filtered by `normalizeEmail(u.email) === email`.
-     - Zero matches → create `{ id: uuidv4(), name: toTitleCase(name), email, oauthId: uid, image: decoded.picture || null, recipientId: null, gifterId: null }`.
-     - Exactly one with `u.email === email` and `doc.id === (u.id ?? doc.id)` → link it, keeping its UUID.
-     - Anything else → `PROFILE_CONFLICT`, no writes.
-  4. Writes: lifecycle if missing; `tx.create(users/…)` if new; `tx.create(index, { email, userId, epoch, createdAt })` if new; `tx.set(identity, { uid, email, userId, epoch, createdAt: previousIdentity?.createdAt ?? now, updatedAt: now })`. Existing `users` docs are never modified.
-- **`resolveParticipant`**: non-transactional `getAll(lifecycle, identity)` + user doc (+ index when `verifyIndex`: `index.userId === identity.userId`, `index.epoch === epoch`). Valid → return; else `admitParticipant`.
-- **`runFencedTransaction(decoded, work)`**: `assertAdmissibleToken`; transaction reads lifecycle, identity, user, applies the predicate, calls `work(tx, { uid, email, epoch, user })` (reads before writes; no external side effects). "Admission required" on the first attempt → `admitParticipant`, retry once; second failure → `SERVICE_UNAVAILABLE`.
-- **`ensureParticipantProfiles`**: one transaction per participant (steps 1–4 without identity). `resetId: null` requires `active`; a `resetId` requires `resetting` with that id. Created profiles have `oauthId: null, image: null`. After all are processed, any conflict throws `PROFILE_CONFLICT` with `error.conflicts = <count>`.
-
-Stale requests are rejected by their own precondition, since re-admission can make the caller valid again:
-
-| Mutation | Commit-time checks | Stale-request precondition |
+| | Copy → verify → delete | **Archive in place (chosen)** |
 |---|---|---|
-| Admission, seed, init | lifecycle `active` | none |
-| Send | lifecycle, identity, reciprocal assignment | `senderUserId` (always sent by the new outbox); old clients: recipient must exist and be reciprocally assigned |
-| Push register / unregister | lifecycle, identity | `expectedEpoch` + `expectedRevision`, both required |
-| Invalid-token cleanup | lifecycle `active` | dispatch's captured `epoch` and each row's captured `revision` |
-| Dev assign / dev inject | lifecycle (+ users read in the same transaction / reciprocal assignment) | none |
-| Reset steps | `resetId` | none |
+| Close | multi-batch copy, verify, publish | one transaction on `system/lifecycle` |
+| Start | multi-batch delete, reseed | one transaction: lifecycle plus roster profiles into an empty namespace |
+| Partial-failure states | several | none |
+| Bulk year deletion in production | yes, yearly | none |
+| Cost | job framework and integrity checks | year-aware paths and rules for two locations |
 
-**Reset protocol**
-- `beginReset()`: transaction → `{ epoch: (epoch ?? 0) + 1, state: 'resetting', resetId: uuidv4(), resetStartedAt: now }`. Always succeeds; newest wins.
-- Delete: per batch of ≤ 400, a transaction doing `assertResetOwner` then `tx.delete` of refs from `collection(name).limit(400).get()`, repeated until empty.
-- Reseed: `ensureParticipantProfiles(participants, { resetId })`.
-- `completeReset(resetId)`: `assertResetOwner` → `{ state: 'active', resetId: null, resetStartedAt: null }`.
-- `assertResetOwner` throws `RESET_SUPERSEDED` unless `resetting` with a matching `resetId`.
+The year number is the idempotency and staleness token. The epoch bumps only on Start.
 
-Outcomes:
-- Delayed send → 503 during reset; afterwards 403 `SENDER_MISMATCH` (new client) or 400 (old); nothing written.
-- Delayed push register → 409.
-- Late invalid-token response → nothing written.
-- In-flight bootstrap → commits before `beginReset` (then deleted) or 503 and retried.
-- Second reset → runs fully; the first fails `RESET_SUPERSEDED`.
-- Crash → stays `resetting` (admissions 503, rules deny all); recovery is re-running reset.
-- Seed/init/dev assign/dev inject during reset → 503.
+## Storage and lifecycle
 
-**Outside DB fencing:** a notification already handed to FCM cannot be retracted (generic text and conversation tag only).
+| Scope | Location |
+|---|---|
+| 2025 (legacy) | root `users`, `messages`, `reactions`, `lastRead`, `typing` |
+| Year Y ≥ 2026 | `years/{Y}/users`, `…/messages`, `…/reactions`, `…/lastRead`, `…/typing` (no parent document) |
+| Global, server-written | `system/lifecycle`, `authIdentities`, `participantIndex`, `pushTokens` |
 
-### `src/lib/firestore.js` (Admin)
+Document shapes are unchanged. Rows from an earlier epoch in the global collections are inert and are overwritten on next use.
+
+**`system/lifecycle`** — the only shape the new app writes (always a whole-document `tx.set`):
+
 ```js
-export const APP_COLLECTIONS = ['authIdentities','participantIndex','users','messages','lastRead','typing','reactions','pushTokens'];
-export async function ensureAllParticipants(participants)
-export async function resetDatabase({ afterBegin } = {})
-export async function resetAndReseedParticipants(participants, { afterBegin, afterDelete, afterReseed } = {})
-export async function assignUsersInTransaction(buildUpdates): Promise<{ usersFound, updated }>
+{ epoch: number, state: 'active'|'closed', year: number, closedYears: number[],
+  startedAt: string|null, closedAt: string|null, updatedAt: string }
 ```
-- `toTitleCase` imported from `./participant-admission`.
-- No `finally` in either reset function; on error they rethrow and state stays `resetting`.
-- Hooks are awaited at the named points, default to no-ops, and are never passed by routes (test barriers only).
-- `assignUsersInTransaction`: one transaction — `assertLifecycleActive(tx)`, `tx.get(usersCollection)`, `buildUpdates(users)`; `null` → no writes; else `tx.update(ref, { recipientId, gifterId })`.
-- `batchUpdateUsers` removed; other exports unchanged.
 
-### Routes (Admin)
-- `api/auth/bootstrap` POST: `verifyRequestToken` → `resolveParticipant(decoded, { verifyIndex: true })` → 200 `{ success: true, user }`; errors via `admissionErrorResponse`; else 500 `{ code: 'INTERNAL' }`.
-- `api/admin/reset`: after the existing admin gate (no admission needed), `resetAndReseedParticipants(PARTICIPANTS)`; admission errors mapped; others 500 `{ error: 'Reset did not complete. Run Reset again.' }`.
-- `api/init`, `api/dev/seed`: map admission errors; `api/init` also returns `{ code: 'PROFILE_CONFLICT', conflicts: <count> }`.
-- `api/dev/assign`: existing shuffle moves into local `buildUpdates(users)` (returns `null` for < 2 users); calls `assignUsersInTransaction`; `updated === 0` → existing 400; admission errors mapped.
+**Server and client interpretation** — one pure function, `interpretLifecycle(data)`. Each field is validated independently; a missing `year` never changes how `state` is read.
 
-### `firestore.rules` — exact replacement
+| # | Document | Result |
+|---|---|---|
+| 1 | does not exist | `exists:false`, valid, year 2025, `active`, `epoch:null`, `closedYears:[]` (first admission or Close creates it at epoch 1) |
+| 2 | `state` not exactly `'active'` or `'closed'` (missing, `'resetting'`, other) | **unavailable** |
+| 3 | `epoch` missing, not an integer, or < 1 | **unavailable** |
+| 4 | `year` key absent | year 2025 |
+| 5 | `year` present but not an integer in 2025…9999 | **unavailable** |
+| 6 | `closedYears` key absent | `[]` |
+| 7 | `closedYears` present but not an array of strictly ascending integers in 2025…9999 | **unavailable** |
+| 8 | `closed` with `year ∉ closedYears`; `active` with `year ∈ closedYears`; any listed year > `year` | **unavailable** |
+| 9 | `year > 2025` with no listed year below it | **unavailable** |
+| 10 | otherwise | as stored; absent `startedAt`/`closedAt` → `null` (informational) |
+
+Unavailable on the server means every fenced operation returns 503 `SERVICE_UNAVAILABLE` and performs **zero writes**; Close, Start and admission all refuse. No path overwrites an unavailable document, so a legacy `resetting` state cannot be revived.
+
+**Rules subset.** Rules cannot iterate a list, so they enforce less than the table.
+
+- *Enforced by rules (any failure denies every read and write):* state not `active`/`closed`; `epoch` not an integer ≥ 1; `year` present but not an integer in range; `closedYears` present but not a list; `closed` without the year listed; `active` with the year listed; `year > 2025` with an empty list.
+- *Server-only (not detected by rules):* non-integer or out-of-range list elements, duplicates, non-ascending order, and listed years above `year`.
+- *Hard bounds that hold even for a server-only-malformed document:* a year is readable only if `2025 ≤ requested ≤ year` **and** it is the current year or listed; only the current year is ever writable.
+
+So a document with a server-only list defect can leave already-admitted callers with rules access to the current year and to listed years at or below it, while the server refuses everything. It can never expose a future or unlisted year or make a non-current year writable. This narrow residual is accepted: valid metadata is written only by the server, and rollout stops on invalid existing metadata.
+
+## Transition and error contracts
+
+Both routes first require an admin and `assertYearTransitionsEnabled()`.
+
+**Close(Y)** — one transaction; L is the interpreted lifecycle.
+
+| Condition | Result |
+|---|---|
+| L unavailable | 503 `SERVICE_UNAVAILABLE`, no write |
+| Y > L.year | 409 `YEAR_MISMATCH` |
+| Y < L.year and Y ∈ L.closedYears | 200 `changed:false` |
+| Y < L.year and Y ∉ L.closedYears | 409 `YEAR_MISMATCH` |
+| Y = L.year, closed | 200 `changed:false` |
+| Y = L.year, active | set `{epoch: L.epoch ?? 1, state:'closed', year:Y, closedYears: L.closedYears ∪ {Y} ascending, startedAt: L.startedAt, closedAt: now, updatedAt: now}` → 200 `changed:true` |
+
+**Start(F → T)** — validation, then one transaction.
+
+| Condition | Result |
+|---|---|
+| F or T not a valid year, or T ≤ F | 400 `INVALID_YEAR` |
+| roster(T) missing; < 2 or > 200 entries; non-canonical or duplicate emails; duplicate names | 409 `ROSTER_NOT_CONFIGURED` |
+| L unavailable | 503 `SERVICE_UNAVAILABLE` |
+| L.year = T | 200 `changed:false` |
+| L.year > T | 409 `STALE_REQUEST` |
+| L.year ≠ F | 409 `YEAR_MISMATCH` |
+| L.year = F, active | 409 `YEAR_NOT_CLOSED` |
+| any of the five `years/T/{users,messages,reactions,lastRead,typing}` non-empty (`limit(1)` read in the transaction, each one) | 409 `YEAR_NOT_EMPTY` |
+| otherwise | `tx.create` one profile per roster entry in `years/T/users`; `tx.set` each `participantIndex/{email}` to `{email, userId, epoch: L.epoch+1, createdAt}`; `tx.set` lifecycle `{epoch: L.epoch+1, state:'active', year:T, closedYears: L.closedYears, startedAt: now, closedAt: null, updatedAt: now}` → 200 `changed:true` |
+
+**`AdmissionError` codes**
+
+| Code | Status | Note |
+|---|---|---|
+| `UNAUTHENTICATED` | 401 | unchanged |
+| `ACCESS_DENIED` | 403 | unknown email; not on the active year's roster; roster member with no profile in a closed year |
+| `EMAIL_NOT_VERIFIED` | 403 | unchanged |
+| `ADMIN_REQUIRED` | 403 | new |
+| `PROFILE_CONFLICT` | 409 | unchanged |
+| `YEAR_CLOSED` | 409 | new: "This year's exchange is closed and read-only." |
+| `CLIENT_UPDATE_REQUIRED` | 409 | new: "A new version of the app is available. Reload the page (or close and reopen the app) to continue." |
+| `TRANSITIONS_DISABLED` | 409 | new: "Year transitions are not enabled on this deployment." |
+| `YEAR_NOT_CLOSED`, `YEAR_MISMATCH`, `STALE_REQUEST`, `ROSTER_NOT_CONFIGURED`, `YEAR_NOT_EMPTY` | 409 | new |
+| `INVALID_YEAR` | 400 | new |
+| `SERVICE_UNAVAILABLE` | 503 | includes an unavailable lifecycle |
+
+Removed: `RESET_IN_PROGRESS`, `RESET_SUPERSEDED`. `/api/admin/reset` returns route-level 410 `RESET_RETIRED`. The client adds one local error code, `LIFECYCLE_MISMATCH` (see UserContext).
+
+**Writer fence matrix**
+
+| Writer | Open year | Closed year | Stale after Start |
+|---|---|---|---|
+| `/api/messages/send` | writes L.year `messages` | 409 `YEAR_CLOSED`, no admission write | re-admitted; old `senderUserId` → 403 `SENDER_MISMATCH`; old `toId` → 400 |
+| recipient claim, lastRead, typing, reactions (rules) | L.year only | denied | denied; root and other years always denied |
+| bootstrap / admission | links or creates a profile in L.year | identity/index only, never a `users` doc; no profile → `ACCESS_DENIED` | roster(L.year) decides |
+| `/api/init`, `/api/dev/seed` | seeds roster(L.year) | `YEAR_CLOSED` | `YEAR_MISMATCH` if the year flips mid-run |
+| `/api/dev/assign`, `/api/dev/inject-message` | L.year paths | `YEAR_CLOSED` | — |
+| push register / unregister | allowed | allowed (device control; nothing is dispatched) | old epoch → 409 `STALE_REGISTRATION` |
+| push dispatch / token cleanup | active and matching epoch | skipped | skipped |
+| `/api/admin/reset` | 410 | 410 | 410 |
+
+**Old installed clients.** After Close: reads continue, direct writes are denied, sends get 409 (already permanent in the outbox), Reset gets 410. After Start: a bootstrap without the header `x-secret-santa-client: 2` returns 409 `CLIENT_UPDATE_REQUIRED`, a terminal error card. Without this gate an old client would receive a 2026 profile, watch a root document that does not exist, and re-bootstrap in an unbounded loop.
+
+## Proposed Changes
+
+### Manifest
+
+**Create — source (8)**
+
+| File | SDK |
+|---|---|
+| `src/lib/year-paths.js` | none (pure) |
+| `src/lib/year-client.js` | Client |
+| `src/lib/archive-threads.js` | none (pure) |
+| `src/hooks/useYearArchive.js` | Client |
+| `src/hooks/useAdminYearActions.js` | Client (auth token only) |
+| `src/components/ArchiveViewer.js` | Client component |
+| `src/app/api/admin/year/close/route.js` | Admin |
+| `src/app/api/admin/year/start/route.js` | Admin |
+
+**Create — tests (12)**
+
+- `__tests__/integration/helpers/emulator-admin.js`
+- `__tests__/integration/firestore-rules-years.test.js`
+- `__tests__/integration/year-lifecycle.test.js`
+- `__tests__/unit/year_paths.test.js`
+- `__tests__/unit/year_client.test.js`
+- `__tests__/unit/archive_threads.test.js`
+- `__tests__/unit/useYearArchive.test.js`
+- `__tests__/unit/ArchiveViewer.test.js`
+- `__tests__/unit/useAdminYearActions.test.js`
+- `__tests__/unit/useTypingIndicator_scope.test.js`
+- `__tests__/api/admin_year_api.test.js`
+- `e2e/year-rollover.spec.ts`
+
+**Modify — source and docs (31)**
+
+- `firestore.rules`
+- `src/lib/participants.js`
+- `src/lib/participant-admission.js`
+- `src/lib/firestore.js`
+- `src/lib/push-server.js`
+- `src/lib/lastReadClient.js`
+- `src/lib/typing-client.js`
+- `src/lib/reactions-client.js`
+- `src/hooks/useTypingIndicator.js`
+- `src/hooks/useUser.js`
+- `src/context/UserContext.js`
+- `src/context/RealtimeMessagesContext.js`
+- `src/app/page.js`
+- `src/components/AdminPanel.js`
+- `src/components/AuthGuard.js`
+- `src/components/RecipientSelector.js`
+- `src/components/Sidebar.js`
+- `src/components/TabNavigation.js`
+- `src/components/ChatTabs.js`
+- `src/app/api/admin/reset/route.js`
+- `src/app/api/auth/bootstrap/route.js`
+- `src/app/api/init/route.js`
+- `src/app/api/dev/seed/route.js`
+- `src/app/api/dev/inject-message/route.js`
+- `src/app/api/messages/send/route.js`
+- `scripts/lib/emulator-firestore.js`
+- `scripts/wipe_db.js`
+- `scripts/check_all_data.js`
+- `CLAUDE.md`
+- `AGENTS.md`
+- `__tests__/integration/README.md`
+
+**Modify — tests (33)**
+
+- `__tests__/helpers/useUser-mock.js`
+- `__tests__/context/RealtimeMessagesContext.test.js`
+- `__tests__/unit/admin_ui.test.js`
+- `__tests__/unit/app_flows.test.js`
+- `__tests__/unit/auth_timing.test.js`
+- `__tests__/unit/realtime_hooks.test.js`
+- `__tests__/unit/unread_badge_clearing.test.js`
+- `__tests__/unit/unread_logic.test.js`
+- `__tests__/unit/lastReadClient.test.js`
+- `__tests__/unit/lastReadClient-normalization.test.js`
+- `__tests__/unit/typing-client.test.js`
+- `__tests__/unit/reactions-client.test.js`
+- `__tests__/unit/participants.test.js`
+- `__tests__/unit/useUser_realtime.test.js`
+- `__tests__/unit/Sidebar.test.js`
+- `__tests__/unit/RecipientSelector.test.js`
+- `__tests__/unit/emulator_scripts_config.test.js`
+- `__tests__/lib/participant_admission.test.js`
+- `__tests__/lib/firestore.test.js`
+- `__tests__/lib/push_server.test.js`
+- `__tests__/api/admin_reset_enhanced.test.js`
+- `__tests__/api/auth_bootstrap_api.test.js`
+- `__tests__/api/dev_assign_api.test.js`
+- `__tests__/api/send_message_api.test.js`
+- `__tests__/api/push_register_api.test.js`
+- `__tests__/api/push_unregister_api.test.js`
+- `__tests__/api/push_status_api.test.js`
+- `__tests__/integration/participant-admission.test.js`
+- `__tests__/integration/push-registration.test.js`
+- `__tests__/integration/firestore_participants.test.js`
+- `__tests__/integration/init.test.js`
+- `__tests__/integration/firestore-rules-admission.test.js`
+- `e2e/admission-and-reset.spec.ts`
+
+**Delete (4, primary, ordinary file deletion)**
+
+- `src/hooks/useAdminReset.js`
+- `__tests__/unit/useAdminReset.test.js`
+- `__tests__/integration/reset-fencing.test.js`
+- `scripts/seed_users.js`
+
+**Deliberately unchanged:** `src/lib/message-utils.js`, `src/lib/message-outbox.js`, `src/components/Chat.js`, `src/components/PublicFeed.js`, `src/lib/push-client.js`, `src/lib/sign-out.js`, the three push routes, `src/components/MessageOutboxRuntime.js`, `src/app/api/dev/assign/route.js`, `src/app/dev/login/page.js`.
+
+**Removed exports and every caller**
+
+| Removed | Callers to update |
+|---|---|
+| `getParticipantName` | `participant-admission.js`, `UserContext.js`; tests `participants`, `participant_admission` (mock), `useUser_realtime` (mock) |
+| `getParticipantEmail`, `getParticipantNames` | `RecipientSelector.js`, `page.js`; test `participants` |
+| `resetDatabase`, `resetAndReseedParticipants`, `APP_COLLECTIONS` (server) | `admin/reset/route.js`; tests `lib/firestore`, `admin_reset_enhanced`, `emulator_scripts_config`, integration `participant-admission`, `push-registration`, `firestore_participants`, `init`, `reset-fencing` (deleted) |
+| `getUserByEmail`, `getAllUsers`, `createUser`, `updateUser` | `dev/seed/route.js`; tests `lib/firestore`, integration `init`, `firestore_participants` |
+| `beginReset`, `assertResetOwner`, `completeReset`, `assertLifecycleActive` | `firestore.js`, `dev/inject-message/route.js`; test `lib/firestore` (mocks) |
+| `ensureAllParticipants(list)`, `ensureParticipantProfiles(list, {resetId})` → no-argument forms | `init/route.js`, `dev/seed/route.js`, `firestore.js`; tests `participant_admission`, `lib/firestore`, integration `participant-admission`, `firestore_participants` |
+| `useAdminReset` | `page.js`, `AdminPanel.js`, `RecipientSelector.js`; test `admin_ui` |
+| context `notice`; `AuthGuard` prop `notice`; `AdminPanel` prop `onResetComplete`; `Sidebar` prop `onReset`; `RecipientSelector` prop `onReset` | `page.js`, `AuthGuard.js`, `useUser.js`; tests `useUser_realtime`, `Sidebar`, `admin_ui` |
+
+### Server contracts
+
+**`src/lib/year-paths.js`**
+
+```js
+export const LEGACY_YEAR = 2025;
+export const YEAR_COLLECTIONS = ['users', 'messages', 'lastRead', 'typing', 'reactions'];
+export const GLOBAL_COLLECTIONS = ['authIdentities', 'participantIndex', 'pushTokens'];
+export function isValidYear(year)              // Number.isInteger && 2025 <= year <= 9999
+export function yearCollectionPath(year, name) // 2025 -> [name]; else ['years', String(year), name]; throws on invalid year or name
+export function yearDocPath(year, name, id)
+export function interpretLifecycle(data)       // -> { exists, valid, state:'active'|'closed'|'unavailable', year, epoch, closedYears, startedAt, closedAt } per the table
+export function lifecycleKey(value)            // value.valid === false -> 'invalid'; else `${year}:${state}:${epoch}`
+```
+
+**`src/lib/participants.js`** — keep `PARTICIPANTS` unchanged; add:
+
+```js
+export const YEAR_ROSTERS = {
+    2025: PARTICIPANTS,
+    2026: PARTICIPANTS.filter((participant) => participant.name !== 'Jana'),
+};
+export function getRoster(year)                // array, or null when not configured
+export function getRosterName(year, email)     // case-insensitive; null if absent
+export function getRosterEmail(year, name)
+export function getRosterNames(year)           // [] when not configured
+export function isKnownParticipantEmail(email) // on any roster
+export function getNextRosterYear(year)        // smallest configured year > year, or null
+```
+
+Remove the three legacy helpers. A later year is added by a reviewed edit plus deploy; Start refuses an unconfigured year.
+
+**`src/lib/participant-admission.js`** (Admin SDK). Add imports of `isAdmin` (`@/lib/config`), the roster helpers, and `LEGACY_YEAR`, `isValidYear`, `interpretLifecycle`, `yearCollectionPath`.
+
+- `userRef(db, year, id)` / `yearUsers(db, year)` use `db.collection(yearCollectionPath(year, 'users').join('/'))`.
+- `assertAdmissibleToken(decoded) → { uid, email }`: uid; canonical email without `/`; `isKnownParticipantEmail` else `ACCESS_DENIED`; verified email outside development. No Firestore read.
+- Internal `resolveLifecycle(snap)`: interpretation plus `createLifecycle` (true only for a missing document); `!valid` → `SERVICE_UNAVAILABLE`.
+- `resolveProfileInTransaction(tx, db, { year, state, email, name, epoch, indexSnap, oauthId, image })`:
+  - An index row is current only if `index.epoch === epoch` with a non-empty `userId`; a stale-epoch row is treated as absent.
+  - Current → read `userRef(db, year, userId)`; missing or email mismatch → `PROFILE_CONFLICT`.
+  - Otherwise scan `yearUsers(db, year)` by email: none and closed → `ACCESS_DENIED`; none and open → `created`; one canonical match → `linked`; else `PROFILE_CONFLICT`.
+- `applyProfileWrites`: lifecycle create writes `{epoch:1, state:'active', year:2025, closedYears:[], startedAt:null, closedAt:null, updatedAt}`; user create is `tx.create`; index write is `tx.set`.
+- `admitParticipant(decoded, { requireLegacyYear = false } = {}) → { user, created, epoch, year, state, closedYears }`. In the transaction: `resolveLifecycle`; `requireLegacyYear && year !== 2025` → `CLIENT_UPDATE_REQUIRED` before any write; roster check; then as today.
+- `resolveParticipant(decoded, { verifyIndex = false, requireLegacyYear = false } = {}) → { uid, email, user, epoch, year, state, closedYears }` with the same checks after its lifecycle read.
+- `runFencedTransaction(decoded, work, { allowClosed = false } = {})`. Order: unavailable → 503; roster check; closed and `!allowClosed` → `YEAR_CLOSED`; identity/profile validity → admit once and retry as today; `work(tx, { uid, email, epoch, year, state, user })`.
+- `ensureParticipantProfiles() → { year, created, linked, existing }`: one lifecycle read to fix `year` and roster (unavailable → 503; closed → `YEAR_CLOSED`; no roster → `ROSTER_NOT_CONFIGURED`); then one transaction per roster entry that re-reads the lifecycle (`year` changed → `YEAR_MISMATCH`; not active → `YEAR_CLOSED`).
+- `assertYearOpen(tx) → { epoch, year }`: missing or unavailable → 503; closed → `YEAR_CLOSED`.
+- `verifyAdminRequest(request) → decoded`: token; verified email outside development; `isAdmin` else `ADMIN_REQUIRED`.
+- `assertYearTransitionsEnabled()`: passes when `process.env.YEAR_TRANSITIONS_ENABLED === 'true'` or `NODE_ENV === 'development'`; else `TRANSITIONS_DISABLED`.
+- `closeYear({ year })`, `startNewYear({ fromYear, targetYear })` exactly per the tables. Start builds profiles `{ id: uuidv4(), name: toTitleCase(name), email, oauthId:null, image:null, recipientId:null, gifterId:null }` before the transaction. Neither takes hook parameters.
+- Remove the reset protocol functions and `assertLifecycleActive`.
+
+**`src/lib/firestore.js`** — reduced to:
+
+```js
+export async function assignUsersInTransaction(buildUpdates) // { year } = await assertYearOpen(tx); users at that year's path
+export async function ensureAllParticipants()                // ensureParticipantProfiles()
+```
+
+**`src/lib/push-server.js`** — `registerPushToken` and `unregisterPushToken` call `runFencedTransaction(decodedToken, work, { allowClosed: true })`. Nothing else changes.
+
+**Routes**
+
+- `admin/reset/route.js`: `POST` returns 410 `{ error: 'Reset has been retired. Use Close year and Start new year.', code: 'RESET_RETIRED' }` unconditionally; only `NextResponse` is imported.
+- `admin/year/close/route.js`, `admin/year/start/route.js`: `verifyAdminRequest` → `assertYearTransitionsEnabled` → parse JSON (failure → 400 `INVALID_YEAR`) → `isValidYear` checks → call. 200 `{ success:true, year, state, epoch, closedYears, changed }`; start adds `participants` (roster size when changed, else `null`). Other errors → 500 `{ error: 'The action did not complete. Check the current state and try again.', code: 'INTERNAL' }`, logging `error?.message` only.
+- `auth/bootstrap/route.js`: `yearAware = request.headers.get('x-secret-santa-client') === '2'`; `resolveParticipant(decoded, { verifyIndex: true, requireLegacyYear: !yearAware })`; respond `{ success, user, year, yearState: state, epoch, closedYears }`.
+- `init/route.js`: `ensureAllParticipants()`; drop the `PARTICIPANTS` import; add `year` to the JSON.
+- `dev/seed/route.js`: `ensureAllParticipants()`; remove the `PARTICIPANTS` import and the read-back block; return `{ success, message, ...result }`.
+- `dev/inject-message/route.js`: `{ year } = await assertYearOpen(tx)`; all refs through `yearCollectionPath`.
+- `messages/send/route.js`: `work(tx, { user: sender, year })`; `recipientRef` and `messageRef` built from `yearCollectionPath(year, …).join('/')`.
+
+### `firestore.rules` (full replacement)
+
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function identityPath() { return /databases/$(database)/documents/authIdentities/$(request.auth.uid); }
     function lifecyclePath() { return /databases/$(database)/documents/system/lifecycle; }
-    function userPath(userId) { return /databases/$(database)/documents/users/$(userId); }
-    function isParticipant() {
+    function lifecycle() { return get(lifecyclePath()).data; }
+    // Absent `year` = the legacy 2025 exchange in the root collections. Absent closedYears = none.
+    function lifecycleYear() { return lifecycle().get('year', 2025); }
+    function lifecycleClosedYears() { return lifecycle().get('closedYears', []); }
+    // Rules subset of the server validation: scalar fields, list type and state/membership
+    // consistency. List element types and ordering are validated by the server only.
+    function lifecycleValid() {
+      return lifecycle().state in ['active', 'closed']
+        && lifecycle().epoch is int && lifecycle().epoch >= 1
+        && lifecycleYear() is int && lifecycleYear() >= 2025 && lifecycleYear() <= 9999
+        && lifecycleClosedYears() is list
+        && (lifecycle().state == 'closed') == (lifecycleYear() in lifecycleClosedYears())
+        && (lifecycleYear() == 2025 || lifecycleClosedYears().size() >= 1);
+    }
+    function isAdmitted() {
       return request.auth != null
         && exists(identityPath())
-        && get(lifecyclePath()).data.state == 'active'
-        && get(identityPath()).data.epoch == get(lifecyclePath()).data.epoch;
+        && lifecycleValid()
+        && get(identityPath()).data.epoch == lifecycle().epoch;
     }
+    // ys = year as a string: '2025' for the root collections, the {year} segment otherwise.
+    function isScopedYear(ys) { return ys.matches('^[0-9]{4}$') && int(ys) > 2025; }
+    function isCurrentYear(ys) { return isAdmitted() && int(ys) == lifecycleYear(); }
+    // Never a future year, never an unlisted past year.
+    function canReadYear(ys) {
+      return isAdmitted()
+        && int(ys) >= 2025 && int(ys) <= lifecycleYear()
+        && (int(ys) == lifecycleYear() || int(ys) in lifecycleClosedYears());
+    }
+    function canWriteYear(ys) { return isCurrentYear(ys) && lifecycle().state == 'active'; }
     function myUserId() { return get(identityPath()).data.userId; }
-    function authMatchesUser(userId) {
-      return isParticipant() && myUserId() == userId && exists(userPath(userId));
+    function userExists(ys, userId) {
+      return (ys == '2025' && exists(/databases/$(database)/documents/users/$(userId)))
+        || (ys != '2025' && exists(/databases/$(database)/documents/years/$(ys)/users/$(userId)));
+    }
+    function messageExists(ys, messageId) {
+      return (ys == '2025' && exists(/databases/$(database)/documents/messages/$(messageId)))
+        || (ys != '2025' && exists(/databases/$(database)/documents/years/$(ys)/messages/$(messageId)));
+    }
+    function userAfterHasGifter(ys, targetId, gifterId) {
+      return (ys == '2025' && getAfter(/databases/$(database)/documents/users/$(targetId)).data.gifterId == gifterId)
+        || (ys != '2025' && getAfter(/databases/$(database)/documents/years/$(ys)/users/$(targetId)).data.gifterId == gifterId);
+    }
+    function userAfterHasRecipient(ys, targetId, recipientId) {
+      return (ys == '2025' && getAfter(/databases/$(database)/documents/users/$(targetId)).data.recipientId == recipientId)
+        || (ys != '2025' && getAfter(/databases/$(database)/documents/years/$(ys)/users/$(targetId)).data.recipientId == recipientId);
+    }
+    function authMatchesUser(ys, userId) {
+      return canWriteYear(ys) && myUserId() == userId && userExists(ys, userId);
     }
     function onlyChanges(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
-    function isAllowedSelfRecipientSelection(userId) {
-      return authMatchesUser(userId) && onlyChanges(['recipientId'])
+    function isAllowedSelfRecipientSelection(ys, userId) {
+      return authMatchesUser(ys, userId) && onlyChanges(['recipientId'])
         && resource.data.recipientId == null
         && request.resource.data.recipientId is string
         && request.resource.data.recipientId != userId
-        && getAfter(userPath(request.resource.data.recipientId)).data.gifterId == userId;
+        && userAfterHasGifter(ys, request.resource.data.recipientId, userId);
     }
-    function isAllowedRecipientClaimUpdate(recipientUserId) {
+    function isAllowedRecipientClaimUpdate(ys, recipientUserId) {
       return onlyChanges(['gifterId'])
         && resource.data.gifterId == null
         && request.resource.data.gifterId is string
         && request.resource.data.gifterId != recipientUserId
-        && authMatchesUser(request.resource.data.gifterId)
-        && getAfter(userPath(request.resource.data.gifterId)).data.recipientId == recipientUserId;
+        && authMatchesUser(ys, request.resource.data.gifterId)
+        && userAfterHasRecipient(ys, request.resource.data.gifterId, recipientUserId);
     }
-    match /users/{userId} {
-      allow read: if isParticipant();
-      allow create, delete: if false;
-      allow update: if isAllowedSelfRecipientSelection(userId) || isAllowedRecipientClaimUpdate(userId);
+    function canReadLastRead(ys, lastReadId) {
+      return isCurrentYear(ys)
+        && (lastReadId.matches('^' + myUserId() + '_.+$')
+          || (lastReadId.matches('^[^_]+_.+$') && !lastReadId.matches('^[^_]+_publicFeed_.*$')));
     }
-    match /messages/{messageId} {
-      allow read: if isParticipant();
-      allow create, update, delete: if false;
-    }
-    function ownsLastReadId(lastReadId) {
-      return isParticipant() && lastReadId.matches('^' + myUserId() + '_.+$');
-    }
-    function isAllowedLastReadWrite(lastReadId) {
+    function isAllowedLastReadWrite(ys, lastReadId) {
       return request.resource.data.keys().hasOnly(['userId','conversationId','lastReadAt'])
         && request.resource.data.userId is string
         && request.resource.data.conversationId is string
         && request.resource.data.lastReadAt is timestamp
         && lastReadId == request.resource.data.userId + '_' + request.resource.data.conversationId
         && request.resource.data.lastReadAt <= request.time + duration.value(5, 'm')
-        && authMatchesUser(request.resource.data.userId);
+        && authMatchesUser(ys, request.resource.data.userId);
     }
     function isMonotonicLastRead() {
       return !(resource.data.lastReadAt is timestamp)
         || request.resource.data.lastReadAt >= resource.data.lastReadAt;
     }
+    function isAllowedTypingWrite(ys, typingId) {
+      return request.resource.data.keys().hasOnly(['userId', 'conversationId', 'typingAt'])
+        && request.resource.data.userId is string
+        && request.resource.data.conversationId is string
+        && request.resource.data.typingAt is string
+        && authMatchesUser(ys, request.resource.data.userId)
+        && typingId == (request.resource.data.conversationId + '_' + request.resource.data.userId);
+    }
+    // resource == null: deleting a nonexistent doc is a no-op.
+    function isAllowedTypingDelete(ys) {
+      return canWriteYear(ys)
+        && (resource == null || (resource.data.userId is string && authMatchesUser(ys, resource.data.userId)));
+    }
+    function isAllowedReactionCreate(ys, reactionId) {
+      return request.resource.data.keys().hasOnly(['messageId', 'userId', 'emoji', 'createdAt'])
+        && request.resource.data.messageId is string
+        && request.resource.data.userId is string
+        && request.resource.data.emoji is string
+        && request.resource.data.emoji.size() <= 4
+        && request.resource.data.createdAt is string
+        && authMatchesUser(ys, request.resource.data.userId)
+        && reactionId == (request.resource.data.messageId + '_' + request.resource.data.userId + '_' + request.resource.data.emoji)
+        && messageExists(ys, request.resource.data.messageId);
+    }
+    function isAllowedReactionDelete(ys) {
+      return resource.data.userId is string && authMatchesUser(ys, resource.data.userId);
+    }
+
+    // Season metadata only (no participant data); server-written. Readable by any account that
+    // has ever been admitted, so a tab whose admission just went stale still learns of a Start.
+    match /system/lifecycle {
+      allow get: if request.auth != null && exists(identityPath());
+      allow list, write: if false;
+    }
+
+    // Root collections = the legacy 2025 exchange.
+    match /users/{userId} {
+      allow read: if canReadYear('2025');
+      allow create, delete: if false;
+      allow update: if isAllowedSelfRecipientSelection('2025', userId) || isAllowedRecipientClaimUpdate('2025', userId);
+    }
+    match /messages/{messageId} {
+      allow read: if canReadYear('2025');
+      allow create, update, delete: if false;
+    }
+    match /reactions/{reactionId} {
+      allow read: if canReadYear('2025');
+      allow create: if isAllowedReactionCreate('2025', reactionId);
+      allow delete: if isAllowedReactionDelete('2025');
+      allow update: if false;
+    }
     match /lastRead/{lastReadId} {
-      allow read: if ownsLastReadId(lastReadId)
-        || (isParticipant() && lastReadId.matches('^[^_]+_.+$')
-            && !lastReadId.matches('^[^_]+_publicFeed_.*$'));
-      allow create: if isAllowedLastReadWrite(lastReadId);
-      allow update: if isAllowedLastReadWrite(lastReadId) && isMonotonicLastRead();
+      allow read: if canReadLastRead('2025', lastReadId);
+      allow create: if isAllowedLastReadWrite('2025', lastReadId);
+      allow update: if isAllowedLastReadWrite('2025', lastReadId) && isMonotonicLastRead();
       allow delete: if false;
     }
-    // typing and reactions: bodies unchanged except every isSignedIn() becomes isParticipant()
+    match /typing/{typingId} {
+      allow read: if isCurrentYear('2025');
+      allow create, update: if isAllowedTypingWrite('2025', typingId);
+      allow delete: if isAllowedTypingDelete('2025');
+    }
+
+    // 2026 onwards: one namespace per year.
+    match /years/{year} {
+      match /users/{userId} {
+        allow read: if isScopedYear(year) && canReadYear(year);
+        allow create, delete: if false;
+        allow update: if isScopedYear(year)
+          && (isAllowedSelfRecipientSelection(year, userId) || isAllowedRecipientClaimUpdate(year, userId));
+      }
+      match /messages/{messageId} {
+        allow read: if isScopedYear(year) && canReadYear(year);
+        allow create, update, delete: if false;
+      }
+      match /reactions/{reactionId} {
+        allow read: if isScopedYear(year) && canReadYear(year);
+        allow create: if isScopedYear(year) && isAllowedReactionCreate(year, reactionId);
+        allow delete: if isScopedYear(year) && isAllowedReactionDelete(year);
+        allow update: if false;
+      }
+      match /lastRead/{lastReadId} {
+        allow read: if isScopedYear(year) && canReadLastRead(year, lastReadId);
+        allow create: if isScopedYear(year) && isAllowedLastReadWrite(year, lastReadId);
+        allow update: if isScopedYear(year) && isAllowedLastReadWrite(year, lastReadId) && isMonotonicLastRead();
+        allow delete: if false;
+      }
+      match /typing/{typingId} {
+        allow read: if isScopedYear(year) && isCurrentYear(year);
+        allow create, update: if isScopedYear(year) && isAllowedTypingWrite(year, typingId);
+        allow delete: if isScopedYear(year) && isAllowedTypingDelete(year);
+      }
+    }
+
+    // Deny any other collections by default.
     match /{document=**} { allow read, write: if false; }
   }
 }
 ```
-Own-marker reads are path-based (a missing own `publicFeed_*` doc is readable; another user's stays denied). `RecipientSelector`'s existing transaction satisfies these rules unchanged.
 
-## Phase 2 — Client auth/profile owner (#6 #7 #8, #17 reset)
+### Client contracts
 
-### `src/context/UserContext.js` (client)
+**`src/lib/year-client.js` — writable scope**
+
 ```js
-export function UserProvider({ children })
-export function useUserContext(): { user, authUid, authEmail, loading, error, notice, refreshUser }
+export function setWritableScope(next)        // next: { key, year } | null. Same key keeps the existing object; otherwise stores Object.freeze({ key, year }).
+export function getWritableScope()            // { key, year } | null; identity is stable per key
+export function scopedDocRef(scope, name, id) // doc(firestore, ...yearDocPath(scope.year, name, id))
+export function yearCollectionRef(year, name)
+export function yearDocRef(year, name, id)
 ```
-Three separate lifecycles:
-- **Auth generation** — changes only on uid change, sign-out, unmount. On change, synchronously in the auth callback: clear retry timers; call `cancelOutboxDrains()`, `cancelPushOperations()`, `resetLastReadState()`; set `{ status: 'loading'|'signed-out', user: null, authUid: null, error: null, notice: null }`. Same-uid callbacks on a ready state are ignored.
-- **Request sequence** — incremented per bootstrap request; a response or retry applies only if the auth generation is unchanged and its sequence is latest.
-- **Profile subscription** — effect keyed on `[authUid, user?.id]` with an effect-local `active` flag; a refresh returning the same profile id does not touch it.
 
-Bootstrap outcomes (from `loading` / from `ready` on refresh):
-- 200 → `ready` / replace `user`.
-- 401 → one retry with `getIdToken(true)`.
-- 503 `RESET_IN_PROGRESS` → `loading`, `notice: 'RESET_IN_PROGRESS'`, retry 1s, 2s, 4s, then every 8s (refresh drops to `loading` with `user: null` first).
-- Network / other 5xx → same delays, 5 attempts, then `error { code: 'BOOTSTRAP_FAILED' }` / keep `ready`, log only.
-- 403 / 409 → `error { code, message }`, `user: null`, `authUid: null`.
-- Non-participant email → `ACCESS_DENIED` (existing message), no request. `refreshUser()` from `error` sets `loading` and bootstraps.
+Rule for every direct writer: **capture the scope object when the action is requested, build refs only from the captured scope, and act only while `getWritableScope() === capturedScope`.** No writer resolves "the current year" at execution time.
 
-Profile listener: `onSnapshot(doc(firestore,'users',id), { includeMetadataChanges: true }, next, error)`; every branch checks `active`.
-- Exists → update `user` only when `recipientId` or `gifterId` changed.
-- Missing with `metadata.fromCache === true` → ignored.
-- Missing from server, or `permission-denied` → profile loss: run the three cancels, set `loading` with `user: null`, bootstrap.
-- Other errors → `console.error('[useUser] Error listening to user document:', error)`.
+**`src/context/UserContext.js`**
 
-The `window.__e2eUserData__` effect and the uninitialized-client microtask path are kept; no client `users` query or `setDoc` remains.
+*Publication contract*
 
-### Other Phase 2 files
-- `src/hooks/useUser.js`: `export function useUser() { return useUserContext(); }`.
-- `ClientProviders.js`: `<UserProvider><RealtimeMessagesProvider>…</RealtimeMessagesProvider></UserProvider>`.
-- `RealtimeMessagesContext.js`:
-  - `userId = user?.id ?? null`; messages effect deps `[userId, authLoading, messagesRetry]`, reactions `[userId, authLoading, reactionsRetry]`.
-  - Each effect owns `cancelled` and `retryTimer` (cleanup sets and clears); the `permission-denied` 2s retry is scheduled only when not cancelled.
-- `AuthGuard.js`:
-  - Props `notice`, `authEmail`, `onRetry`.
-  - Loading branch with `notice === 'RESET_IN_PROGRESS'` shows "A reset is in progress. If this persists, an admin can run Reset again." and `<AdminPanel userEmail={authEmail} onResetComplete={onRetry} />`.
-  - After ACCESS_DENIED, a generic error card ("Try again", "Sign out") for any other `authError`; sign-outs use `signOutCurrentUser`.
-- `src/lib/sign-out.js`: `export async function signOutCurrentUser(): Promise<void>`:
-  1. `await Promise.race([Promise.allSettled([flushPendingWrites(), releasePushRegistration({ timeoutMs: 3000 })]), sleep(3000)])`;
-  2. `cancelOutboxDrains(); cancelPushOperations(); resetLastReadState();`
-  3. `await signOut(clientAuth)`.
-- `src/hooks/useAdminReset.js`: `export function useAdminReset({ onComplete } = {}): () => Promise<void>` — confirm text, token, POST, toasts (server `error` text on failure), `onComplete()`, moved from `AdminPanel.handleReset`.
-- `AdminPanel.js` (D1 = A): props `{ userEmail, onResetComplete }`; compact button only, wired to the hook.
-- `RecipientSelector.js`: uses `useAdminReset({ onComplete: onReset })` and `signOutCurrentUser`.
-- `page.js`:
-  - Reads `authUid`, `authEmail`, `notice`; `Sidebar onReset={useAdminReset({ onComplete: refreshUser })}`; sign-outs via the helper.
-  - Passes `notice`, `authEmail`, `onRetry={refreshUser}` to `AuthGuard`.
-  - Passes `authUid` to `MessageOutboxRuntime`, `PushNotificationsRuntime`, `ChatTabs`, both `PushNotificationsControl`s.
-  - Passes memoized `buildViewerAssignmentMap(currentUser)` as the fifth `filterMessages` argument.
+1. `stateRef.current` is the authoritative session state. React state is a mirror.
+2. `applyState(updater)` is synchronous and uses no React functional updater:
+   ```js
+   const prev = stateRef.current;
+   const next = typeof updater === 'function' ? updater(prev) : updater;   // pure; called exactly once
+   if (next === prev) return;
+   stateRef.current = next;
+   setWritableScope(scopeFor(next));
+   if (mountedRef.current) setState(next);
+   ```
+3. `scopeFor(state)` is `` { key: `${authUid}|${user.id}|${season.year}|${season.epoch}`, year: season.year } `` when `status === 'ready'` and `season.state === 'active'`; otherwise `null`.
+4. `cancelSessionWork()` runs, in order: `setWritableScope(null)`, `cancelOutboxDrains()`, `cancelPushOperations()`, `resetLastReadState()`, `resetTypingState()`, `clearYearArchiveCache()`.
+5. Every loss path calls `cancelSessionWork()` before publishing: the auth callback on uid change or sign-out, `handleProfileLoss`, a lifecycle reconciliation, and a fenced-out bootstrap response.
+6. The auth effect's first statement is `setWritableScope(scopeFor(stateRef.current))` (restores the scope after a StrictMode remount). Its cleanup calls `setWritableScope(null)`.
 
-## Phase 3 — Routing and atomic send (#9 #14 #15)
+*Lifecycle subscription, fence and reconciliation.* Four refs:
 
-### `src/lib/message-utils.js` (pure) — additions
+- `lifecycleSubRef = { id, unsubscribe, ended, attachedAtSeq }` — `id` is the subscription generation; `ended` is set by any listener error (the listener is dead after an error, permission-denied included); `attachedAtSeq` is the admission sequence at attach time.
+- `admissionSeqRef` — number of accepted 2xx bootstrap responses in this auth session. Each one proves the caller's identity record now exists.
+- `confirmedKeyRef` — key of the latest **server-confirmed** lifecycle snapshot in this auth session; `'invalid'` for an unavailable document; `null` when none has arrived or the document does not exist.
+- `mismatchCountRef` — consecutive fenced-out bootstrap responses.
+
+`unsubscribeLifecycle()` increments `id`, calls the stored unsubscribe and clears it.
+
+`subscribeLifecycle()` calls `unsubscribeLifecycle()`, captures `id`, sets `ended = false` and `attachedAtSeq = admissionSeqRef.current`, and attaches `onSnapshot(doc(firestore, 'system', 'lifecycle'), { includeMetadataChanges: true }, next, error)`:
+
+- `next(snapshot)`:
+  1. `id !== lifecycleSubRef.current.id` → return (captured-generation guard).
+  2. `snapshot.metadata.fromCache !== false` → return (cached data never moves the fence).
+  3. `liveKey = snapshot.exists() ? lifecycleKey(interpretLifecycle(snapshot.data())) : null`.
+  4. `liveKey === confirmedKeyRef.current` → return.
+  5. `confirmedKeyRef.current = liveKey; mismatchCountRef.current = 0;` The fence follows the server in either direction, so a real environment reset moves it too.
+  6. If `stateRef.current.status === 'ready'` and the published season's key differs from `liveKey` → `handleProfileLoss()`. In any other status nothing more happens; the next bootstrap response is fenced.
+- `error(err)`:
+  1. `id !== lifecycleSubRef.current.id` → return.
+  2. `lifecycleSubRef.current.ended = true;` log the error.
+  3. `maybeReattachLifecycle()`.
+
+**Bounded reattach** — one rule, evaluated from both sides:
+
 ```js
-export function buildAssignmentMap(users): Map<string,string>          // santaId → recipientId
-export function buildViewerAssignmentMap(user): Map<string,string>     // { id → recipientId, gifterId → id }
-export function resolveMessageConversation(message, assignments): {
-  conversationId, santaId, recipientId, isSantaMsg, isAmbiguous,
-  source: 'explicit'|'legacy-flag'|'assignment'|'canonical'|'unroutable' }
-export function resolveAuthorizedConversationId(sender, recipient, requestedConversationId):
-  { conversationId } | { error: 'NOT_ASSIGNED'|'INVALID_CONVERSATION'|'AMBIGUOUS_CONVERSATION' }
-export function matchesStoredMessage(existing, request): boolean
-export function getLatestMessageTimestamp(messages): string|null
+function maybeReattachLifecycle() {
+    const sub = lifecycleSubRef.current;
+    if (firebaseUserRef.current && sub.ended && admissionSeqRef.current > sub.attachedAtSeq) {
+        subscribeLifecycle();
+    }
+}
 ```
-- **Resolver precedence:**
-  1. Missing/equal endpoints → `unroutable` (`'legacy_' + (id ?? 'unknown')`, ambiguous).
-  2. Parseable `conversationId` whose parties equal the endpoints as a set → `explicit`; parseable but mismatched → `unroutable`.
-  3. Boolean `isSantaMsg` → `legacy-flag`.
-  4. Exactly one of `assignments.get(fromId) === toId` / `assignments.get(toId) === fromId` → `assignment`.
-  5. Both or neither → `canonical` (smaller id is Santa; ambiguous; `isSantaMsg: false`).
 
-  Absent or unparseable `conversationId` falls to 3–5.
-- `filterMessages(messages, currentUserId, otherUserId, targetConversationId, assignments = null)`: endpoint check, resolver match, time sort; `null` keeps today's behaviour.
-- **`resolveAuthorizedConversationId`:** candidates `santa_S_recipient_R` when `sender.recipientId === recipient.id && recipient.gifterId === sender.id`, and `santa_R_recipient_S` when `sender.gifterId === recipient.id && recipient.recipientId === sender.id`. None → `NOT_ASSIGNED`; requested not a candidate → `INVALID_CONVERSATION`; none requested → the single candidate, or `AMBIGUOUS_CONVERSATION` for two.
-- **`matchesStoredMessage`** (single matcher; `request = { id, fromId, toId, content, clientMessageId, clientCreatedAt, requestedConversationId }`): `id`, `fromId`, `toId`, `content` equal; `clientMessageId`, `clientCreatedAt` equal after null-normalizing; `requestedConversationId` null or equal to `existing.conversationId`.
+It is called from the listener's `error` callback (above) and from the 2xx bootstrap branch (below). Consequences:
 
-### `src/app/api/messages/send/route.js` (Admin)
-Body `{ toId, content, conversationId?, clientMessageId?, clientCreatedAt?, senderUserId? }`.
-1. Service check (503); `verifyRequestToken`; existing shape validation.
-2. `runFencedTransaction(decoded, work)` with `work(tx, { user: sender })`:
-   1. `tx.getAll(recipientRef, messageRef)` (message id = `clientMessageId` or an outside-generated `uuidv4()`);
-   2. `senderUserId` present and ≠ `sender.id` → 403 `SENDER_MISMATCH`;
-   3. stored message exists → matcher true → `{ kind: 'replayed', message }`, false → 409;
-   4. recipient missing → 400;
-   5. `resolveAuthorizedConversationId` error → 400 `{ error: 'Invalid conversation for this recipient', code }`;
-   6. `tx.create(messageRef, { id, fromId, toId, content, timestamp, conversationId, clientMessageId?, clientCreatedAt? })` → `{ kind: 'created', message }`.
-3. The existing three-attempt transient retry wraps the transaction; typed route errors and `AdmissionError`s are not retried.
-4. Push is dispatched after the transaction, only for `created`.
+- **Error first, then success:** the error sets `ended` with no newer admission, so nothing happens; the 2xx increments the sequence and reattaches.
+- **Success first, then error:** the 2xx finds `ended` false and does nothing; the late error finds a newer admission than the one it was attached at, and reattaches.
+- **Repeated denial:** the reattached listener records the current sequence. If it ends too, the sequence is not newer, so it stays stopped and logged until a genuinely later 2xx bootstrap.
+- At most one reattach per accepted 2xx. This path never issues a bootstrap request and never retries on a timer.
 
-`writeMessageWithIdempotency` and `isImmutableMessageMatch` are removed. `senderUserId` is optional for old clients; the new outbox always sends it.
+Subscription lifetime (the listener lives for the whole signed-in auth session, not only while ready):
 
-### Paths affected by denying direct message creates
-- Client: none.
-- `api/dev/inject-message`: one transaction with `assertLifecycleActive(tx)` and both user docs; requires `resolveAuthorizedConversationId(from, to, 'santa_' + fromId + '_recipient_' + toId)` (else 400); stores schema fields only (`displayName` accepted, not stored).
-- `scripts/test_message_routing.js`: verifies the same reciprocal assignment before writing; exits 1 otherwise.
-- `e2e/unread-badge.spec.ts` injects from the user's `gifterId` (valid).
-- `firestore-rules-reactions.test.js` fixture `isSantaMsg` becomes `true`.
-- Seed/init never write messages.
+- auth callback, uid change or sign-out: `unsubscribeLifecycle()`, `confirmedKeyRef.current = null`, `mismatchCountRef.current = 0`, `admissionSeqRef.current = 0`; then `subscribeLifecycle()` if a user is present;
+- auth effect mount with `firebaseUserRef.current` already set (StrictMode remount): `subscribeLifecycle()`;
+- auth effect cleanup: `unsubscribeLifecycle()`.
 
-### Unread and feed
-- `useRealtimeMessages.js`: `useRealtimeUnreadCounts` counts a message when `toId === userId`, `fromId` is the partner, the resolver (viewer map) yields that tab's conversation, and its timestamp is after the cached marker. The prime-fetch effect is replaced by `subscribeToLastRead` per non-null own conversation (#13); the event-bus subscription stays.
-- `PublicFeed.js` (routing): local legacy helpers removed; uses `buildAssignmentMap(allUsers)` + the resolver.
+*Bootstrap 2xx branch* — after the existing latest-request check and after validating the response fields and building `season`:
 
-## Phase 4 — Outbox (#2 #3)
-
-### `src/lib/message-outbox.js` (client)
 ```js
-export const MESSAGE_OUTBOX_STORAGE_KEY = 'secret-santa-message-outbox-v1';     // read-only import source
-export const OUTBOX_ITEM_PREFIX  = 'secret-santa-message-outbox-v2:item:';
-export const OUTBOX_STATE_PREFIX = 'secret-santa-message-outbox-v2:state:';
-export const OUTBOX_DONE_PREFIX  = 'secret-santa-message-outbox-v2:done:';
-export function subscribeOutbox(callback): () => void
-export function enqueueMessage({ ownerUid, fromUserId, toId, conversationId = null, content }): item   // sync
-export function retryOutboxMessage({ fromUserId, clientMessageId }): boolean                          // sync
-export function getConversationOutboxMessages({ fromUserId, conversationId }): item[]                 // sync
-export function clearDeliveredOrExpired({ fromUserId = null } = {}): number                           // sync
-export async function drainOutboxForUser({ ownerUid, fromUserId, fetchImpl = fetch } = {}): Promise<{ delivered, retried, failed, skipped }>
-export function cancelOutboxDrains(): void
+admissionSeqRef.current += 1;
+maybeReattachLifecycle();
+
+const confirmed = confirmedKeyRef.current;
+if (confirmed !== null && lifecycleKey(season) !== confirmed) {
+    cancelSessionWork();                                   // scope is null from here on
+    mismatchCountRef.current += 1;
+    if (mismatchCountRef.current >= 3) {
+        mismatchCountRef.current = 0;
+        applyState((prev) => ({ ...prev, status: 'error', user: null, authUid: null, season: null,
+            error: { code: 'LIFECYCLE_MISMATCH', message: 'The exchange changed while loading. Please try again.' } }));
+        return;
+    }
+    applyState((prev) => ({ ...prev, status: 'loading', user: null, authUid: null, season: null, error: null }));
+    scheduleRetry(generation, sequence, 'initial', mismatchCountRef.current - 1);   // 1 s, then 2 s
+    return;
+}
+mismatchCountRef.current = 0;
+// publish ready with user, authUid and season
 ```
-- **Keys** (every operation is a single-key `setItem`/`removeItem`):
-  - `item:{id}` = `{ clientMessageId, ownerUid|null, fromUserId, toId, conversationId, content, createdAt }` — written once, never rewritten.
-  - `done:{id}` = ISO `deliveredAt` — written on any 2xx.
-  - `state:{id}` = `{ attemptCount, nextAttemptAt, status: 'pending'|'failed', lastError }` — last writer wins; absent ≡ pending, zero attempts.
-- **Live** = payload exists, no tombstone, not expired. **Delivered:** write the tombstone, then remove payload and state. A late failure can only write `state:{id}`, which is ignored without a live payload.
-- `enqueueMessage` returns after its `setItem`; throws on quota/validation error.
-- **v1 import** (start of every read, enqueue, drain), in array order. Skip an entry when:
-  - it lacks `clientMessageId`, `fromUserId`, `toId`, `content` or a valid `createdAt`;
-  - it is expired or `status === 'delivered'`;
-  - a tombstone exists;
-  - a payload already exists (never overwritten, even if content differs; duplicate ids inside v1 are skipped the same way).
 
-  Otherwise write the payload with `ownerUid: null` and the state key if absent. The v1 key is never written or removed; a skipped count may be logged, never content.
-- **Cutover boundary:** old-code tabs still overwrite the shared v1 array (audit #2 itself). The fix is in effect once every open tab has reloaded; v1 is preserved only for import.
-- **GC** (`clearDeliveredOrExpired`): removes payload+state for tombstoned/expired items matching the filter (count returned); state keys with no payload; tombstones older than seven days with no payload.
-- **Eligibility:** `item.fromUserId === fromUserId && (item.ownerUid === ownerUid || item.ownerUid === null)`; legacy items are never re-stamped.
-- **`drainOutboxForUser`:**
-  - Returns zeros unless `ownerUid`, `fromUserId`, and `clientAuth.currentUser?.uid === ownerUid`.
-  - Captures `authUser` and `drainGeneration`; tokens only from `authUser.getIdToken(force)`.
-  - `isCurrent()` (generation unchanged and uid matches) is checked before each item, after each token await, after each fetch.
-  - A 2xx marks delivered regardless of identity; other outcomes write state only when current, else the loop stops.
-  - Body adds `senderUserId: item.fromUserId`; 30s abort per fetch treated as a network error; the 401 path refreshes once on the captured user.
-  - A call during an active drain sets one follow-up pass and returns the active promise.
-  - No cross-tab lock (the server commits duplicates once).
-- Subscribers also fire on `storage` events for the v1 key and the three prefixes.
+Resulting guarantees:
 
-### Outbox consumers
-- `MessageOutboxRuntime.js`: props `{ currentUser, authUid }`; no-op without both; drains `{ ownerUid: authUid, fromUserId }`; deps `[currentUser?.id, authUid]`; cleanup `cancelOutboxDrains()`.
-- `ChatTabs.js`: prop `authUid` to both chats; `key={'recipient:' + recipientConversationId}` / `key={'santa:' + santaConversationId}` on `Chat` (#16); `key={currentUser?.id}` on `PublicFeed`.
-- `Chat.js`: prop `authUid`; `enqueueMessage({ ownerUid: authUid, … })`; both drain calls pass `ownerUid`.
+- A ready, writable state is published only when the response equals the latest server-confirmed lifecycle, or when nothing has been confirmed yet. In the second case the first confirmed snapshot re-checks it through step 6.
+- After a server-confirmed Close or Start the session is either ready with exactly that season, or loading or in error with the scope `null`. An active composer cannot survive a confirmed Close.
+- Healthy case: one re-bootstrap. If the response is ahead of a lagging listener, the listener catches up while the 1 s retry waits, and the retry matches.
+- Persistent disagreement: exactly three bootstrap requests, then the `LIFECYCLE_MISMATCH` error card with **Try again**, which starts one new bounded cycle. There is no automatic loop.
 
-## Phase 5 — Read boundaries and feed (#12 #13 #18 #19)
+*Other changes*
 
-### `src/lib/lastReadClient.js` (client: `firestore`, `clientAuth`, `Timestamp`)
+- Imports: `isKnownParticipantEmail` replaces `getParticipantName`; add `interpretLifecycle`, `lifecycleKey`, `setWritableScope`, `yearDocRef`, `resetTypingState`, `clearYearArchiveCache`.
+- State gains `season: null | { year, state, epoch, closedYears }`; `notice` is removed. Every transition that sets `user: null` sets `season: null`.
+- Bootstrap sends `'X-Secret-Santa-Client': '2'`. A 2xx also needs an integer `data.year`, an integer `data.epoch` and `yearState` of `active`/`closed`; otherwise it is a transient failure and does not count as an admission. The 503 reset-notice branch is removed.
+- Profile subscription uses `yearDocRef(season.year, 'users', userId)`, keyed on `[authUid, userId, season.year]`.
+- Context value: `{ user, authUid, authEmail, season, loading, error, refreshUser }`.
+
+**`src/lib/lastReadClient.js`**
+
+- **Single liveness guard**, used by every result path:
+  ```js
+  function isTokenLive(token) {
+      if (token.generation !== stateGeneration) return false;
+      if (getWritableScope() !== token.scope) return false;
+      const entry = pending.get(token.key);
+      return !!entry && entry.entryId === token.entryId && entry.inFlight === true;
+  }
+  ```
+- `settle(token, outcome)` begins with `if (!isTokenLive(token)) return undefined;`, replacing its two current checks. A result that is not live changes nothing: no cache, `remoteSeen` or `pending` mutation, no timer, no log.
+- `handleRejection(token, error)` keeps `isTokenLive` as its first statement, before any logging. The confirmation read is `getDoc(scopedDocRef(token.scope, 'lastRead', token.key))`; it is reached only while the token's scope is still current, and the existing post-await and catch-path `isTokenLive` checks stay.
+- `updateLastReadTimestamp`: capture `scope = getWritableScope()`; no scope → `false` before touching the cache. A new entry stores `scope`. An existing entry whose scope differs is deleted and replaced.
+- `startWrite(entry)`: `getWritableScope() !== entry.scope` → delete the entry and return `null`. The token stores `scope: entry.scope`. The write goes to `scopedDocRef(entry.scope, 'lastRead', entry.key)`.
+- `flushPendingWrites`: an entry whose scope is not current is deleted, neither started nor flagged.
+- `getLastReadTimestamp`: capture scope; none → cached value or epoch; after the await, discard if the generation or the scope changed.
+- `subscribeToLastRead`: capture scope; none → no-op unsubscribe; the callback ignores snapshots once the scope changed.
+- `resetLastReadState` is unchanged.
+
+**`src/lib/typing-client.js`**
+
+- `setTyping`: capture scope; none → return. The immediate write and the trailing-timer closure hold the captured scope; `writeTyping` returns without writing if `getWritableScope() !== scope`.
+- `clearTyping`: capture scope; always clear local timers; send `deleteDoc(scopedDocRef(scope, 'typing', key))` only when a scope exists.
+- New `export function resetTypingState()`: clears all trailing timers and both maps.
+
+**`src/lib/reactions-client.js`** — capture scope first; none → `throw new Error('Reactions are unavailable right now')`. After the `getDoc` await, re-check identity and throw the same error instead of writing if it changed.
+
+**`src/hooks/useTypingIndicator.js`** — capture scope in the effect; none → no subscription; ignore snapshots after a scope change.
+
+**`src/context/RealtimeMessagesContext.js`** — read `season`; `year = season?.year ?? null`, `yearOpen = season?.state === 'active'`. Both listener effects produce empty arrays and loading false unless `userId && yearOpen`; otherwise they listen on `yearCollectionRef(year, 'messages'|'reactions')` with the existing ordering. Dependencies: `[userId, authLoading, year, yearOpen, retry]`.
+
+**`src/hooks/useYearArchive.js`**
+
 ```js
-export async function getLastReadTimestamp(userId, conversationId): Promise<string>
-export function updateLastReadTimestamp(userId, conversationId, observedAt): boolean
-export function subscribeToLastRead(userId, conversationId, callback): () => void
-export async function flushPendingWrites(): Promise<void>
-export function resetLastReadState(): void
-export function getCachedTimestamp(userId, conversationId): string|undefined
-export function clearCache(): void
+export function clearYearArchiveCache()                    // archiveGeneration += 1; cache.clear()
+export function useYearArchive({ authUid, year, immutable })
+// -> { status: 'idle'|'loading'|'ready'|'error', data: { users, messages, reactions } | null, reload }
 ```
-Module state: `cache`, `remoteSeen`, `pending: Map<key, Entry>`, `stateGeneration`, `nextEntryId`. Entry: `{ entryId, userId, conversationId, observedAt, ownerUid, debounceTimer, retryTimer, inFlight, flushRequested, retries }`; `entryId` assigned at creation; `ownerUid = clientAuth?.currentUser?.uid ?? null` at creation. **One write per key is in flight at a time.**
-- **`updateLastReadTimestamp`**: `false`, no effect, unless `observedAt` is a valid ISO string greater than the cache. Otherwise set cache; create the entry or raise its `observedAt`; arm the 2s debounce only when not in flight and no retry timer; return `true`.
-- **`startWrite(entry)`** (never while `inFlight`): clear timers; if current uid (`?? null`) ≠ `ownerUid`, delete the entry and stop; capture `token = { key, entryId, generation, written: entry.observedAt }`; set `inFlight = true`, `flushRequested = false`; `setDoc(ref, { userId, conversationId, lastReadAt: Timestamp.fromDate(new Date(written)) })`.
-- **`settle(token, outcome)`** (only place a result is applied):
-  1. generation changed → return;
-  2. entry missing or `entryId` differs → return;
-  3. `inFlight = false`;
-  4. `ok`/`superseded`: `retries = 0`; if `entry.observedAt > written` → `startWrite` now when `flushRequested`, else arm debounce; else delete the entry;
-  5. `failed`: if `entry.observedAt > written` → reset `retries`, arm debounce; else `retries++`, arm `retryTimer` (5s, 15s, 60s); after the third failure delete with `console.error`.
-- **Outcomes:** resolve → `ok`. `permission-denied` → `superseded` when `remoteSeen ≥ written`; otherwise one confirmation `getDoc` (entry stays in flight) → `superseded` if remote ≥ `written`, else `failed`. Other rejection → `failed`.
-- **Offline:** the promise stays pending; later observations only raise `observedAt`.
-- **`flushPendingWrites`**: in-flight entries get `flushRequested = true`; others `startWrite` now; resolves when the writes it started settle (no shutdown guarantee).
-- **`resetLastReadState`**: `stateGeneration++`; clear timers, `pending`, `cache`, `remoteSeen`.
-- **`subscribeToLastRead` / `getLastReadTimestamp`**: max-merge remote into `remoteSeen` and cache, never backwards; callbacks ignored after unsubscribe or generation change; an entry is deleted only when not in flight and `observedAt ≤ remote`.
 
-### Consumers
-- `RealtimeMessagesContext.js`: `updateLastReadTimestamp(userId, otherUserId, conversationId = null, observedAt = null)` notifies subscribers only when the client returned `true` and returns that boolean. New effect keyed on `userId`: `flushPendingWrites()` on `visibilitychange`→hidden and `pagehide`; cleanup `resetLastReadState()`.
-- `Chat.js`: `latestObservedAt = getLatestMessageTimestamp(messages)`; the four mark-read call sites pass it as the fourth argument and skip when `null`; visibility gating unchanged.
-- `PublicFeed.js` (state):
-  - No `localStorage`; one mount effect removes legacy `publicFeedLastViewed` without reading it.
-  - `markers` holds hydrated threads only (unread 0 until hydrated).
-  - `markThreadRead(threadId)` sets the marker to the thread's latest message timestamp and calls `updateLastReadTimestamp(userId, 'publicFeed_' + threadId, boundary)`.
-  - It runs on thread click, and while a thread is open whenever its latest timestamp changes or the document becomes visible — only while visible (#19).
-  - Per-user isolation comes from the `key` remount (#18).
+- No `authUid` or invalid year → `idle`.
+- Cache key `` `${authUid}:${year}` ``. A hit → `ready` with no reads.
+- A miss → `loading`, capture `archiveGeneration`, then `Promise.all` of three `getDocsFromServer(yearCollectionRef(year, name))` calls for `users`, `messages`, `reactions`. No `orderBy`, no limit, no cache fallback, no listeners.
+- On completion, in this order:
+  1. effect no longer active → do nothing;
+  2. generation changed → `error`, nothing cached;
+  3. any snapshot with `metadata.fromCache === true` or `metadata.hasPendingWrites === true` → `error`, nothing cached, nothing displayed;
+  4. otherwise map rows to `{ ...data, id: data.id ?? doc.id }`, cache **only if `immutable`**, report `ready`.
+- Any rejection, offline included → `error`, nothing cached, no partial data. No automatic retry.
+- `reload()` deletes the key's cache entry and reruns all three reads.
+- Returned data is tagged with its key; a result for a different uid or year reads as `loading`.
 
-## Phase 6 — Push, worker, sound (#5 #10 #11 #20 #21, risk)
-- `firebase-client.js`: `firebaseConfig` gains `messagingSenderId` and `appId` by conditional spread when the env vars are set.
-- `worker/index.js`: remove the `onBackgroundMessage` import and callback; keep `getMessaging(app)` and `notificationclick`.
+**`src/lib/archive-threads.js`** — `buildArchiveView({ users, messages }) → { pairings, threads }`, `UNSORTED_THREAD_ID = '__unsorted__'`.
 
-### `src/lib/push-server.js` (Admin)
+- Names come from that year's `users`; `'Unknown'` for a missing profile.
+- Pairings from `buildAssignmentMap(users)`; one `pair` thread seeded per pairing, titled `` `🎁 ${recipientName}'s gift exchange · Santa: ${santaName}` ``.
+- Per message, by `resolveMessageConversation(msg, assignments)`:
+  - `unroutable` → the single `unsorted` thread (`Other messages`), label `` `${from} → ${to}` ``;
+  - ambiguous → thread `` `ambiguous:${getLegacyConversationId(fromId, toId)}` ``, title `` `${A} & ${B} · direction unknown` ``, label is the sender's name; never merged into a pair thread, never labelled Santa;
+  - otherwise → the thread for `resolved.conversationId`; label `` `🎅 ${santaName} (Santa)` `` when `isSantaMsg`, else the sender's name.
+- Messages ascending by parsed timestamp, invalid or missing last, ties by id. Threads with messages by latest descending, then empty pair threads by title, `unsorted` last.
+- Invariant: messages across all threads equal the input count.
+
+**`src/components/ArchiveViewer.js`** — props `{ authUid, years, initialYear, closedYears, onBack = null, banner = null }`. Imports only React, `useYearArchive`, `buildArchiveView`, `ReactionChips`.
+
+- Header row, always visible:
+  - when `onBack` is provided, a button with text `← Back to current year` and `aria-label="Back to current year"` that calls `onBack()`;
+  - heading `` `📚 ${year} Archive` ``;
+  - `<select aria-label="Archive year">` when `years.length > 1`.
+- Optional banner, then the note `Read-only. Pairings are shown because this exchange is over.`
+- **Pairings** rows `🎅 {santa} → 🎁 {recipient}`, or `No pairings were recorded.`
+- **Conversations** rows with title and last-message preview or `No messages`.
+- Thread view: a separate button `← Back` with `aria-label="Back to conversations"` that returns to the conversation list only. Each message shows label, plain-text content (`whiteSpace: 'pre-wrap'`), absolute date or `Unknown date`, and `<ReactionChips messageId={message.id} allReactions={data.reactions} currentUserId={null} onToggle={null} />`.
+- States: `Loading {year}…`; `Could not load {year}. Check your connection and try again.` with a `Try again` button calling `reload`.
+- Test ids: `archive-viewer`, `archive-pairing`, `archive-thread`, `archive-message`.
+- It calls `useYearArchive({ authUid, year, immutable: closedYears.includes(year) })`.
+
+**`src/hooks/useAdminYearActions.js`** — `useAdminYearActions({ onComplete }) → { closeYear(year), startYear(fromYear, targetYear, rosterNames), busy }`.
+
+- Close prompt (`window.prompt`): `` `Close the ${year} exchange?\n\nAll ${year} chats become read-only for everyone, and the ${year} pairings become visible to all participants in the archive. This cannot be reopened from the app.\n\nType ${year} to confirm.` ``
+- Start prompt: `` `Start the ${targetYear} exchange?\n\n${rosterNames.length} participants: ${rosterNames.join(', ')}.\nAnyone not on this list loses access to the app. Everyone picks a new recipient. ${fromYear} stays in Archives.\n\nType ${targetYear} to confirm.` ``
+- Proceed only when the trimmed input equals the year string. POST JSON `{ year }` or `{ fromYear, targetYear }` with `Authorization` and `Content-Type` headers.
+- Toasts: `` `${year} is now closed (read-only).` `` / `` `Failed to close ${year}: ${message}` `` / `` `${targetYear} has started.` `` / `` `Failed to start ${targetYear}: ${message}` ``.
+- Call `onComplete` on success; ignore re-entry while busy.
+
+**UI components**
+
+- `AdminPanel.js`: props `{ userEmail, season, onComplete }`; `null` unless admin and season set. Active → button `` `Close ${year}` `` (title `` `Close the ${year} exchange (read-only)` ``). Closed → `next = getNextRosterYear(year)`; button `` `Start ${next}` `` (title `` `Start the ${next} exchange` ``) calling `startYear(year, next, getRosterNames(next))`, or the muted text `No next-year roster`. Disabled while busy.
+- `AuthGuard.js`: remove the `notice` prop, its block and the `AdminPanel` import.
+- `RecipientSelector.js`: add props `year`, `adminControl = null`, `onBrowseArchive = null`; remove `onReset`, `useAdminReset`, `isAdmin` and the red button. Use `getRosterNames(year)`, `getRosterEmail(year, name)`, `yearCollectionRef(year, 'users')`, `yearDocRef(year, 'users', currentUser.id)`. Render `{adminControl}`, a `Browse past years` button when `onBrowseArchive` is set, and the line `` `${year} exchange` ``. The reciprocal transaction is otherwise unchanged.
+- `Sidebar.js`: remove `onReset` and the `isAdmin` import; add `adminControl = null` (rendered where the reset button was) and `showArchive = false` (item `📚 Archives`, `onTabChange('archive')`).
+- `TabNavigation.js`: add `showArchive = false` and a `📚 Archives` tab calling `onTabChange('archive')`.
+- `ChatTabs.js`: add props `archiveYears = []`, `closedYears = []`, and the branch:
+  ```jsx
+  if (activeTab === 'archive') {
+      return (
+          <ArchiveViewer
+              key="archive"
+              authUid={authUid}
+              years={archiveYears}
+              initialYear={archiveYears[0]}
+              closedYears={closedYears}
+          />
+      );
+  }
+  ```
+- `useUser.js`: doc comment only.
+
+**`src/app/page.js`**
+
+- Read `season` from `useUser()`. Derive `yearOpen = season?.state === 'active'`, `seasonYear = season?.year ?? null`, `closedYears = season?.closedYears ?? []`, `archiveYears = [...closedYears].sort((a, b) => b - a)`. Remove `useAdminReset`, `getParticipantNames`, `notice`. Add `const [showArchive, setShowArchive] = useState(false);`.
+- `const adminControl = <AdminPanel userEmail={currentUser?.email} season={season} onComplete={refreshUser} />;`
+- Render `MessageOutboxRuntime` only when `yearOpen`. The push and sound runtimes are unchanged.
+
+*Users fetch — scoped, guarded, derived.* The two state variables `allUsers` and `availableRecipients` are removed and replaced by one key-tagged result plus derivation:
+
 ```js
-export function isPushDispatchEnabled(): boolean
-export async function getPushRegistrationStatus({ decodedToken, token }): Promise<{ epoch, revision, mine, enabled }>
-export async function registerPushToken({ decodedToken, token, expectedEpoch, expectedRevision, enabled = true, userAgent = null }): Promise<{ epoch, revision, enabled }>
-export async function unregisterPushToken({ decodedToken, token, expectedEpoch, expectedRevision }): Promise<{ epoch, revision, changed }>
-export async function sendIncomingMessagePush({ toUserId, conversationId = null, fromUserId = null }): Promise<{ totalTokens, successCount, failureCount, cleanedTokenCount, skipped? }>
-export async function cleanupInvalidTokens({ epoch, sent, fcmResponse }): Promise<number>
-// sent: Array<{ token: string, revision: string|null }>, index-aligned with the tokens given to FCM
+const EMPTY_USERS = [];   // module scope
+
+const usersScopeKey = currentUser && yearOpen
+    ? `${authUid}|${currentUser.id}|${seasonYear}|${season.epoch}`
+    : null;
+const [usersResult, setUsersResult] = useState({ key: null, users: EMPTY_USERS });
+
+useEffect(() => {
+    if (!usersScopeKey) return undefined;
+    let active = true;
+    getDocs(yearCollectionRef(seasonYear, 'users'))
+        .then((snapshot) => {
+            if (!active) return;
+            setUsersResult({ key: usersScopeKey, users: snapshot.docs.map((d) => d.data()) });
+        })
+        .catch((error) => {
+            if (active) console.error('Failed to fetch users:', error);
+        });
+    return () => { active = false; };
+}, [currentUser, usersScopeKey, seasonYear]);
+
+const usersLoaded = usersScopeKey !== null && usersResult.key === usersScopeKey;
+const allUsers = usersLoaded ? usersResult.users : EMPTY_USERS;
+const currentUserName = currentUser?.name ?? '';
+const availableRecipients = useMemo(() => {
+    if (!usersLoaded) return [];
+    const mine = currentUserName.toLowerCase();
+    return getRosterNames(seasonYear).filter((name) => {
+        if (name.toLowerCase() === mine) return false;
+        const row = allUsers.find((u) => u?.name?.toLowerCase() === name.toLowerCase());
+        return !(row && row.gifterId);
+    });
+}, [usersLoaded, allUsers, currentUserName, seasonYear]);
 ```
-- **`isPushDispatchEnabled()`**, in order: `PUSH_DISPATCH_ENABLED === 'false'` → `false` (hard override everywhere); `=== 'true'` → `true`; otherwise `NODE_ENV === 'production' && !FIRESTORE_EMULATOR_HOST && !FIREBASE_AUTH_EMULATOR_HOST`.
-- **Mutations** run in `runFencedTransaction`, `current = doc?.revision ?? null`. `expectedEpoch !== ctx.epoch` or `expectedRevision !== current` → 409 `STALE_REGISTRATION`.
-  - **Register** always writes: `{ userId, authUid, token, enabled, platform, userAgent, createdAt: doc?.createdAt ?? now, updatedAt, revision: uuidv4(), epoch }`. Ownership moves to the caller. The revision rotates even when owner and `enabled` are unchanged; a missing row is created (enabled or disabled as requested).
-  - **Unregister** (sign-out only): row missing or `doc.userId !== user.id` → `{ changed: false }`; otherwise `enabled: false` and a new `revision`.
-- **Status:** `resolveParticipant` + one doc read → `{ epoch, revision: current, mine: doc?.userId === user.id, enabled: doc?.enabled === true }`.
-- **`sendIncomingMessagePush`:**
-  1. Dispatch disabled → zero result + `skipped: 'disabled'` before any Firestore/FCM call.
-  2. Read lifecycle; missing or not `active` → zero result + `skipped: 'inactive'`; else capture `epoch`.
-  3. Query enabled rows; build `sent = [{ token, revision: row.revision ?? null }]`, de-duplicated.
-  4. `sendEachForMulticast`; `webpush.notification = { tag, icon: '/icons/icon-192x192.png', badge: '/icons/icon-192x192.png' }`.
-  5. `cleanedTokenCount = await cleanupInvalidTokens({ epoch, sent, fcmResponse })`.
-- **`cleanupInvalidTokens`** (no actor, no re-admission):
-  - Collect `sent[i]` whose response failed with an invalid-registration code; none → 0, no transaction.
-  - One transaction `tx.getAll(lifecycleRef, ...tokenRefs)`; lifecycle missing, not `active`, or `epoch` differs → write nothing.
-  - Per row, write only if it exists and `(row.revision ?? null) === sent[i].revision`: `tx.update(ref, { enabled: false, invalid: true, revision: uuidv4(), updatedAt })`. Never `set`/merge; returns rows updated.
-- Token rows are removed only by reset (which changes the epoch), so a revision never recurs within an epoch.
 
-### Push routes
-- `register` body `{ token, expectedEpoch, expectedRevision, enabled? }` → 200 `{ success, epoch, revision, enabled }`.
-- `unregister` body `{ token, expectedEpoch, expectedRevision }` → 200 `{ success, epoch, revision, changed }`.
-- `status` body `{ token }` → 200 `{ success, epoch, revision, mine, enabled }`.
-- Missing precondition key → 400 `PRECONDITION_REQUIRED`; `expectedEpoch` must be a positive integer and `expectedRevision` a string or `null`, else 400; 409 `STALE_REGISTRATION`; 503 `RESET_IN_PROGRESS`.
-- Old clients send no preconditions and get 400 until reload; existing rows read `revision: null` until first mutated.
+What this guarantees:
 
-### `src/lib/push-client.js` (client)
-```js
-export const PUSH_INTENT_KEY = 'secret-santa-push-intent';                 // { id, authUid }
-export function isPushSupported(): boolean
-export function getPushPreference(authUid): 'enabled'|'disabled'|null      // key 'secret-santa-push-pref:' + authUid, plain string
-export function subscribePushState(callback): () => void
-export async function enablePushForCurrentUser({ authUid }): Promise<PushResult>
-export async function disablePushForCurrentUser({ authUid }): Promise<PushResult>
-export async function syncPushTokenIfGranted({ authUid }): Promise<PushResult>
-export async function releasePushRegistration({ timeoutMs = 3000 } = {}): Promise<boolean>
-export function cancelPushOperations(): void
-export function attachForegroundListener(onIncomingMessage): () => void
-// PushResult: 'registered' | 'disabled' | 'skipped' | 'aborted'
-```
-- **Preference (desired state):** written in exactly two places — the first synchronous statements of enable and disable, each one unconditional `setItem` before any `await`. No rollback, no adoption, no preference write after an await or a check.
-- **Device intent** (who may start network work; not desired state, never treated as a storage CAS): a new `{ id: uuid, authUid }` is written unconditionally by exactly four events — a runtime sync whose stored intent names another account, enable, disable, sign-out release (`authUid: null`). A runtime sync for the already-named account adopts the stored id. Retries never write an intent.
-- **`isCurrent(op)`**: realm `pushGeneration` unchanged, `clientAuth.currentUser?.uid === op.authUid`, stored intent `id === op.intentId`. Evaluated after every await and immediately before every request; failure ends the operation as `aborted` with no further request and no storage write.
-- **Enable:**
-  1. synchronously: throw if unsupported; `setItem(preference, 'enabled')`; `setItem(intent, { id: new, authUid })`;
-  2. `await Notification.requestPermission()` if not granted;
-  3. after it, no storage write: not current → `aborted`; permission not granted → throw (preference stays `enabled`, effective if permission is granted later);
-  4. reconcile. Network failure throws; preference stays `enabled`; next startup retries.
-- **Disable:** synchronously `setItem(preference, 'disabled')` then the intent; reconcile. Failure throws; preference stays `disabled`; next startup retries.
-- **Reconcile — at most three rounds; no no-op outcome.** Each round:
-  1. obtain the token (first round only);
-  2. `isCurrent`, then POST status → `{ epoch, revision }`;
-  3. `isCurrent`, then read the stored preference: `desired = (preference === 'enabled')`;
-  4. POST `register { token, expectedEpoch: epoch, expectedRevision: revision, enabled: desired }` — **always**, including when status already shows the caller's row with the same `enabled` value;
-  5. 200 → record realm `lastKnown = { authUid, token, epoch, revision }` and return `desired ? 'registered' : 'disabled'`;
-  6. 409 → next round, repeating 2–4 with a fresh status and a freshly re-read preference; after a third 409 → `aborted`.
-- **Why this fences without the older tab:** the newest action is acknowledged only after its own register has rotated the revision. Any request issued earlier against the previous revision — an older enable, disable or sign-out unregister, held anywhere before the server commit — is then rejected with 409, whether or not its tab still exists. If the older request commits first, the newer one either sees it in status or gets a 409 and retries; either way its own write lands last. There is no client convergence step.
-- Fetches use the captured user's token and a 15s abort. `syncPushTokenIfGranted` returns `skipped` unless the uid matches, push is supported and permission is granted; it removes the legacy `secret-santa-push-token` key. A device with no preference ends `disabled` (opt-in is explicit).
-- **Release** (sign-out): write intent `{ authUid: null }`; if the realm has no `lastKnown` for the current user, fetch status first; send one owner-checked `unregister` with those preconditions; abort everything at `timeoutMs`; clear `lastKnown`; preference untouched.
-- `cancelPushOperations()` increments `pushGeneration` (realm-local).
-- **Storage events** refresh subscribers only and never start a reconcile; a tab reconciles on its own mount/identity change and its own actions.
+- Every effect run has its own `active` flag, so a response from an earlier run (earlier year, earlier account, or an earlier refetch in the same scope) is dropped when it arrives.
+- A stored result is used only when its key equals the current key. On the first render after an account or year change, before the new fetch finishes, `allUsers` is the empty constant and `availableRecipients` is `[]`; no previous-scope row or candidate is rendered.
+- The effect still reruns when the `currentUser` object changes, so a same-scope assignment change refetches as today, and the previous same-scope rows stay visible until the new result lands.
+- State is set only inside promise callbacks, never synchronously in the effect body.
+- The selection rules are the existing ones (roster names minus self minus names whose row has a `gifterId`). The rules-fenced reciprocal claim in `RecipientSelector` is unchanged and nothing is assigned automatically.
 
-### Push and sound components
-- `PushNotificationsControl.js`: props `{ compact, authUid }`.
-  - Desired = `getPushPreference(authUid)` via `subscribePushState`; effective = desired `enabled` and permission `granted`; button reads "Disable notifications" when effective, else "Enable notifications".
-  - Per-instance `registrationNote`, set only from this instance's toggle and cleared on its next toggle or any preference change:
-    - enable threw (non-permission): "Notifications are on, but this device is not registered yet. It will retry the next time the app opens.";
-    - disable threw: "Notifications are off. This device will finish unregistering the next time the app opens.";
-    - `aborted`: no note, no toast.
-  - Permission denied keeps the existing hint. The control never writes a preference except through the two toggles.
-- `PushNotificationsRuntime.js`: props `{ currentUser, authUid }`; sync only with both; `attachForegroundListener` in try/catch; cleanup `cancelPushOperations()` + unsubscribe; deps `[currentUser?.id, authUid, showToast]`.
-- `NotificationSoundRuntime.js`: `hydratedUserRef` replaces `previousLoadingRef`. Order: no user → reset; user changed → un-hydrate; loading → un-hydrate and return; not hydrated → silent baseline; else existing diff and gates.
+*Body, in this order.* Branches 1 and 2 use a standalone layout: `<main className="container" style={{ flexDirection: 'column' }}>` with a top row of greeting, `{adminControl}` and Sign out.
 
-## Phase 7 — Scripts and docs (#22)
-- `scripts/lib/emulator-firestore.js` exports `EMULATOR_PROJECT_ID = 'xmasteak-app'`, `APP_COLLECTIONS` (same order as `src/lib/firestore.js`), `getEmulatorFirestore()`; sets `FIRESTORE_EMULATOR_HOST` to `127.0.0.1:8080` when unset; exits 1 unless the host is `127.0.0.1:*` or `localhost:*`.
-- `wipe_db.js`: deletes every `APP_COLLECTIONS` entry in ≤ 400-op batches; sets `system/lifecycle` to `{ epoch: previous + 1, state: 'active', resetId: null, resetStartedAt: null }`.
-- `check_messages.js`, `test_message_routing.js`: take `<santaUserId> <recipientUserId>` from argv (usage + exit 1 if missing); no hardcoded ids or names.
-- All four print ids, counts and assignment linkage only.
+1. Year not open:
+   ```jsx
+   <ArchiveViewer
+       authUid={authUid}
+       years={archiveYears}
+       initialYear={season.year}
+       closedYears={closedYears}
+       banner={`The ${season.year} exchange is closed. You can browse it below; chats reopen when the next year starts.`}
+   />
+   ```
+2. `needsRecipient && showArchive && archiveYears.length > 0`:
+   ```jsx
+   <ArchiveViewer
+       authUid={authUid}
+       years={archiveYears}
+       initialYear={archiveYears[0]}
+       closedYears={closedYears}
+       onBack={() => setShowArchive(false)}
+   />
+   ```
+3. `needsRecipient`:
+   ```jsx
+   <RecipientSelector
+       currentUser={currentUser}
+       availableRecipients={availableRecipients}
+       year={season.year}
+       onComplete={refreshUser}
+       adminControl={adminControl}
+       onBrowseArchive={archiveYears.length > 0 ? () => setShowArchive(true) : null}
+   />
+   ```
+4. Otherwise the existing layout, with these changes: `Sidebar` loses `onReset` and gains `adminControl={adminControl}` and `showArchive={archiveYears.length > 0}`; the mobile header renders `{adminControl}` where `AdminPanel` was; `TabNavigation` gains `showArchive={archiveYears.length > 0}`; `ChatTabs` keeps its existing props (with `allUsers={allUsers}` now the derived value) and gains `archiveYears={archiveYears}` and `closedYears={closedYears}`.
 
-### Documentation — exact text
-**`CLAUDE.md`**
-1. Replace the body of "### Authentication & User Management" with:
-> User authentication is a server-mediated handshake:
-> 1. Users sign in with Google OAuth via Firebase Auth.
-> 2. `src/context/UserContext.js` is the single auth/profile owner (`useUser()` reads it). It POSTs the ID token to `/api/auth/bootstrap`.
-> 3. `src/lib/participant-admission.js` checks the email against `src/lib/participants.js` (and `email_verified` outside development), then atomically resolves or creates the UUID profile and writes a server-only `authIdentities/{authUid}` record.
-> 4. Firestore rules admit only callers whose admission record matches the current `system/lifecycle` epoch. Unauthorized emails get ACCESS_DENIED.
->
-> Clients never create `users` documents. After an admin reset, open clients re-bootstrap automatically. To remove a participant mid-season, remove them from the list and delete their `authIdentities` document.
+`AuthGuard` no longer receives `notice`.
 
-2. In "### Data Model", change the `lastRead` comment to `// lastReadAt = timestamp of the latest message the user has observed; monotonic` and append:
-> **Server-only collections** (clients cannot read or write them): `authIdentities/{authUid}` `{ uid, email, userId, epoch, createdAt, updatedAt }`; `participantIndex/{email}` `{ email, userId, epoch, createdAt }`; `system/lifecycle` `{ epoch, state, resetId, resetStartedAt, updatedAt }`. `pushTokens` documents carry `authUid`, `revision` and `epoch`; push mutations must present the `epoch` and `revision` returned by `/api/push/status`.
+### Scripts and documentation
 
-3. In "### API Routes":
-   - delete the `/api/admin/assign` bullet;
-   - add `- **POST /api/auth/bootstrap**: Resolve or create the caller's profile and admission record. Requires a Bearer token.`;
-   - add `- **POST /api/push/status**: Report this device token's registration state (epoch, revision, ownership). Requires a Bearer token.`;
-   - replace the send bullet's second sentence with `Requires a Bearer token; validates the conversation against both users' assignments and commits replay check, validation and write in one transaction keyed on clientMessageId.`;
-   - append to the reset bullet `Exclusive and fail-closed: if it does not complete, run it again.`;
-   - append to both push bullets `Requires expectedEpoch and expectedRevision from /api/push/status.`
-4. In "## Important Notes":
-   - replace the "Message create verifies…" sub-bullet with `Clients cannot create users or messages; both are written only by the server. Recipient selection must update both users reciprocally in one transaction.`;
-   - replace the "lastRead writes are owner-scoped…" sub-bullet with `lastRead doc ids must equal {userId}_{conversationId}; markers are monotonic; a user can read their own markers, and other users' DM markers for read receipts, but never another user's public-feed markers.`;
-   - add `Push dispatch: PUSH_DISPATCH_ENABLED=false always disables it and =true always enables it; unset means production only, and never when an emulator host is configured. The emulators do not emulate FCM.`;
-   - add `The message outbox stores one localStorage entry per queued message under secret-santa-message-outbox-v2:*; the v1 key is read-only legacy input. Tabs running an older build must reload before the outbox fixes apply.`
-5. In "### Message Architecture", replace the `filterMessages` bullet's last sentence with `Routing is decided by resolveMessageConversation: explicit conversationId, then legacy isSantaMsg, then the known assignment, then a canonical fallback (santa = smaller id) only for genuinely ambiguous rows.`
+- `scripts/lib/emulator-firestore.js`: add `clearEmulatorFirestore()` — `ensureEmulatorHost()`, then `fetch('http://' + host + '/emulator/v1/projects/' + EMULATOR_PROJECT_ID + '/databases/(default)/documents', { method: 'DELETE' })`, throwing on a non-OK response. Keep `APP_COLLECTIONS`; its comment becomes `// Root (legacy 2025) and global collection names, for diagnostics.`
+- `scripts/wipe_db.js`: replace the deletion loop and lifecycle write with `await clearEmulatorFirestore()` and print `emulator database cleared`.
+- `scripts/check_all_data.js`: also print lifecycle `year` and `closedYears`; when `year > 2025`, print counts for the five `years/{year}/…` collections.
 
-**`README.md`** — replace the rules sentence under Deployment with:
-> Firestore security rules live in `firestore.rules`. They admit only server-admitted participants and deny client creation of users and messages. Deploy the app before the rules, and ask participants to reload open tabs.
+**`AGENTS.md`** — replace this Safety bullet:
 
-and add after the client variable list:
-> `PUSH_DISPATCH_ENABLED` (server, optional): `false` always disables push dispatch, `true` always enables it. Leave it unset or `false` for local development.
+> - Local development and checks use the Firebase emulators by default. `.firebaserc` defaults to `xmasteak-app`, which is not a `demo-` project, and `scripts/seed_users.js` connects to production when `FIRESTORE_EMULATOR_HOST` is unset and production credentials are in the environment. Target the emulator explicitly.
 
-**`plans/05-admin-assign-decision.md`** (only if D1 = A) — prepend `> Resolved by the bug-sweep PLAN.md: Option A (variant and endpoint removed).`
+with:
 
-**`__tests__/integration/README.md`** — one bullet per new integration file, named as in the manifest, with a one-line description.
+> - Local development and checks use the Firebase emulators by default. `.firebaserc` defaults to `xmasteak-app`, which is not a `demo-` project. Target the emulator explicitly. The integration and end-to-end suites and `scripts/wipe_db.js` clear the whole emulator database; run them only against emulators the primary started.
 
-## Tests — required assertions
+**`__tests__/integration/README.md`** — replace the `reset-fencing.test.js` line with:
 
-### New
-- **`participant_admission.test.js`**:
-  - outsider/unverified rejected with zero writes; `resetting` → 503;
-  - linking keeps the UUID without writing the users doc;
-  - two matches, noncanonical casing, id mismatch, index-to-missing-user → `PROFILE_CONFLICT`, zero writes;
-  - identity `createdAt` preserved; epoch-mismatched identity triggers admission; fenced transaction retries once.
-- **`auth_bootstrap_api`, `push_status_api`**: status-code mappings; 200 shapes.
-- **`dev_assign_api`**: non-development 403; `RESET_IN_PROGRESS` 503; < 2 users 400; success 200 via `assignUsersInTransaction`.
-- **`integration/participant-admission`**: five concurrent admissions for one synthetic token → one users doc + one index doc; concurrent seed + admission → one profile; concurrent `ensureAllParticipants` → participant count.
-- **`integration/reset-fencing`** (barriers = hooks resolved by the test):
-  1. A held at `afterBegin`, B completes, release A → `RESET_SUPERSEDED`; final `active`, B's epoch, one profile per participant.
-  2. Same with A held at `afterDelete`.
-  3. `afterDelete` throws → stays `resetting`; a second reset completes.
-  4. Held at `afterReseed`: `assignUsersInTransaction` → `RESET_IN_PROGRESS`; afterwards no assignments.
-  5. Delayed send with the old `senderUserId` → rejected; `messages` empty.
-  6. Status, full reset, register with the old epoch → 409; `pushTokens` empty.
-  7. Admission while held at `afterBegin` → 503.
-- **`integration/firestore-rules-admission`**:
-  - outsider: users get, messages list, users create, lastRead/typing/reactions writes all fail;
-  - stale-epoch identity, and anyone while `resetting`: all reads/writes fail;
-  - users create and messages create fail for everyone;
-  - one-sided claim either way fails; reciprocal batch succeeds; batch + `name` change or + extra field fails; second claim and claim on an already-claimed user fail.
-- **`integration/push-registration`** (emulator; `cleanupInvalidTokens` called with a crafted response, no FCM):
-  1. Missing either precondition → 400.
-  2. Two registers with the same revision → one success, one 409.
-  3. Stale unregister after a newer register → 409, still enabled.
-  4. Another user's unregister → `changed: false`.
-  5. Every mutation changes `revision`.
-  6. After a reset, the pre-reset epoch → 409 even with `expectedRevision: null`.
-  7. **Matching-state reaffirmation, disable:** row disabled at R; `register(enabled: false, expectedRevision: R)` → 200 with R2 ≠ R; an earlier held `register(enabled: true, expectedRevision: R)` → 409; row stays disabled at R2.
-  8. **Matching-state reaffirmation, enable:** row enabled (mine) at R; `register(enabled: true, R)` → R2; an earlier held `unregister(R)` and an earlier held `register(enabled: false, R)` → 409; row stays enabled at R2.
-  9. Cleanup after reset with the old epoch → 0, `pushTokens` empty.
-  10. Cleanup with a superseded revision → 0, the newer enabled row untouched.
-  11. Cleanup with the current revision → 1; row `enabled: false`, `invalid: true`, new revision; old revision or `null` → 409.
-  12. Cleanup for a token with no row → 0, nothing created.
-- **`firebase_client_config`**: with `jest.unmock('@/lib/firebase-client')`, mocked `firebase/app`, env set → `initializeApp` receives `appId` and `messagingSenderId`; absent when unset.
-- **`worker_push_display`**: `getMessaging` once; `onBackgroundMessage` not registered; `showNotification` never called; source has no `showNotification`.
-- **`ChatTabs_draft_isolation`**: draft absent after switching tabs; Send enqueues nothing.
-- **`PublicFeed_read_state`**: another `userId` shows its own state; legacy key removed and never read; new message while open and visible writes that timestamp and unread is 0 after Back; no write while hidden.
-- **`useAdminReset`**: declined confirm → no fetch; success → POST with Bearer, toast, `onComplete`; failure → server text.
-- **`emulator_scripts_config`**: project id matches `.firebaserc` and both Firebase lib files; `APP_COLLECTIONS` equal; non-loopback host exits.
-- **`message_outbox_cross_realm`** (two module instances via `jest.isolateModules`, one `localStorage`):
-  - A delivered in realm 1 while realm 2 gets a late 503 → not live, never re-sent;
-  - B enqueued in realm 2 during realm 1's pending fetch survives and is delivered;
-  - both realms import the same v1 array → one payload per id, v1 byte-identical, delivered ids not re-imported;
-  - existing different v2 payload unchanged; duplicate v1 id imports once.
+> - **year-lifecycle.test.js**: Close/Start transitions, idempotency, atomic failure, held-transaction races, roster exclusion, old-client and delayed-send fences, and a second rollover
+> - **firestore-rules-years.test.js**: Year-scoped read/write rules, closed-year immutability, skipped- and future-year denial, and malformed lifecycle metadata
 
-### Modified
-- `__tests__/setup.js`: add `doc`, `getDoc`, `setDoc`, `deleteDoc`, `Timestamp: { fromDate }` to the global firestore mock.
-- `helpers/firestore-rules-test-utils.js`: `seedUser` also seeds `system/lifecycle` `{ epoch: 1, state: 'active' }` and `authIdentities/{userId}` `{ uid, email, userId, epoch: 1 }` unless `{ admitted: false }`; add `seedIdentity(testEnv, authUid, userId, email, epoch = 1)`.
-- `firestore-rules-lastRead`: owner reads a missing own `publicFeed_*` doc, another user denied; older update fails, newer succeeds; > 5 minutes ahead fails; id ≠ `userId + '_' + conversationId` fails; remapped identity cannot write the old path.
-- `lib/firestore.test`: `resetDatabase` begins, deletes eight collections in order in owner-checked transactions ≤ 400, completes; on delete error `completeReset` not called; `assignUsersInTransaction` reads users in-transaction, rejects when not `active`, writes nothing for `null`; `batchUpdateUsers` case removed.
-- `api/admin_reset_enhanced`: calls `resetAndReseedParticipants(PARTICIPANTS)` with no hooks; `RESET_SUPERSEDED` → 409; others → 500.
-- `api/send_message_api` (mock `verifyRequestToken`, `runFencedTransaction` invoking `work` with a fake `tx`):
-  - wrong pair 400; false role 400; `senderUserId` mismatch 403; missing conversation on a mutual pair 400;
-  - replay with omitted `conversationId` → `replayed`; replay after assignments changed → `replayed`, no push;
-  - differing content 409; `RESET_IN_PROGRESS` 503, no push; transient error retried.
-- `api/push_register_api`, `api/push_unregister_api`: missing precondition → 400 `PRECONDITION_REQUIRED`; invalid types 400; 409 mapping; new argument shapes.
-- `lib/push_server.test` (save/restore the four env vars; `runTransaction` mocked):
-  - `'false'` with production → zero Firestore/FCM calls; unset with an emulator host and production → zero; unset in test env → zero; `'true'` → existing copy cases pass with icon and badge.
-  - Lifecycle not `active` → `skipped: 'inactive'`, no FCM; cleanup receives the captured `epoch` and per-row `revision` (`null` for legacy).
-  - Register on an unchanged owner/`enabled` still writes a new revision.
-  - Cleanup: epoch differs / `resetting` / missing lifecycle / missing row / revision differs → zero writes and never `tx.set`; matching row → one `tx.update` with `enabled: false`, `invalid: true`, new revision; non-invalid code ignored; no invalid responses → no transaction.
-- `context/RealtimeMessagesContext.test`: add `flushPendingWrites`, `resetLastReadState` to the mock; same-`id` `user` object change does not call `onSnapshot` again; retry timer does not fire after unmount.
-- `unit/useUser_realtime` (rewritten):
-  - two consumers → one bootstrap; stale response after sign-out or switch ignored;
-  - assignment snapshot still updates `user` after `refreshUser()` and after a reset-driven re-bootstrap;
-  - server-confirmed missing doc → re-bootstrap; cache-only miss ignored; snapshot after cleanup ignored;
-  - 503 retries with notice; 403/409 → error state with `user: null`; refresh network failure keeps `ready`; auth change calls the three cancels.
-- `unit/message_outbox`, `unit/outbox_retry_delivery`:
-  - add `uid`/`ownerUid`;
-  - B enqueued during A's pending fetch survives success, failure and 401-refresh and is delivered by the follow-up pass;
-  - auth switch during the token await and during the fetch sends no request with another account's token and leaves the item pending with the same id;
-  - body carries `senderUserId`; stale v2 payload collected; expired or malformed v1 entry not imported, v1 untouched.
-- `unit/MessageOutboxRuntime`: `authUid` prop; `cancelOutboxDrains` in the mock and called on unmount.
-- `unit/Chat_outbox`: `authUid` in enqueue and drain; no messages → mark-read not called.
-- `unit/Chat_unread`: fourth argument equals the latest message timestamp.
-- `unit/lastReadClient`, `unit/lastReadClient-normalization` (pass `observedAt`; written value equals it; deferred `setDoc`/`getDoc`):
-  1. In flight + newer observation + flush → no second `setDoc` until the first settles, then immediate with the newest; entry removed after.
-  2. In flight + reset + new entry for the same key → old resolve/reject leaves the new entry and timer intact.
-  3. Entry removed by subscription (not in flight) then recreated → written; an in-flight entry is not removed.
-  4. Rejection then newer observation during backoff → next write carries the newest.
-  5. `permission-denied` with deferred confirmation read and a newer observation → newer value still written.
-  6. `permission-denied` with no newer remote → retried, dropped after the third failure.
-  7. Changed `ownerUid` at write start → no `setDoc`.
-- `unit/unread_badge_clearing`, `unit/unread_logic`, `unit/realtime_hooks`: mocked client returns `true` on accepted updates and adds `subscribeToLastRead`, `flushPendingWrites`, `resetLastReadState`; waits use `subscribeToLastRead`; a rejected update does not notify; a remote callback clears the badge; a mutual pair's legacy row counts in one tab only.
-- `unit/PublicFeed_lastViewed_sync`: retitled "hydrates from Firestore markers"; existing assertions kept; a seeded legacy key is removed and does not affect the badge.
-- `unit/message_routing`: non-mutual pair with Santa id sorting after recipient id + viewer map → legacy row in the real conversation; mutual → canonical; endpoint-mismatched explicit id → `unroutable`; `matchesStoredMessage` cases.
-- `unit/NotificationSoundRuntime`: already-loaded mount then new message → one chime; reload cycle → none; user change → none.
-- `unit/push_client` (rewritten; two module instances share `localStorage`; a stateful fake server implements epoch/revision checks and can **hold a request before it is applied**; `setItem`/`getItem` spied; "close realm" = `cancelPushOperations()` on it and discard its response):
-  1. **Held enable vs newer disable, old realm closed:** row disabled at R. Realm 1 enable(A) sends `register(true, R)`, held before commit. Realm 2 disable(A): status shows disabled, yet it sends `register(false, R)` → acknowledged R2, returns `disabled`. Close realm 1, release its request → server returns 409. Final: row disabled at R2, preference `disabled`, no further request from realm 1.
-  2. **Held disable vs newer enable, old realm closed:** row enabled (mine) at R. Realm 1 disable(A) sends `register(false, R)`, held. Realm 2 enable(A): status shows mine and enabled, yet it sends `register(true, R)` → R2, returns `registered`. Close realm 1, release → 409. Final: enabled at R2, preference `enabled`.
-  3. **Held sign-out unregister vs newer enable:** realm 1's release `unregister(R)` held; realm 2 enable acknowledged at R2; release → 409; row stays enabled.
-  4. **Older request commits first:** realm 1's `register(true, R)` commits between realm 2's status and its register → realm 2 gets 409, re-reads status and the preference, registers `false` → final disabled.
-  5. **Account switch:** realm 1 (A) register held; realm 2 (B) syncs and registers per B's preference; release → 409; realm 1 sends nothing further.
-  6. **Every round registers:** startup sync with a matching row sends status + register; with no preference it registers `enabled: false` and writes no preference key.
-  7. **Preference re-read on retry:** preference changed between a 409 and the next round → the next register uses the new value.
-  8. **No rollback:** an enable whose register fails leaves the preference `enabled`; it throws; a later sync registers.
-  9. **Write at the guard:** a `getItem` hook on the intent key runs realm 2's disable at the instant realm 1 checks before a register → realm 1 writes no preference; stored preference `disabled`; fake server ends disabled.
-  10. **Delayed permission:** enable(A) with `requestPermission` held, then (a) realm 2 disable, (b) release, (c) in-realm cancel; on resolve `granted` → no storage write, no request; preference is whatever the last click left.
-  11. **Write audit:** each account's preference key is written exactly once per enable/disable call, before its first await, never by sync, release or retries.
-  12. Storage event → subscribers only, no request. Three 409s → `aborted`. Release aborts at the timeout, writes a no-account intent, sends at most one unregister, leaves the preference. Throwing `getMessaging` → no-op.
-- `unit/PushNotificationsControl` (stateful mocks; permission per case): enabled + granted → "Disable notifications"; failed enable → same label + "not registered yet" note; failed disable → "Enable notifications" + "finish unregistering" note; `aborted` → no note, no toast; enabled without permission → "Enable notifications"; a preference change from another tab updates the label without calling a toggle.
-- `unit/PushNotificationsRuntime`: new props and mocks; a throwing listener does not throw from render.
-- `unit/admin_ui`: admin with a recipient sees compact Reset; clicking sidebar "Reset App Data" (confirm accepted) POSTs `/api/admin/reset`; stale comments removed.
-- `unit/app_flows`: add `cancelOutboxDrains` to the outbox mock.
-- `unit/RecipientSelector`: mock `@/lib/sign-out`.
-- `unit/participants`: every list email lowercase with no `/` (if it fails, the implementer stops and reports).
-- `e2e/mobile-layout`, `e2e/unread-badge`: `/api/admin/assign` → `/api/dev/assign`.
+**`CLAUDE.md`** — exact replacements:
 
-### New e2e (emulators only)
-- `admission-and-reset.spec.ts`: outsider gets 403 from the Firestore REST `users` read and from `/api/auth/bootstrap`; a draft does not follow a tab switch; admin reset from the desktop sidebar → a second context reaches "Welcome" with a new `__e2eUserData__.id` without reload.
-- `outbox-cross-tab.spec.ts` (two new-code pages, `page.route('**/api/messages/send')`):
-  - (a) B enqueued while A is held is delivered after A;
-  - (b) tab 1 delivers X, tab 2 then gets 503 for X → no bubble, no further request;
-  - (c) a seeded v1 item with two pages → exactly one message doc, v1 unchanged;
-  - (d) with all sends failing the item survives reload and is delivered once unblocked;
-  - (e) after sign-out and sign-in as another user while a request is held, every request for that item decodes to the original uid.
+1. In *Authentication & User Management*, replace items 3–4 and the paragraph after them with:
 
-Push has no browser-level test (needs a service worker and real FCM).
+   > 3. `src/lib/participant-admission.js` reads `system/lifecycle`, checks the email against that year's roster in `src/lib/participants.js` (and `email_verified` outside development), then atomically resolves or creates the UUID profile in that year's `users` collection and writes a server-only `authIdentities/{authUid}` record. In a closed year it links an existing profile but never creates one.
+   > 4. Firestore rules admit only callers whose admission record matches the current `system/lifecycle` epoch. Emails not on the active year's roster get ACCESS_DENIED.
+   >
+   > Clients never create `users` documents. Profile UUIDs are new every year. Open clients watch `system/lifecycle` and re-bootstrap after a server-confirmed Close or Start. To remove a participant mid-season, remove them from that year's roster and delete their `authIdentities` document.
 
-## Traceability
+2. Replace the body of *Participant Management* with:
 
-| ID | Change | Primary test |
-|---|---|---|
-| 1 | Admission, epoch-bound rules | rules-admission; e2e outsider |
-| 2 | Immutable payload keys, follow-up pass | message_outbox; cross-realm; e2e (a) |
-| 3 | Captured user, cancels, `senderUserId` | message_outbox auth switch; e2e (e) |
-| 4 | `getAfter` + `affectedKeys` | rules-admission claims |
-| 5 | Config keys, contained init | firebase_client_config; PushNotificationsRuntime |
-| 6 | Index transaction, single provider | integration admission; useUser two consumers |
-| 7 | Auth generation and request sequence | useUser stale response |
-| 8 | Profile-loss recovery, reset protocol | useUser; reset-fencing; e2e reset |
-| 9 | Transactional send, client creates denied | send API; rules-admission |
-| 10 | Every reconcile round registers desired state with status epoch/revision; device intent; fenced cleanup | push_client 1–7; push-registration 1–12 |
-| 11 | Preference written only by explicit clicks; newest action fences older requests | push_client 1–2, 8–11; PushNotificationsControl |
-| 12 | Observed boundary, single-flight writes | lastReadClient schedules |
-| 13 | Own-marker subscription | unread tests |
-| 14 | Assignment-aware resolver in DMs | message_routing |
-| 15 | Resolver in unread counts | unread mutual case |
-| 16 | Keyed chats | ChatTabs_draft_isolation |
-| 17 | `useAdminReset`; shuffle per D1 | admin_ui; useAdminReset |
-| 18 | Keyed feed, no shared local key | PublicFeed_read_state |
-| 19 | Open-thread marking | PublicFeed_read_state |
-| 20 | Baseline on first loaded state | NotificationSoundRuntime |
-| 21 | Worker display removed | worker_push_display |
-| 22 | Emulator helper | emulator_scripts_config |
-| Risk | Dispatch gate with hard-off override | push_server env cases |
+   > `src/lib/participants.js` is the source of truth:
+   > - `PARTICIPANTS`: registry of every known `{ name, email }`
+   > - `YEAR_ROSTERS`: who takes part in each year; a year with no roster cannot be started and admits nobody
+   > - Helpers: `getRoster()`, `getRosterName()`, `getRosterEmail()`, `getRosterNames()`, `isKnownParticipantEmail()`, `getNextRosterYear()`
+   > - Used for authorization, recipient selection, and seeding each new year
 
-## Read and write budget
+3. In *Data Model*, insert before `**users collection:**`:
 
-| Operation | Reads | Writes |
-|---|---|---|
-| Rules evaluation | identity + lifecycle (2), plus the user doc for owner-checked writes as today | — |
-| Send | 5 (lifecycle, identity, sender, recipient, message); today 2 | 1 |
-| Bootstrap, warm | 4 (lifecycle, identity, user, index) | 0 |
-| First admission per participant per epoch | 3 + the `users` collection (≤ participant count) | ≤ 4 |
-| Push status | 4 | 0 |
-| Push register / unregister | 4 | 1 |
-| **Push reconcile round** | 8 (status + register) | 1 |
-| **Startup, permission granted** | 8 (one round) | 1 — always, even when nothing changed |
-| Startup, permission not granted | 0 | 0 |
-| Enable / disable click | 8 per round, at most 3 rounds | 1 per successful round (normally 1) |
-| Sign-out release | 4 (+4 if status is needed) | ≤ 1 |
-| Push dispatch (only when enabled) | 1 lifecycle + the existing token query | 0 |
-| Invalid-token cleanup (only on invalid responses) | 1 lifecycle + 1 per invalid token | 1 per matching row |
-| Dev assign | lifecycle + `users` collection | 1 per user |
+   > **Year storage:** the 2025 exchange lives in the root collections `users`, `messages`, `reactions`, `lastRead`, `typing`. Every later year lives in `years/{year}/…` with the same five collection names and document shapes. Build paths only with `src/lib/year-paths.js`. The app never writes to a closed year.
 
-Listeners: one all-messages and one reactions listener, unchanged; two own-marker doc listeners replace two one-shot reads.
+4. Replace the sentence beginning `**Server-only collections**` through `…{ epoch, state, resetId, resetStartedAt, updatedAt }`. with:
 
-## Rollout and cutover (not authorized by this plan)
-- No automatic data migration; lifecycle, index and identity docs are created lazily; existing profiles are linked with their UUIDs. Conflicts fail closed with `PROFILE_CONFLICT`; repair is a separately authorized manual action.
-- Deploy order: app first (compatible with the old rules), then an admin `/api/init` backfill, then rules.
-- **Required cutover step:** every open tab reloads onto the new build. Until then an old tab is denied by the new rules, gets 400 from push mutation routes, and still runs the legacy outbox code. Its v1 queue is imported by the first new-code load.
-- Old clients' markers satisfy the new marker rules.
-- Push: opt-in is explicit per device. On its first new-code load with notification permission granted, a device with no local preference is registered as disabled, and the user enables notifications again.
+   > **Server-written collections**: `authIdentities/{authUid}` `{ uid, email, userId, epoch, createdAt, updatedAt }`; `participantIndex/{email}` `{ email, userId, epoch, createdAt }` (clients cannot read either); `system/lifecycle` `{ epoch, state: 'active'|'closed', year, closedYears, startedAt, closedAt, updatedAt }` (readable by accounts that have been admitted, never writable by clients; a missing `year` means 2025; the server treats any other shape as unavailable and writes nothing).
 
-## Limits and unverified items
-- A message stamped earlier than a marker but delivered later counts as read (accepted ordering limit). Marker flush on hide/unload is best-effort.
-- A removed participant keeps rule-level read access until their identity doc is deleted.
-- Unparseable `conversationId` rows now use legacy resolution and may newly appear in DMs.
-- Push:
-  - The newest acknowledged action always commits a fresh revision, so earlier requests are rejected whenever they reach the server.
-  - The one remaining gap is a tab that passes its intent check on a lagging localStorage view after another account took the device; that is corrected at the device's next sync.
-  - If no one signs in after a sign-out that bypassed the helper, the previous account's generic notifications continue on that device.
-- Notifications dispatched before a reset cannot be retracted.
-- Not verified by the planner; the primary must confirm: emulator behaviour of the rules syntax (`duration.value`, `getAfter`, `affectedKeys`) and of Admin transactions under contention; `email_verified` for every participant and the enabled production providers; SDK auto-display and click after the worker change; selectors in the new e2e specs.
-- **Real FCM delivery is not verified by any step in this plan.**
+5. In *API Routes*, replace the bootstrap, init and admin/reset bullets with:
+
+   > - **POST /api/auth/bootstrap**: Resolve or create the caller's profile and admission record; returns the user plus `year`, `yearState`, `epoch`, `closedYears`. Requires a Bearer token. Clients send `X-Secret-Santa-Client: 2`; without it the route answers only while the active year is 2025.
+   > - **POST /api/init**: Seed the active year's roster. No auth in development; requires an admin Bearer token in production. Refused in a closed year.
+   > - **POST /api/admin/reset**: Retired. Always returns 410 `RESET_RETIRED`.
+   > - **POST /api/admin/year/close**: Body `{ year }`. Makes that year read-only in one transaction. Admin only; idempotent.
+   > - **POST /api/admin/year/start**: Body `{ fromYear, targetYear }`. Requires `fromYear` closed and a roster for `targetYear`; creates the new year's profiles and bumps the epoch in one transaction. Admin only; idempotent.
+
+6. In *Key Files*, replace the `src/lib/firestore.js` line with:
+
+   > - `src/lib/firestore.js`: Server helpers (`ensureAllParticipants`, `assignUsersInTransaction`)
+   > - `src/lib/year-paths.js`: Year storage layout and lifecycle interpretation (pure; shared by client and server)
+   > - `src/components/ArchiveViewer.js`: Read-only view of closed years
+
+7. In *Important Notes*, add:
+
+   > - Year lifecycle: `Close year` and `Start new year` are the only season transitions. The app has no bulk reset or deletion of year data and never writes to a closed year; the open year keeps its normal writes (messages, pairing claims, read markers, and adding or removing typing and reaction documents). Both admin routes require `YEAR_TRANSITIONS_ENABLED=true` outside development.
+   > - Firestore rules allow reads of the current year and of earlier years listed in `closedYears`, never a later year, and writes only in the single open year.
+
+   and replace the anonymity bullet's first two sentences with:
+
+   > - **Anonymity is a trust model, not a hard guarantee.** The Public Feed and Santa/Recipient split hide identities in the UI for the open year, but `messages` are readable by any admitted participant, so identities are technically discoverable by inspecting raw data. Closing a year reveals its pairings to all admitted participants in the archive.
+
+### Tests
+
+All synthetic. No test file may contain a participant email literal; the two existing ones noted below are removed.
+
+**`__tests__/integration/helpers/emulator-admin.js`**
+
+- `clearEmulatorFirestore()` — loopback guard, then the REST DELETE for project `xmasteak-app`.
+- `snapshotCollections(firestore, paths)` → sorted `{ path, id, data }` for deep equality.
+- `syntheticParticipantsModule()` → a full replacement for `@/lib/participants` with rosters 2025 = a, b, c, d; 2026 = a, b, c; 2027 = a, b, e (all `@example.test`), used as `jest.mock('@/lib/participants', () => require('./helpers/emulator-admin').syntheticParticipantsModule())`.
+- `interceptNextTransaction(firestore, { afterWork, failAfterWork })` — a test-only wrapper: spies `firestore.runTransaction` once and delegates to the real method with a decorated callback that runs the original, awaits `afterWork()`, then throws `failAfterWork` if given. No production hook is added.
+
+**Held-transaction pattern** (every race below): start A through `interceptNextTransaction` with `afterWork` signalling "reached" and awaiting a gate; await "reached"; start B without awaiting it; open the gate; `await Promise.allSettled([A, B])`; assert invariants that hold under either serialization. No sleeps.
+
+**`__tests__/integration/year-lifecycle.test.js`** (Admin SDK, synthetic rosters). `H` = deep snapshot of root `users`, `messages`, `reactions`, seeded with pairings, messages and reactions.
+
+- Server interpretation, zero writes: `closeYear`, `startNewYear`, `admitParticipant`, `ensureParticipantProfiles` and the send route against each of `{state:'resetting'}` without a year, a null year, a missing epoch, out-of-order `closedYears`, duplicate entries, a string element, and a listed year above `year` → 503, and a snapshot of the lifecycle, `participantIndex`, `authIdentities` and `H` is deep-equal afterwards.
+- Missing lifecycle: `closeYear(2025)` creates the closed document at epoch 1; Start before Close → `YEAR_NOT_CLOSED`.
+- Close: `changed:true` then `changed:false`; epoch unchanged; `H` unchanged.
+- After Close: send → 409 with no document and no identity write; dev assign/inject and seeding → `YEAR_CLOSED`; push status, register and unregister succeed; bootstrap returns `yearState:'closed'`; a roster member whose profile was removed → `ACCESS_DENIED` and no `users` write.
+- **Atomic failure:** Start with `failAfterWork` → rejects; lifecycle, `participantIndex` and `H` deep-equal to before; all five `years/2026/*` collections empty. The same for Close. A plain retry then succeeds with exactly roster-size profiles.
+- Start: profiles equal the 2026 roster with null pairings; index rows at the new epoch each pointing at an existing 2026 profile; `H` unchanged; the excluded member's bootstrap → `ACCESS_DENIED` while their 2025 rows remain.
+- `YEAR_NOT_EMPTY`: five cases, one pre-seeded document in each target collection → refused, nothing else written.
+- Transition tables: every row, including `STALE_REQUEST`, `YEAR_MISMATCH` (gap year and never-closed year), `ROSTER_NOT_CONFIGURED`, `INVALID_YEAR`.
+- Held races:
+  - Start vs Start and Close vs Close: exactly one `changed:true`; exact profile count; every index row resolves.
+  - Close vs send: `status === 200` exactly when the message exists; lifecycle closed at the end.
+  - Admission vs Start: one 2026 profile per roster email; the held identity is either stale or points at a 2026 profile; none for the excluded email.
+  - Seeding one missing profile vs Close: the profile exists exactly when seeding did not throw `YEAR_CLOSED`.
+- Old clients: bootstrap without the header is 200 in 2025 and 409 `CLIENT_UPDATE_REQUIRED` with no identity write in 2026; delayed send with a 2025 `senderUserId` → 403, without it → 400; `years/2026/messages` empty; push status before Start then register after → `STALE_REGISTRATION`.
+- Transitions gate: with `NODE_ENV` forced to `production` and the flag unset, both routes → 409 `TRANSITIONS_DISABLED`, nothing written.
+- Reset route → 410; `H` unchanged.
+- **Second rollover:** activity in 2026, Close 2026, Start 2027. `H` and the snapshot of `years/2026/{users,messages,reactions}` are deep-equal afterwards. Sends carrying 2025 ids and 2026 ids are both rejected in 2027. A participant returning in 2027 gets a new UUID.
+
+**`__tests__/integration/firestore-rules-years.test.js`** (real rules)
+
+- Legacy active with no `year`: existing behaviour.
+- **Rules-enforced malformed lifecycle**, each denying every read and write: `resetting` without a year; null year; string year; missing epoch; `closedYears` not a list; `closed` without membership; `active` with the year listed; year 2026 with an empty list.
+- **Future-listed year:** lifecycle `{epoch:1, state:'active', year:2026, closedYears:[2027]}` with documents seeded in `years/2027/*` → every read of 2027 denied. With `closedYears:[2025, 2027]` → 2025 readable, 2027 still denied.
+- **Server-only list defects** (a duplicate entry; descending order; a string element): the test asserts only the hard bounds — no year above `year` and no unlisted year becomes readable, and no non-current year becomes writable. It does not assert a blanket denial.
+- Closed 2025: root reads allowed; the claim transaction, lastRead create/update, typing set/delete and reaction create/delete all fail; `years/2026/*` reads and writes fail.
+- Active 2026 with `closedYears:[2025]` and a matching identity: own-profile writes in `years/2026` succeed; root reads succeed; every root write fails; `years/2025`, `years/02026`, `years/2027`, `years/abc` denied; a 2026 reaction needs a 2026 message.
+- **Skipped year:** lifecycle `{year:2028, closedYears:[2025,2026]}` with documents seeded in `years/2027/*` → every read denied.
+- Second-rollover state `{year:2027, closedYears:[2025,2026]}`: reads of 2025 and 2026 allowed; every writer type denied against root and `years/2026`.
+- Stale-epoch identity: everything denied, root included.
+- lastRead and typing of non-current years unreadable.
+- Lifecycle `get` allowed for an identity holder, denied for an outsider; list and write denied.
+
+**New unit and API tests**
+
+- `__tests__/unit/year_paths.test.js`: path table; every row of the interpretation table; `lifecycleKey`.
+- `__tests__/unit/year_client.test.js`: same key keeps object identity; a new key replaces it; `null` clears; refs use the scope's year.
+- `__tests__/unit/useYearArchive.test.js`:
+  - only `getDocsFromServer` is called;
+  - `immutable` results are cached and a second mount reads nothing;
+  - non-immutable results are never cached;
+  - one of three rejecting → `error`, no cache, no data;
+  - a snapshot with `fromCache: true` → `error`, not cached;
+  - a snapshot with `hasPendingWrites: true` → `error`, not cached, nothing displayed; a following `reload` with clean metadata → `ready` and cached;
+  - `reload` refetches all three and bypasses the cache;
+  - a held load followed by `clearYearArchiveCache()` is neither cached nor shown;
+  - uid A's entry is not served to uid B;
+  - a year switch mid-load discards the late result.
+- `__tests__/unit/archive_threads.test.js`: mutual pairs stay two threads; ambiguous rows never labelled Santa; unroutable rows kept; a pairing with no messages listed; missing participant → `Unknown`; count invariant.
+- `__tests__/unit/ArchiveViewer.test.js`:
+  - renders pairings, threads and static reaction chips (no buttons);
+  - with `onBack`, a `Back to current year` button is present in both the list and the thread view and clicking it calls `onBack` once; without `onBack` it is absent;
+  - `Back to conversations` returns to the list and does not call `onBack`;
+  - `Try again` calls reload;
+  - no `setDoc`, `deleteDoc`, `onSnapshot`, outbox or typing call occurs.
+- `__tests__/unit/useAdminYearActions.test.js`: exact request bodies and headers; a mistyped or cancelled prompt sends nothing; toasts; `onComplete`; busy guard.
+- `__tests__/unit/useTypingIndicator_scope.test.js`: no subscription without a scope; subscribes at the captured year's path; ignores snapshots after a scope change.
+- `__tests__/api/admin_year_api.test.js`: 401, 403 `ADMIN_REQUIRED`, `TRANSITIONS_DISABLED`, `INVALID_YEAR`, each mapped code, success shapes.
+
+**Updated tests**
+
+- **Season pattern.** `__tests__/helpers/useUser-mock.js` exports `LEGACY_ACTIVE_SEASON = { year: 2025, state: 'active', epoch: 1, closedYears: [] }`. Every mocked `useUser()` value with a user gains it, in `__tests__/context/RealtimeMessagesContext.test.js`, `__tests__/unit/admin_ui.test.js`, `__tests__/unit/app_flows.test.js`, `__tests__/unit/auth_timing.test.js`, `__tests__/unit/realtime_hooks.test.js`, `__tests__/unit/unread_badge_clearing.test.js` and `__tests__/unit/unread_logic.test.js`.
+- **Scope pattern.** `__tests__/unit/lastReadClient.test.js`, `__tests__/unit/lastReadClient-normalization.test.js`, `__tests__/unit/typing-client.test.js` and `__tests__/unit/reactions-client.test.js` call `setWritableScope({ key: 'a', year: 2025 })` in `beforeEach` and `setWritableScope(null)` in `afterEach`. These are the only four tests that reach the real writers.
+- `__tests__/unit/lastReadClient.test.js` added cases. Each changes the scope with `setWritableScope({ key: 'b', year: 2026 })` and does **not** call `resetLastReadState()`:
+  - no scope → `updateLastReadTimestamp` returns `false` and the cache is untouched;
+  - an entry enqueued under A whose debounce fires under B → no `setDoc`, entry removed;
+  - a write under a 2026 scope goes to `('years', '2026', 'lastRead', key)`;
+  - **late resolve:** `setDoc` held under A, scope becomes B, promise resolves → `remoteSeen` and cache unchanged, a B entry enqueued meanwhile keeps its own state and timers, no further `setDoc` for A after advancing timers;
+  - **late reject, permission-denied:** held under A, scope becomes B, promise rejects → no `getDoc` confirmation read, no retry after advancing 60 s, no `console.error`;
+  - **late reject, other error:** same expectations;
+  - **confirmation in flight:** rejection under A starts the confirmation `getDoc` (at A's ref), scope becomes B, `getDoc` resolves → nothing applied, no retry, no log;
+  - control: with A still current, the confirmation read uses A's ref and settles as today;
+  - `flushPendingWrites` deletes an entry whose scope is not current.
+- `__tests__/unit/typing-client.test.js`: a trailing write is dropped after a scope change; `clearTyping` without a scope sends no delete; `resetTypingState` cancels timers.
+- `__tests__/unit/reactions-client.test.js`: a held `getDoc` across a scope change throws and writes nothing.
+- `__tests__/context/RealtimeMessagesContext.test.js`: closed season → no listeners and empty data; 2026 active → `collection(firestore, 'years', '2026', 'messages')`.
+- `__tests__/unit/useUser_realtime.test.js`:
+  - participants mock becomes `isKnownParticipantEmail`; `doc` mock becomes `(db, ...segments)`;
+  - bootstrap sends the header and publishes `season`;
+  - the cancel test asserts all six steps with the scope cleared first;
+  - **StrictMode** render: updaters run once; the scope and the lifecycle subscription are restored after remount;
+  - a cache-only differing lifecycle snapshot does not move the fence and causes no bootstrap;
+  - **healthy convergence:** ready at A, a server-confirmed B arrives → scope is `null` synchronously, exactly one bootstrap, a B response publishes ready with B;
+  - **lagging listener:** a refresh response B while the fence is A → loading with scope `null`; the listener then confirms B and the 1 s retry publishes ready;
+  - **persistent mismatch:** the fence stays at K1 while every response carries K0 → exactly three bootstrap requests, then `error.code === 'LIFECYCLE_MISMATCH'` with `user`, `season` and the scope all `null`; advancing timers causes no further request; `refreshUser` starts one new bounded cycle;
+  - a held stale bootstrap response released after a reconciliation is ignored;
+  - a snapshot or error delivered to a callback from a previous subscription generation (after an account switch) is ignored, causes no reattach, and the fence is `null` for the new uid;
+  - **environment reset:** a server-confirmed missing document while ready → one re-bootstrap, fence `null`, the response is accepted;
+  - **first admission, error then success:** the first lifecycle listener errors with `permission-denied` while the bootstrap is held; the 2xx then arrives → exactly one new lifecycle `onSnapshot` attach, bootstrap request count still 1, and a server-confirmed advance on the new listener triggers reconciliation;
+  - **first admission, success then error:** the 2xx arrives first; the first listener's `permission-denied` is delivered afterwards → exactly one new attach, no extra bootstrap, and the new listener is live;
+  - **repeated denial:** the reattached listener also errors → no further attach and no bootstrap, including after advancing timers; a later `refreshUser` 2xx → exactly one more attach;
+  - a 2xx response without `year` is transient and causes no reattach;
+  - remove the reset-notice test.
+- `__tests__/unit/admin_ui.test.js` (mocks `ArchiveViewer`):
+  - an admin with an active season sees `Close 2025` on the Welcome screen, and in both sidebar and mobile header once assigned;
+  - a non-admin sees no Close or Start button;
+  - a closed season shows `Start 2026`, the banner and the archive, with no chat;
+  - Close with prompt `2025` POSTs `/api/admin/year/close` with `{"year":2025}` and refreshes;
+  - Start with prompt `2026` POSTs `{"fromYear":2025,"targetYear":2026}`, and its prompt lists `getRosterNames(2026)` without the excluded name;
+  - a wrong or cancelled prompt sends nothing;
+  - `/api/admin/reset` is never called and no "Reset" text exists.
+  - **Users-fetch scope** (new `describe` in this file, because it already renders the real Welcome screen with a controllable `getDocs`). Setup: `collection.mockImplementation((db, ...segments) => ({ path: segments.join('/') }))`; `getDocs.mockImplementation((ref) => held[ref.path].promise)` with one deferred per path; rows are built from roster names as `{ id, name, gifterId }`.
+    - *Late older year:* render as an unassigned user named `getRosterNames(2026)[0]` in season 2025 (fetch for `users` held); rerender with a new profile id and season `{ year: 2026, state: 'active', epoch: 2, closedYears: [2025] }` (fetch for `years/2026/users`); resolve 2026 with nobody paired → the select lists exactly `getRosterNames(2026).slice(1)`; then resolve the 2025 fetch with every row paired → the options are unchanged and not empty.
+    - *Account switch:* render as account A (unassigned) and resolve its fetch so that only one name N is unpaired → the select lists `[N]`; rerender as account B (different `authUid` and profile id, same year) with its fetch held → the select has only the placeholder option, not `[N]`; resolve B with nobody paired → the select lists the roster minus B's own name.
+- `__tests__/unit/Sidebar.test.js` (this file already covers `TabNavigation`):
+  - drop `onReset` and the `isAdmin` mock;
+  - `Sidebar` renders a supplied `adminControl` node and nothing admin-related without one;
+  - `Sidebar` with `showArchive` false has no Archives item; with true, clicking it calls `onTabChange('archive')` and `activeTab="archive"` gives it active styling;
+  - `TabNavigation` with `showArchive` false has no Archives tab; with true, clicking it calls `onTabChange('archive')`.
+- `__tests__/unit/RecipientSelector.test.js`: mock `@/lib/participants` with synthetic `getRosterNames`/`getRosterEmail`; replace the real name and email in the fixture with synthetic values; `doc` mock becomes `(firestore, ...segments)`. With `year={2025}`, `collection(firestore, 'users')`; with `year={2026}`, `collection(firestore, 'years', '2026', 'users')` and the matching `doc`. `adminControl` renders; `Browse past years` appears only with `onBrowseArchive` and calls it; no reset button. The three transaction tests stay.
+- `__tests__/unit/participants.test.js`: remove the legacy-helper tests and their email literals. Assert: the 2025 roster equals the registry; the 2026 roster is the registry without the entry named `Jana`; round-trip lookups using roster entries; an unconfigured year gives `null` and `[]`; `isKnownParticipantEmail`; `getNextRosterYear`.
+- `__tests__/unit/emulator_scripts_config.test.js`: compare the script list with `GLOBAL_COLLECTIONS ∪ YEAR_COLLECTIONS` as sets.
+- `__tests__/lib/participant_admission.test.js`: participants mock exposes the new helpers; the fake database supports collection names containing `/` and `limit()`; remove the reset-protocol cases; add stale-index, closed-year, roster, `requireLegacyYear`, interpretation, `closeYear`, `startNewYear` cases.
+- `__tests__/lib/firestore.test.js`: remove the reset and user-helper suites; mock `assertYearOpen`.
+- `__tests__/lib/push_server.test.js`: register and unregister call `runFencedTransaction` with third argument `{ allowClosed: true }`.
+- `__tests__/api/send_message_api.test.js`:
+  - `useStore({ users, messages, sender, year = 2025 })` keys its store by the joined collection path and passes `year` and `state: 'active'` in the fake context;
+  - with `year: 2026` the message is created under `years/2026/messages`, the recipient is read from `years/2026/users`, and the root store is untouched;
+  - a recipient that exists only at root while the year is 2026 → 400;
+  - `YEAR_CLOSED` → 409 without push, replacing the reset case;
+  - the route calls `runFencedTransaction` without `allowClosed`.
+- `__tests__/api/auth_bootstrap_api.test.js`: new response fields; `{ verifyIndex: true, requireLegacyYear: true }` without the header and `false` with it; mapping table with `YEAR_CLOSED`, `CLIENT_UPDATE_REQUIRED`, without `RESET_IN_PROGRESS`.
+- `__tests__/api/dev_assign_api.test.js`, `__tests__/api/push_register_api.test.js`, `__tests__/api/push_unregister_api.test.js`, `__tests__/api/push_status_api.test.js`: replace the `RESET_IN_PROGRESS` → 503 case with `SERVICE_UNAVAILABLE` → 503; `dev_assign_api.test.js` also gains `YEAR_CLOSED` → 409.
+- `__tests__/api/admin_reset_enhanced.test.js`: 410 with and without a token; no Firestore call.
+- `__tests__/integration/participant-admission.test.js`, `__tests__/integration/push-registration.test.js`, `__tests__/integration/firestore_participants.test.js`, `__tests__/integration/init.test.js`: `clearEmulatorFirestore()` replaces `resetDatabase()`; reads go through the Admin SDK; `ensureAllParticipants()` takes no argument; drop the empty-list case; rewrite "re-admits after a reset" as "re-admits after Start with a new profile"; `init.test.js` takes names from `getRoster(2025)` and loses its email literal.
+- `__tests__/integration/firestore-rules-admission.test.js`: lifecycle `get` succeeds for an admitted user; the reset case becomes an unknown-state case.
+- `e2e/admission-and-reset.spec.ts`: remove the admin-reset test.
+
+**`e2e/year-rollover.spec.ts`** — clears the emulator in `beforeAll` and `afterAll`.
+
+- Seed and assign 2025; exchange a message and a reaction.
+- Admin closes (dialog accepted with `2025`): a second open browser shows the banner and the 2025 archive with pairings and no composer, without a reload; `/api/messages/send` → 409.
+- Admin starts 2026: the second browser reaches `Welcome, …` with a new profile id, without a reload.
+- From Welcome: `Browse past years` shows 2025 before a recipient is chosen; `Back to current year` returns to the Welcome screen without a reload.
+- The excluded participant (registry minus `getRoster(2026)`) sees Access Denied; a 2026 message sends; `/api/admin/reset` → 410.
 
 ## Primary-executed steps
-1. Before approval, in the real tree:
-   - `git diff --check`;
-   - every Modify/Delete path exists and every Create path does not;
-   - `for n in $(seq 1 22); do grep -Eq "^\| ${n} \|" PLAN.md || echo "missing ${n}"; done; grep -q "^| Risk |" PLAN.md || echo "missing Risk"` prints nothing;
-   - `grep -nE "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}" PLAN.md` prints nothing.
-2. Record `shasum` of `public/sw.js`, `public/workbox-f1770938.js`, `public/worker-2a484529a5551160.js`, `.claude/settings.local.json`; re-check after every gate; they stay unchanged and unstaged.
-3. After implementation, if D1 = A: delete `src/app/api/admin/assign/route.js`; `grep -rn "admin/assign\|handleAssign\|variant=\|batchUpdateUsers" src e2e __tests__` prints nothing.
-4. `git status --porcelain` lists only manifest paths plus pre-existing items; `git diff --check` passes.
 
-## Verification (primary; all in a disposable copy)
-```
-export PATH=/usr/local/bin:$PATH && node -v        # expect v22.15.0
-VERIFY_DIR="$(mktemp -d)/verify"
-rsync -a --exclude node_modules --exclude .next --exclude .git --exclude '.env*' \
-  --exclude playwright-report --exclude test-results \
-  --exclude 'public/sw.js' --exclude 'public/workbox-*.js' --exclude 'public/worker-*.js' \
-  ./ "$VERIFY_DIR"/
-cp -R node_modules "$VERIFY_DIR"/ && cd "$VERIFY_DIR"
-unset GOOGLE_APPLICATION_CREDENTIALS FIREBASE_PROJECT_ID FIREBASE_CLIENT_EMAIL FIREBASE_PRIVATE_KEY
-export PUSH_DISPATCH_ENABLED=false
-export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
-export FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099
-```
-`PUSH_DISPATCH_ENABLED=false` forces dispatch off for every command, whatever credentials the machine holds; no command calls FCM. Check ports 8080, 9099, 4000, 3000 first, then:
-1. `npm run lint`
-2. `npm run test:unit -- --runInBand` (includes `PublicFeed_grouping`, `message_routing`)
-3. `npx firebase emulators:exec --project=xmasteak-app "npm run test:integration"`
-4. `NEXT_PUBLIC_FIREBASE_API_KEY=fake NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=localhost NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-verify NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=000000000000 NEXT_PUBLIC_FIREBASE_APP_ID=1:000000000000:web:0000000000000000 NEXT_PUBLIC_FIREBASE_VAPID_KEY=fake npm run build`, then:
-   ```
-   ls public/worker-*.js >/dev/null 2>&1 || { echo "FAIL: generated worker missing"; exit 1; }
-   if grep -lE "secret-santa-message[\"']" public/worker-*.js; then
-     echo "FAIL: old custom notification tag present"; exit 1
-   else
-     echo "OK: old custom notification tag absent"
-   fi
-   ```
-5. `npx firebase emulators:exec --project=xmasteak-app "npm run test:e2e"`
-6. Manual against emulators in the copy:
-   - two tabs at first sign-in → one profile;
-   - reset with a second browser open → recovers;
-   - forced mid-reset failure → loading screen with admin Reset → re-run recovers;
-   - a read on one browser clears the badge on another;
-   - `window.__firestoreDebug.printListenerSummary()` shows one all-messages listener before and after an assignment change.
+1. Delete the four files in the manifest with ordinary file deletion. Do not stage.
+2. Search `src`, `__tests__`, `e2e`, `scripts` for every removed export and prop in the table above; expect no match outside this plan's intended lines. Check `docs/runtime-verification.md` (primary-only; not read by the planner) for Reset or `seed_users` references.
+3. Establish how production app and rules deploys happen and where Admin credentials exist. The repository shows neither.
 
-Passing = exit 0 for 1–5 with the listed assertions present, the worker check printing OK, and the recorded hashes unchanged. Push is verified against mocks and the Firestore emulator only.
+## Verification (primary; executed results recorded in checkpoint above)
 
-## Open decisions (user)
+Preconditions:
+- `node --version` satisfies `>=22.13.0 <23` (`.nvmrc` 22.15.0).
+- Before any emulator-backed step, check what is listening on 8080, 9099, 4000 and 3000. Do not stop or reuse anything the primary did not start. The integration and e2e suites clear the entire emulator database, so they run only against an emulator the primary started.
+- Protect owner files: either run the build in a disposable copy of the working tree, or record checksums of `public/sw.js`, `public/workbox-f1770938.js`, `public/worker-2a484529a5551160.js` and `.claude/settings.local.json` beforehand and confirm they are byte-identical afterwards.
 
-| ID | Decision | Recommendation |
-|---|---|---|
-| D1 | Admin shuffle (`plans/05`). **A:** remove the full variant and `/api/admin/assign`. **B:** expose behind an overwrite guard (needs a planner revision). **C:** leave unreachable, fix reset only. | **A.** Plan is written for A. No option exposes an unguarded shuffle. |
-| D2 | Require `email_verified` outside development. | **Yes**, after confirming every participant signs in with Google. |
-| D3 | Deny all client-side message creates. | **Yes.** |
-| D4 | Drafts clear when leaving a chat tab. | **Clear.** |
-| D5 | Push desired state changes only by an explicit Enable/Disable click on that device. After rollout each device opts in again (a device with no local preference is registered as disabled). Sign-out stops this device's notifications; the preference is remembered per account. | **Accept.** |
-| D6 | Discard the unowned `publicFeedLastViewed` key. | **Yes.** |
-| D7 | Non-production push stays off unless `PUSH_DISPATCH_ENABLED=true`; `false` is a hard off everywhere. | **Yes.** |
+Checks, each passing with zero failures:
+1. `git diff --check`; changed and untracked paths are exactly the manifest plus the pre-existing owner changes.
+2. The reference search from primary step 2 is clean.
+3. Rules compile gate inside `npx firebase emulators:exec --project=xmasteak-app`: the five `firestore-rules-*` integration files.
+4. `npm run lint`
+5. `npm test`, including `__tests__/unit/PublicFeed_grouping.test.js` and `__tests__/unit/message_routing.test.js`.
+6. `npx firebase emulators:exec --project=xmasteak-app "npm run test:integration"`
+7. `npx firebase emulators:exec --project=xmasteak-app "npm run test:e2e"`
+8. `npm run build`
+
+## Owner-authorized rollout
+
+Each step that touches a real project needs its own explicit authorization. A step that cannot be verified is a stop.
+
+1. **Topology inventory.** List every place server code can run with Admin credentials: the current and previous production deployments, preview or branch deployments, aliases and domains, CI secrets, and local credential files. **If this cannot be established, stop; Close is not executed.**
+2. **Read-only pre-checks.** The lifecycle is missing or valid active per the interpretation table; anything else, including `resetting` or any malformed field, is a stop that needs separate planning. Root `users` has one profile per 2025 roster member, by count. No `years` collection. Record root counts. A managed export or confirmed point-in-time recovery is recommended.
+3. **Deploy the rules, then the new app with `YEAR_TRANSITIONS_ENABLED` unset.** The rules behave as today while the lifecycle is legacy-active. Close and Start return `TRANSITIONS_DISABLED`.
+4. **Verify normal operation** and that `/api/admin/reset` on the production domain returns 410.
+5. **Neutralize old writers before anything is closed.** Using the method the owner chooses (open decision 2), make sure no older deployment or credential holder can run the old Reset or any old writer, then wait out the platform's maximum request duration so in-flight old requests have ended. Verify that a superseded deployment, if any is still reachable, can no longer write. Unverified → stop.
+6. **Enable transitions:** set `YEAR_TRANSITIONS_ENABLED=true` on the new deployment.
+7. **Owner presses Close 2025.** Verify lifecycle `{state:'closed', year:2025, closedYears:[2025]}`, unchanged counts, archive visible.
+8. **Owner presses Start 2026** after reading the roster in the prompt. Verify `year:2026`, epoch +1, `years/2026/users` equals the roster size, root counts unchanged.
+
+Rollback: before step 5, redeploying the previous app and rules is possible. From step 5 on, roll forward only. Restoring or reopening a closed year is not provided and needs separate planning and authorization.
+
+## Risk-area flags (CLAUDE.md)
+
+- **Message routing:** `message-utils.js` untouched; the archive assembler consumes it and is stricter about ambiguity than the live feed.
+- **SDK separation:** `year-paths.js` and `archive-threads.js` are pure; `year-client.js` and the hooks are Client SDK only; admission and routes are Admin SDK only.
+- **Listener reads:** one extra single-document listener, held for the signed-in session and reattached at most once per successful bootstrap. Live listeners stay at two, zero in a closed year. Opening an archive year costs users + messages + reactions server reads once per page session.
+- **Security rules:** fully rewritten. Lifecycle metadata becomes readable by accounts that were ever admitted, a deliberate minimum needed to tell a just-stale tab about Start. Rules validate a documented subset of the lifecycle schema.
+- **Anonymity:** unchanged for the open year; closed years show pairings to all admitted participants.
+
+## Not verified (needs execution or access)
+
+- Rules constructs: `Map.get(key, default)`, `in` on a list, `int()` on a path segment, comparing two booleans with `==`, the literal `match /system/lifecycle`, split `get`/`list`. Check 3 is the gate.
+- The emulator REST clear endpoint; `tx.get(query.limit(1))` in an Admin transaction; that a thrown callback rolls back without retry; emulator lock behaviour (the held-transaction assertions hold under either serialization).
+- Actual runtime behaviour of `getDocsFromServer` when offline. Unit tests exercise it only through mocks.
+- Whether Firestore ends already-open listeners when an admission goes stale. The design does not depend on it; an excluded participant's old tab may keep showing 2025 data it already had until reload.
+- Production data, deployment topology, PWA update timing, and `docs/runtime-verification.md`.
+
+## Deferred
+
+Automatic assignment and matching; archive-only access; Reopen or restoration; cleanup of inert stale `participantIndex`, `authIdentities` and `pushTokens` rows; year awareness in `scripts/check_messages.js` and `scripts/test_message_routing.js`; markdown in the archive.
+
+## Open decisions (owner)
+
+1. **Resolved with implementation approval:** the approved manifest deletes `scripts/seed_users.js`, because it can write production root collections outside every fence. Primary completed that deletion. No emulator-only replacement was added.
+2. **How old writers are neutralized in rollout step 5.** Recommended: rotate the Admin service-account key so every older deployment and stray credential copy loses access at once. Alternative: remove every superseded deployment and alias individually. Either needs explicit authorization; neither is authorized by approving this plan.
+
+## Resolutions to review points
+
+Points A–F were accepted in revision 3 and are carried over unchanged. The manifest is unchanged.
+
+**G. Lifecycle listener lost-attach race.** The subscription now records the admission sequence it was attached at, and a single rule, `maybeReattachLifecycle()`, runs from both the listener's error callback and the 2xx bootstrap branch: reattach only if the listener has ended and a newer accepted bootstrap exists. Whichever of the two events arrives second performs the reattach, so both orderings converge. A reattached listener that ends again stays stopped until a later successful bootstrap, giving at most one reattach per accepted 2xx. The path issues no bootstrap requests and uses no timers, and its callbacks keep the captured subscription-generation guard; the sequence resets on uid change. `ended` is set on any listener error, permission-denied included, since the listener is dead either way. Tests for both orderings, repeated denial and stale generations are added to `__tests__/unit/useUser_realtime.test.js`. The fence and reconciliation design is otherwise as in revision 3.
+
+**H. `page.js` users-fetch stale scope.** The effect gets an effect-local `active` flag, and its result is stored tagged with a scope key (`authUid`, profile id, year, epoch). `allUsers` and `availableRecipients` are no longer state; they are derived, and only from a result whose key equals the current key. A late response from an earlier year, account or refetch is dropped, and the first render after a scope change shows no previous-scope rows or candidates. State is set only in promise callbacks. The claim transaction and manual selection are untouched. Two held-result tests are added to `__tests__/unit/admin_ui.test.js`, which already renders the real Welcome screen with a controllable `getDocs`: a late 2025 result after a 2026 success, and an account switch.

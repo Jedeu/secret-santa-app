@@ -15,7 +15,7 @@ const { getFirestore } = require('firebase-admin/firestore');
 const EMULATOR_PROJECT_ID = 'xmasteak-app';
 const DEFAULT_EMULATOR_HOST = '127.0.0.1:8080';
 
-// Same order as APP_COLLECTIONS in src/lib/firestore.js.
+// Root (legacy 2025) and global collection names, for diagnostics.
 const APP_COLLECTIONS = [
     'authIdentities',
     'participantIndex',
@@ -57,9 +57,25 @@ function getEmulatorFirestore() {
     return getFirestore();
 }
 
+/**
+ * Delete every document in the emulator database (all collections, every year) through
+ * the emulator's REST endpoint. Destructive by design; emulator only.
+ */
+async function clearEmulatorFirestore() {
+    const host = ensureEmulatorHost();
+    const response = await fetch(
+        'http://' + host + '/emulator/v1/projects/' + EMULATOR_PROJECT_ID + '/databases/(default)/documents',
+        { method: 'DELETE' }
+    );
+    if (!response.ok) {
+        throw new Error(`Emulator clear failed with status ${response.status}`);
+    }
+}
+
 module.exports = {
     EMULATOR_PROJECT_ID,
     APP_COLLECTIONS,
+    clearEmulatorFirestore,
     getEmulatorFirestore,
     isLoopbackHost,
 };

@@ -3,13 +3,12 @@ import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase-client';
 import { signOutCurrentUser } from '@/lib/sign-out';
 import { useToast } from '@/components/ClientProviders';
-import AdminPanel from '@/components/AdminPanel';
 
 /**
  * AuthGuard - Handles authentication UI states
  *
  * Shows appropriate UI based on auth state:
- * - Loading: Shows loading spinner (plus a reset notice and admin Reset while a reset runs)
+ * - Loading: Shows loading spinner
  * - Access Denied: Shows error and sign-out button
  * - Other auth errors: Generic card with "Try again" and "Sign out"
  * - Not authenticated: Shows sign-in button
@@ -19,12 +18,11 @@ import AdminPanel from '@/components/AdminPanel';
  * @param {boolean} props.isLoading - Whether auth is still loading
  * @param {Object|null} props.currentUser - Current authenticated user or null
  * @param {Object|null} props.authError - Auth error object with code and message
- * @param {string|null} [props.notice] - 'RESET_IN_PROGRESS' while an admin reset is running
  * @param {string|null} [props.authEmail] - Signed-in Firebase Auth email
  * @param {Function} [props.onRetry] - Re-run the profile bootstrap
  * @param {React.ReactNode} props.children - Content to render when authenticated
  */
-export default function AuthGuard({ isLoading, currentUser, authError, notice = null, authEmail = null, onRetry, children }) {
+export default function AuthGuard({ isLoading, currentUser, authError, authEmail = null, onRetry, children }) {
     const { showToast } = useToast();
 
     // Handle sign in with Google
@@ -58,16 +56,6 @@ export default function AuthGuard({ isLoading, currentUser, authError, notice = 
             <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
                 <div className="card login-card">
                     <p style={{ textAlign: 'center' }}>Loading...</p>
-                    {notice === 'RESET_IN_PROGRESS' && (
-                        <>
-                            <p className="text-muted" style={{ textAlign: 'center', marginTop: '12px' }}>
-                                A reset is in progress. If this persists, an admin can run Reset again.
-                            </p>
-                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
-                                <AdminPanel userEmail={authEmail} onResetComplete={onRetry} />
-                            </div>
-                        </>
-                    )}
                 </div>
             </main>
         );

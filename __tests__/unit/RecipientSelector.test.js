@@ -7,6 +7,7 @@ import RecipientSelector from '@/components/RecipientSelector';
 const mockGetDocs = jest.fn();
 const mockRunTransaction = jest.fn();
 const mockDoc = jest.fn();
+const mockCollection = jest.fn();
 const mockShowToast = jest.fn();
 
 jest.mock('@/lib/firebase-client', () => ({
@@ -19,7 +20,7 @@ jest.mock('firebase/auth', () => ({
 }));
 
 jest.mock('firebase/firestore', () => ({
-    collection: jest.fn(() => ({ _type: 'collection' })),
+    collection: (...args) => mockCollection(...args),
     query: jest.fn(() => ({ _type: 'query' })),
     where: jest.fn(() => ({ _type: 'where' })),
     limit: jest.fn(() => ({ _type: 'limit' })),
@@ -27,6 +28,27 @@ jest.mock('firebase/firestore', () => ({
     doc: (...args) => mockDoc(...args),
     runTransaction: (...args) => mockRunTransaction(...args)
 }));
+
+// Synthetic rosters (no real participant data).
+jest.mock('@/lib/participants', () => {
+    const rosters = {
+        2025: [
+            { name: 'Ann', email: 'ann@example.test' },
+            { name: 'Louis', email: 'louis@example.test' },
+        ],
+        2026: [
+            { name: 'Ann', email: 'ann@example.test' },
+            { name: 'Louis', email: 'louis-2026@example.test' },
+        ],
+    };
+    return {
+        getRosterNames: (year) => (rosters[year] || []).map((p) => p.name),
+        getRosterEmail: (year, name) => {
+            const found = (rosters[year] || []).find((p) => p.name.toLowerCase() === String(name).toLowerCase());
+            return found ? found.email : null;
+        },
+    };
+});
 
 jest.mock('@/components/ClientProviders', () => ({
     useToast: () => ({ showToast: mockShowToast })
@@ -36,35 +58,46 @@ jest.mock('@/lib/sign-out', () => ({
     signOutCurrentUser: jest.fn(() => Promise.resolve())
 }));
 
+import { where } from 'firebase/firestore';
+
 describe('RecipientSelector transactional claim', () => {
     const currentUser = {
         id: 'user-1',
-        name: 'Jed',
-        email: 'jed.piezas@gmail.com'
+        name: 'Ann',
+        email: 'ann@example.test'
     };
+
+    function recipientSnapshot(path = 'users/user-2') {
+        const recipientRef = { id: 'user-2', path };
+        return {
+            recipientRef,
+            snapshot: {
+                empty: false,
+                docs: [
+                    {
+                        ref: recipientRef,
+                        id: 'user-2',
+                        data: () => ({ id: 'user-2', gifterId: null })
+                    }
+                ]
+            }
+        };
+    }
 
     beforeEach(() => {
         jest.clearAllMocks();
         global.confirm = jest.fn(() => true);
 
-        mockDoc.mockImplementation((firestore, collectionName, id) => ({
-            id,
-            path: `${collectionName}/${id}`
+        mockDoc.mockImplementation((firestore, ...segments) => ({
+            id: segments[segments.length - 1],
+            path: segments.join('/')
         }));
+        mockCollection.mockImplementation((firestore, ...segments) => ({ path: segments.join('/') }));
     });
 
     it('uses a transaction to atomically set recipient and gifter', async () => {
-        const recipientRef = { id: 'user-2', path: 'users/user-2' };
-        mockGetDocs.mockResolvedValue({
-            empty: false,
-            docs: [
-                {
-                    ref: recipientRef,
-                    id: 'user-2',
-                    data: () => ({ id: 'user-2', gifterId: null })
-                }
-            ]
-        });
+        const { recipientRef, snapshot } = recipientSnapshot();
+        mockGetDocs.mockResolvedValue(snapshot);
 
         mockRunTransaction.mockImplementation(async (_db, transactionFn) => {
             const tx = {
@@ -94,6 +127,7 @@ describe('RecipientSelector transactional claim', () => {
             <RecipientSelector
                 currentUser={currentUser}
                 availableRecipients={['Louis']}
+                year={2025}
                 onComplete={onComplete}
             />
         );
@@ -106,17 +140,8 @@ describe('RecipientSelector transactional claim', () => {
     });
 
     it('shows recipient-taken message when transaction detects claim conflict', async () => {
-        const recipientRef = { id: 'user-2', path: 'users/user-2' };
-        mockGetDocs.mockResolvedValue({
-            empty: false,
-            docs: [
-                {
-                    ref: recipientRef,
-                    id: 'user-2',
-                    data: () => ({ id: 'user-2', gifterId: null })
-                }
-            ]
-        });
+        const { snapshot } = recipientSnapshot();
+        mockGetDocs.mockResolvedValue(snapshot);
 
         mockRunTransaction.mockImplementation(async (_db, transactionFn) => {
             const tx = {
@@ -139,6 +164,7 @@ describe('RecipientSelector transactional claim', () => {
             <RecipientSelector
                 currentUser={currentUser}
                 availableRecipients={['Louis']}
+                year={2025}
             />
         );
 
@@ -151,17 +177,8 @@ describe('RecipientSelector transactional claim', () => {
     });
 
     it('guards against fast double-submit before loading state propagates', async () => {
-        const recipientRef = { id: 'user-2', path: 'users/user-2' };
-        mockGetDocs.mockResolvedValue({
-            empty: false,
-            docs: [
-                {
-                    ref: recipientRef,
-                    id: 'user-2',
-                    data: () => ({ id: 'user-2', gifterId: null })
-                }
-            ]
-        });
+        const { snapshot } = recipientSnapshot();
+        mockGetDocs.mockResolvedValue(snapshot);
 
         let resolveTransaction;
         mockRunTransaction.mockImplementation(() => new Promise((resolve) => {
@@ -172,6 +189,7 @@ describe('RecipientSelector transactional claim', () => {
             <RecipientSelector
                 currentUser={currentUser}
                 availableRecipients={['Louis']}
+                year={2025}
             />
         );
 
@@ -185,5 +203,72 @@ describe('RecipientSelector transactional claim', () => {
 
         resolveTransaction();
         await waitFor(() => expect(continueButton).not.toBeDisabled());
+    });
+
+    it('2025 uses the root users collection', async () => {
+        const { snapshot } = recipientSnapshot();
+        mockGetDocs.mockResolvedValue(snapshot);
+        mockRunTransaction.mockResolvedValue(undefined);
+
+        render(<RecipientSelector currentUser={currentUser} availableRecipients={['Louis']} year={2025} />);
+        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Louis' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+        await waitFor(() => expect(mockRunTransaction).toHaveBeenCalledTimes(1));
+        expect(mockCollection).toHaveBeenCalledWith({}, 'users');
+        expect(mockDoc).toHaveBeenCalledWith({}, 'users', 'user-1');
+        expect(where).toHaveBeenCalledWith('email', '==', 'louis@example.test');
+        expect(screen.getByText('2025 exchange')).toBeInTheDocument();
+    });
+
+    it('2026 uses the years/2026 users collection and the 2026 roster', async () => {
+        const { snapshot } = recipientSnapshot('years/2026/users/user-2');
+        mockGetDocs.mockResolvedValue(snapshot);
+        mockRunTransaction.mockResolvedValue(undefined);
+
+        render(<RecipientSelector currentUser={currentUser} availableRecipients={['Louis']} year={2026} />);
+        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Louis' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+        await waitFor(() => expect(mockRunTransaction).toHaveBeenCalledTimes(1));
+        expect(mockCollection).toHaveBeenCalledWith({}, 'years', '2026', 'users');
+        expect(mockCollection).not.toHaveBeenCalledWith({}, 'users');
+        expect(mockDoc).toHaveBeenCalledWith({}, 'years', '2026', 'users', 'user-1');
+        expect(where).toHaveBeenCalledWith('email', '==', 'louis-2026@example.test');
+        expect(screen.getByText('2026 exchange')).toBeInTheDocument();
+    });
+
+    it('renders a supplied adminControl and no reset button', () => {
+        render(
+            <RecipientSelector
+                currentUser={currentUser}
+                availableRecipients={[]}
+                year={2025}
+                adminControl={<button type="button">Close 2025</button>}
+            />
+        );
+
+        expect(screen.getByRole('button', { name: 'Close 2025' })).toBeInTheDocument();
+        expect(screen.queryByText(/Reset/)).not.toBeInTheDocument();
+    });
+
+    it('"Browse past years" appears only with onBrowseArchive and calls it', () => {
+        const { rerender } = render(
+            <RecipientSelector currentUser={currentUser} availableRecipients={[]} year={2026} />
+        );
+        expect(screen.queryByRole('button', { name: 'Browse past years' })).not.toBeInTheDocument();
+
+        const onBrowseArchive = jest.fn();
+        rerender(
+            <RecipientSelector
+                currentUser={currentUser}
+                availableRecipients={[]}
+                year={2026}
+                onBrowseArchive={onBrowseArchive}
+            />
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Browse past years' }));
+
+        expect(onBrowseArchive).toHaveBeenCalledTimes(1);
     });
 });

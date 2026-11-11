@@ -3,19 +3,32 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { clientAuth, firestore } from '@/lib/firebase-client';
-import { getParticipantName } from '@/lib/participants';
+import { isKnownParticipantEmail } from '@/lib/participants';
 import { cancelOutboxDrains } from '@/lib/message-outbox';
 import { cancelPushOperations } from '@/lib/push-client';
 import { resetLastReadState } from '@/lib/lastReadClient';
+import { resetTypingState } from '@/lib/typing-client';
+import { clearYearArchiveCache } from '@/hooks/useYearArchive';
+import { interpretLifecycle, lifecycleKey } from '@/lib/year-paths';
+import { setWritableScope, yearDocRef } from '@/lib/year-client';
 
 /**
- * Single owner of auth + profile state.
+ * Single owner of auth + profile + season state.
  *
- * Three separate lifecycles:
+ * Lifecycles:
  * - Auth generation: changes only on uid change, sign-out or unmount.
  * - Request sequence: one per bootstrap request; a response/retry applies only if the
  *   auth generation is unchanged and its sequence is the latest.
- * - Profile subscription: keyed on [authUid, user.id] with an effect-local active flag.
+ * - Profile subscription: keyed on [authUid, user.id, season.year] with an effect-local
+ *   active flag.
+ * - Lifecycle subscription: one listener on system/lifecycle for the whole signed-in auth
+ *   session. Only server-confirmed snapshots move the fence (confirmedKeyRef); a
+ *   confirmed change while ready re-bootstraps. A listener that ends with an error is
+ *   reattached at most once per accepted 2xx bootstrap (maybeReattachLifecycle).
+ *
+ * Publication: stateRef.current is authoritative and React state mirrors it. Every
+ * publication also publishes the writable scope (src/lib/year-client.js), which is set
+ * only while ready in an active year.
  *
  * The server (/api/auth/bootstrap) resolves or creates the UUID profile; the client
  * never queries or writes `users` to establish identity.
@@ -26,14 +39,18 @@ const UserContext = createContext(null);
 // Retry delays: 1s, 2s, 4s, then every 8s.
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
 const MAX_TRANSIENT_ATTEMPTS = 5;
+// Consecutive fenced-out bootstrap responses before the LIFECYCLE_MISMATCH error card.
+const MAX_LIFECYCLE_MISMATCHES = 3;
+const CLIENT_VERSION_HEADER = 'X-Secret-Santa-Client';
+const CLIENT_VERSION = '2';
 
 const SIGNED_OUT_STATE = {
     status: 'signed-out',
     user: null,
     authUid: null,
     authEmail: null,
+    season: null,
     error: null,
-    notice: null,
 };
 
 function retryDelay(attempt) {
@@ -47,10 +64,44 @@ function accessDeniedError(email) {
     };
 }
 
+/**
+ * Writable scope for a published state: only while ready in an active year.
+ */
+function scopeFor(state) {
+    if (state?.status !== 'ready' || !state.user?.id || !state.season || state.season.state !== 'active') {
+        return null;
+    }
+    return {
+        key: `${state.authUid}|${state.user.id}|${state.season.year}|${state.season.epoch}`,
+        year: state.season.year,
+    };
+}
+
+/**
+ * Season from a 2xx bootstrap body, or null when the fields are invalid (transient).
+ */
+function parseSeason(data) {
+    if (!Number.isInteger(data?.year) || !Number.isInteger(data?.epoch)) {
+        return null;
+    }
+    if (data.yearState !== 'active' && data.yearState !== 'closed') {
+        return null;
+    }
+    return {
+        year: data.year,
+        state: data.yearState,
+        epoch: data.epoch,
+        closedYears: Array.isArray(data.closedYears) ? [...data.closedYears] : [],
+    };
+}
+
 function cancelSessionWork() {
+    setWritableScope(null);
     cancelOutboxDrains();
     cancelPushOperations();
     resetLastReadState();
+    resetTypingState();
+    clearYearArchiveCache();
 }
 
 export function UserProvider({ children }) {
@@ -64,12 +115,23 @@ export function UserProvider({ children }) {
     const authInitializedRef = useRef(false);
     const mountedRef = useRef(true);
 
+    // Lifecycle subscription, fence and reconciliation.
+    const lifecycleSubRef = useRef({ id: 0, unsubscribe: null, ended: false, attachedAtSeq: 0 });
+    const admissionSeqRef = useRef(0);
+    const confirmedKeyRef = useRef(null);
+    const mismatchCountRef = useRef(0);
+    const handleProfileLossRef = useRef(null);
+
+    /**
+     * Synchronous publication; the updater is pure and called exactly once.
+     */
     const applyState = useCallback((updater) => {
-        setState((prev) => {
-            const next = typeof updater === 'function' ? updater(prev) : updater;
-            stateRef.current = next;
-            return next;
-        });
+        const prev = stateRef.current;
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        if (next === prev) return;
+        stateRef.current = next;
+        setWritableScope(scopeFor(next));
+        if (mountedRef.current) setState(next);
     }, []);
 
     const clearRetryTimer = useCallback(() => {
@@ -78,6 +140,70 @@ export function UserProvider({ children }) {
             retryTimerRef.current = null;
         }
     }, []);
+
+    const unsubscribeLifecycle = useCallback(() => {
+        const sub = lifecycleSubRef.current;
+        sub.id += 1;
+        const unsubscribe = sub.unsubscribe;
+        sub.unsubscribe = null;
+        if (typeof unsubscribe === 'function') {
+            unsubscribe();
+        }
+    }, []);
+
+    const subscribeLifecycleRef = useRef(null);
+
+    /**
+     * Reattach only if the listener has ended and a newer accepted bootstrap exists.
+     * Called from the listener's error callback and from the 2xx bootstrap branch.
+     */
+    const maybeReattachLifecycle = useCallback(() => {
+        const sub = lifecycleSubRef.current;
+        if (firebaseUserRef.current && sub.ended && admissionSeqRef.current > sub.attachedAtSeq) {
+            subscribeLifecycleRef.current?.();
+        }
+    }, []);
+
+    const subscribeLifecycle = useCallback(() => {
+        unsubscribeLifecycle();
+        const sub = lifecycleSubRef.current;
+        const id = sub.id;
+        sub.ended = false;
+        sub.attachedAtSeq = admissionSeqRef.current;
+        if (!firestore) return;
+
+        sub.unsubscribe = onSnapshot(
+            doc(firestore, 'system', 'lifecycle'),
+            { includeMetadataChanges: true },
+            (snapshot) => {
+                if (id !== lifecycleSubRef.current.id) return;
+                // Cached data never moves the fence.
+                if (snapshot?.metadata?.fromCache !== false) return;
+
+                const liveKey = snapshot.exists() ? lifecycleKey(interpretLifecycle(snapshot.data())) : null;
+                if (liveKey === confirmedKeyRef.current) return;
+
+                // The fence follows the server in either direction.
+                confirmedKeyRef.current = liveKey;
+                mismatchCountRef.current = 0;
+
+                const current = stateRef.current;
+                if (current.status === 'ready' && lifecycleKey(current.season) !== liveKey) {
+                    handleProfileLossRef.current?.();
+                }
+            },
+            (error) => {
+                if (id !== lifecycleSubRef.current.id) return;
+                lifecycleSubRef.current.ended = true;
+                console.warn('[useUser] Lifecycle listener stopped:', error);
+                maybeReattachLifecycle();
+            }
+        );
+    }, [unsubscribeLifecycle, maybeReattachLifecycle]);
+
+    useEffect(() => {
+        subscribeLifecycleRef.current = subscribeLifecycle;
+    }, [subscribeLifecycle]);
 
     const runBootstrapRef = useRef(null);
 
@@ -119,7 +245,7 @@ export function UserProvider({ children }) {
                     status: 'error',
                     user: null,
                     authUid: null,
-                    notice: null,
+                    season: null,
                     error: { code: 'BOOTSTRAP_FAILED', message: 'Could not load your profile. Please try again.' },
                 }));
                 return;
@@ -135,7 +261,10 @@ export function UserProvider({ children }) {
                 if (!isLatest()) return;
                 response = await fetch('/api/auth/bootstrap', {
                     method: 'POST',
-                    headers: { Authorization: `Bearer ${token}` },
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        [CLIENT_VERSION_HEADER]: CLIENT_VERSION,
+                    },
                 });
                 if (!isLatest()) return;
                 try {
@@ -150,14 +279,49 @@ export function UserProvider({ children }) {
                 return;
             }
 
-            if (response.ok && data?.user?.id) {
+            const season = response.ok ? parseSeason(data) : null;
+            if (response.ok && data?.user?.id && season) {
+                // An accepted 2xx proves the caller's identity record now exists.
+                admissionSeqRef.current += 1;
+                maybeReattachLifecycle();
+
+                const confirmed = confirmedKeyRef.current;
+                if (confirmed !== null && lifecycleKey(season) !== confirmed) {
+                    // Fenced out: the response disagrees with the latest server-confirmed lifecycle.
+                    cancelSessionWork(); // scope is null from here on
+                    mismatchCountRef.current += 1;
+                    if (mismatchCountRef.current >= MAX_LIFECYCLE_MISMATCHES) {
+                        mismatchCountRef.current = 0;
+                        applyState((prev) => ({
+                            ...prev,
+                            status: 'error',
+                            user: null,
+                            authUid: null,
+                            season: null,
+                            error: { code: 'LIFECYCLE_MISMATCH', message: 'The exchange changed while loading. Please try again.' },
+                        }));
+                        return;
+                    }
+                    applyState((prev) => ({
+                        ...prev,
+                        status: 'loading',
+                        user: null,
+                        authUid: null,
+                        season: null,
+                        error: null,
+                    }));
+                    scheduleRetry(generation, sequence, 'initial', mismatchCountRef.current - 1); // 1 s, then 2 s
+                    return;
+                }
+
+                mismatchCountRef.current = 0;
                 applyState((prev) => ({
                     ...prev,
                     status: 'ready',
                     user: data.user,
                     authUid: firebaseUser.uid,
+                    season,
                     error: null,
-                    notice: null,
                 }));
                 return;
             }
@@ -167,27 +331,13 @@ export function UserProvider({ children }) {
                 return;
             }
 
-            if (response.status === 503 && data?.code === 'RESET_IN_PROGRESS') {
-                applyState((prev) => ({
-                    ...prev,
-                    status: 'loading',
-                    user: null,
-                    authUid: null,
-                    error: null,
-                    notice: 'RESET_IN_PROGRESS',
-                }));
-                // Unbounded: 1s, 2s, 4s, then every 8s; always from 'initial'.
-                scheduleRetry(generation, sequence, 'initial', attempt);
-                return;
-            }
-
             if (response.status === 403 || response.status === 409) {
                 applyState((prev) => ({
                     ...prev,
                     status: 'error',
                     user: null,
                     authUid: null,
-                    notice: null,
+                    season: null,
                     error: {
                         code: data?.code || (response.status === 403 ? 'ACCESS_DENIED' : 'PROFILE_CONFLICT'),
                         message: data?.error || 'Your profile could not be loaded.',
@@ -196,9 +346,10 @@ export function UserProvider({ children }) {
                 return;
             }
 
+            // Includes a 2xx without valid season fields and a 503 (unavailable lifecycle).
             handleTransient(new Error(`Bootstrap failed with status ${response.status}`));
         })();
-    }, [applyState, scheduleRetry]);
+    }, [applyState, scheduleRetry, maybeReattachLifecycle]);
 
     useEffect(() => {
         runBootstrapRef.current = runBootstrap;
@@ -218,13 +369,20 @@ export function UserProvider({ children }) {
             status: 'loading',
             user: null,
             authUid: null,
+            season: null,
             error: null,
         }));
         startBootstrapNow('initial');
     }, [applyState, clearRetryTimer, startBootstrapNow]);
 
+    useEffect(() => {
+        handleProfileLossRef.current = handleProfileLoss;
+    }, [handleProfileLoss]);
+
     // Auth lifecycle
     useEffect(() => {
+        // Restores the scope after a StrictMode remount.
+        setWritableScope(scopeFor(stateRef.current));
         mountedRef.current = true;
 
         if (!clientAuth || !firestore) {
@@ -236,7 +394,13 @@ export function UserProvider({ children }) {
             });
             return () => {
                 mountedRef.current = false;
+                setWritableScope(null);
             };
+        }
+
+        // StrictMode remount with a user already known: restore the lifecycle listener.
+        if (firebaseUserRef.current) {
+            subscribeLifecycle();
         }
 
         const unsubscribe = onAuthStateChanged(clientAuth, (firebaseUser) => {
@@ -255,6 +419,14 @@ export function UserProvider({ children }) {
             clearRetryTimer();
             cancelSessionWork();
 
+            unsubscribeLifecycle();
+            confirmedKeyRef.current = null;
+            mismatchCountRef.current = 0;
+            admissionSeqRef.current = 0;
+            if (firebaseUser) {
+                subscribeLifecycle();
+            }
+
             if (!firebaseUser) {
                 applyState({ ...SIGNED_OUT_STATE });
                 return;
@@ -266,11 +438,11 @@ export function UserProvider({ children }) {
                 user: null,
                 authUid: null,
                 authEmail: email || null,
+                season: null,
                 error: null,
-                notice: null,
             });
 
-            if (!email || !getParticipantName(email)) {
+            if (!email || !isKnownParticipantEmail(email)) {
                 applyState((prev) => ({
                     ...prev,
                     status: 'error',
@@ -286,27 +458,32 @@ export function UserProvider({ children }) {
             mountedRef.current = false;
             authGenerationRef.current += 1;
             clearRetryTimer();
+            setWritableScope(null);
+            unsubscribeLifecycle();
             if (typeof unsubscribe === 'function') {
                 unsubscribe();
             }
         };
-    }, [applyState, clearRetryTimer, startBootstrapNow]);
+    }, [applyState, clearRetryTimer, startBootstrapNow, subscribeLifecycle, unsubscribeLifecycle]);
 
     const userId = state.user?.id ?? null;
     const authUid = state.authUid;
+    const seasonYear = state.season?.year ?? null;
 
-    // Profile subscription (assignment changes + profile-loss recovery)
+    // Profile subscription (assignment changes + profile-loss recovery), at the season's path
     useEffect(() => {
-        if (!userId || !authUid || !firestore) {
+        if (!userId || !authUid || !seasonYear || !firestore) {
             return undefined;
         }
 
         let active = true;
+        // Ignore callbacks once the published state has left this profile.
+        const isCurrent = () => active && stateRef.current.user?.id === userId;
         const unsubscribe = onSnapshot(
-            doc(firestore, 'users', userId),
+            yearDocRef(seasonYear, 'users', userId),
             { includeMetadataChanges: true },
             (docSnapshot) => {
-                if (!active) return;
+                if (!isCurrent()) return;
 
                 if (docSnapshot.exists()) {
                     const updatedUser = docSnapshot.data() || {};
@@ -328,7 +505,7 @@ export function UserProvider({ children }) {
                 handleProfileLoss();
             },
             (error) => {
-                if (!active) return;
+                if (!isCurrent()) return;
                 if (error?.code === 'permission-denied') {
                     handleProfileLoss();
                     return;
@@ -343,7 +520,7 @@ export function UserProvider({ children }) {
                 unsubscribe();
             }
         };
-    }, [authUid, userId, applyState, handleProfileLoss]);
+    }, [authUid, userId, seasonYear, applyState, handleProfileLoss]);
 
     // Expose user data on window for E2E testing in development mode
     useEffect(() => {
@@ -365,7 +542,7 @@ export function UserProvider({ children }) {
         const current = stateRef.current;
         if (current.status === 'error') {
             const email = firebaseUser.email || '';
-            if (!email || !getParticipantName(email)) {
+            if (!email || !isKnownParticipantEmail(email)) {
                 return; // Non-participant: no request.
             }
             applyState((prev) => ({
@@ -373,8 +550,8 @@ export function UserProvider({ children }) {
                 status: 'loading',
                 user: null,
                 authUid: null,
+                season: null,
                 error: null,
-                notice: null,
             }));
             startBootstrapNow('initial');
             return;
@@ -387,9 +564,9 @@ export function UserProvider({ children }) {
         user: state.user,
         authUid: state.authUid,
         authEmail: state.authEmail,
+        season: state.season,
         loading: state.status === 'loading',
         error: state.error,
-        notice: state.notice,
         refreshUser,
     }), [state, refreshUser]);
 

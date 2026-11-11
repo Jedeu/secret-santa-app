@@ -68,5 +68,5 @@ Both delegates work only with repository files relevant to the task. They do not
 ## Safety
 
 - Keep secrets and participants' personal data out of prompts, logs, commits, and plans.
-- Local development and checks use the Firebase emulators by default. `.firebaserc` defaults to `xmasteak-app`, which is not a `demo-` project, and `scripts/seed_users.js` connects to production when `FIRESTORE_EMULATOR_HOST` is unset and production credentials are in the environment. Target the emulator explicitly.
+- Local development and checks use the Firebase emulators by default. `.firebaserc` defaults to `xmasteak-app`, which is not a `demo-` project. Target the emulator explicitly. The integration and end-to-end suites and `scripts/wipe_db.js` clear the whole emulator database; run them only against emulators the primary started.
 - These need the user's explicit authorization, which can cover a whole task rather than each step: deploys and any read or write against a real Firebase project; resetting or wiping data anywhere other than an emulator the primary started; stopping processes the primary did not start; force-pushing, rewriting history, or pushing directly to `main`; changing `.claude/settings*.json` outside an approved plan.

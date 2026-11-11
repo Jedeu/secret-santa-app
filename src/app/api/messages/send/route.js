@@ -11,6 +11,7 @@ import {
     resolveAuthorizedConversationId,
     matchesStoredMessage,
 } from '@/lib/message-utils';
+import { yearCollectionPath } from '@/lib/year-paths';
 
 const MAX_WRITE_ATTEMPTS = 3;
 const WRITE_RETRY_DELAY_MS = 120;
@@ -145,9 +146,10 @@ export async function POST(request) {
         // Generated outside the transaction so retries keep the same id.
         const messageId = clientMessageId || uuidv4();
 
-        const work = async (tx, { user: sender }) => {
-            const recipientRef = firestore.collection('users').doc(toId);
-            const messageRef = firestore.collection('messages').doc(messageId);
+        // Fenced on the open year (YEAR_CLOSED otherwise); refs use that year's paths.
+        const work = async (tx, { user: sender, year }) => {
+            const recipientRef = firestore.collection(yearCollectionPath(year, 'users').join('/')).doc(toId);
+            const messageRef = firestore.collection(yearCollectionPath(year, 'messages').join('/')).doc(messageId);
             const [recipientSnap, messageSnap] = await tx.getAll(recipientRef, messageRef);
 
             if (senderUserId && senderUserId !== sender.id) {

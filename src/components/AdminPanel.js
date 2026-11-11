@@ -1,40 +1,76 @@
 'use client';
 import { isAdmin } from '@/lib/config';
-import { useAdminReset } from '@/hooks/useAdminReset';
+import { getNextRosterYear, getRosterNames } from '@/lib/participants';
+import { useAdminYearActions } from '@/hooks/useAdminYearActions';
 
 /**
- * AdminPanel - Compact admin Reset button (mobile header and reset-in-progress screen).
+ * AdminPanel - Compact admin season control.
  *
- * Pair assignment is user self-selection (RecipientSelector); there is no admin shuffle.
+ * Active year -> "Close {year}". Closed year -> "Start {next}" when a roster for a later
+ * year is configured, otherwise a muted "No next-year roster". Pair assignment is user
+ * self-selection (RecipientSelector); nothing is assigned automatically.
  *
  * @param {Object} props
  * @param {string} props.userEmail - Current user's email
- * @param {Function} [props.onResetComplete] - Called after successful reset
+ * @param {{ year: number, state: 'active'|'closed' }|null} props.season - Published season
+ * @param {Function} [props.onComplete] - Called after a successful Close or Start
  */
-export default function AdminPanel({ userEmail, onResetComplete }) {
-    const handleReset = useAdminReset({ onComplete: onResetComplete });
+export default function AdminPanel({ userEmail, season, onComplete }) {
+    const { closeYear, startYear, busy } = useAdminYearActions({ onComplete });
 
-    // Only render if user is admin
-    if (!isAdmin(userEmail)) {
+    // Only render for an admin with a published season
+    if (!isAdmin(userEmail) || !season) {
         return null;
+    }
+
+    const year = season.year;
+
+    if (season.state === 'active') {
+        return (
+            <button
+                type="button"
+                onClick={() => closeYear(year)}
+                disabled={busy}
+                style={buttonStyle(busy)}
+                title={`Close the ${year} exchange (read-only)`}
+            >
+                {`Close ${year}`}
+            </button>
+        );
+    }
+
+    const next = getNextRosterYear(year);
+    if (next === null) {
+        return (
+            <span className="text-muted" style={{ fontSize: '12px' }}>
+                No next-year roster
+            </span>
+        );
     }
 
     return (
         <button
-            onClick={handleReset}
-            style={{
-                background: '#dc3545',
-                color: 'white',
-                fontSize: '12px',
-                padding: '6px 12px',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontWeight: '500'
-            }}
-            title="Reset all data and assignments"
+            type="button"
+            onClick={() => startYear(year, next, getRosterNames(next))}
+            disabled={busy}
+            style={buttonStyle(busy)}
+            title={`Start the ${next} exchange`}
         >
-            Reset
+            {`Start ${next}`}
         </button>
     );
+}
+
+function buttonStyle(busy) {
+    return {
+        background: 'var(--primary)',
+        color: 'white',
+        fontSize: '12px',
+        padding: '6px 12px',
+        border: 'none',
+        borderRadius: '4px',
+        cursor: busy ? 'not-allowed' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+        fontWeight: '500'
+    };
 }

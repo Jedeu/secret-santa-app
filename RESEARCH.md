@@ -1,130 +1,152 @@
-# Research: Bug-sweep remediation plan
+# Research and verification: annual exchange archives
 
-## Request and ownership
+## Approved request
 
-The user asks Claude Fable 5.2 to read `BUG_REPORT.md` and prepare an efficient, correct implementation plan covering every reported bug, ready for a later Opus implementer. The user explicitly requires the primary assistant to review the plan, review the eventual implementation, and execute the tests. This is planning only; neither the request nor this file is approval to implement.
+The owner approved reviewed `PLAN.md` revision 4 on 2026-11-10. On 2026-11-11 the owner separately requested a draft pull request.
 
-Use `AGENTS.md` and `CLAUDE.md` for the workflow and architecture contract. Planner: `claude-fable-5-2`, xhigh effort, read/search tools only. Later implementer: Claude Opus 5.5, **high** effort by the user's latest explicit instruction; edits only after approval. The primary performs adversarial review, all execution, checks, Git, and runtime verification.
+- Existing conversations and pairings are **2025**; the next exchange is **2026**.
+- Two separate admin actions: **Close year** makes the exchange read-only; **Start new year** opens a clean exchange later.
+- Currently admitted participants may browse every archived conversation, including before choosing their current recipient.
+- Reveal historical pairings at Close; do not change current-year anonymity.
+- Keep Google sign-in and the participant registry. Preserve historical profiles, names, pairings, messages and reactions.
+- Exclude **Jana** from the 2026 roster and app access once 2026 starts. Preserve her 2025 history for admitted participants. No archive-only access role.
+- Automatic recipient assignment on sign-in is explicitly deferred; current manual selection remains.
 
-## Baseline and limits
+Implementation approval did not authorize production reads/writes, deployments, credential operations or live Close/Start actions. The later draft-PR request authorizes Git/GitHub publication, not those production operations.
 
-- `BUG_REPORT.md` is the current audit artifact: 22 findings plus one conditional development-FCM risk. Its numbering is the traceability contract for this plan; validate root causes against code rather than treating proposed fixes as mandatory designs.
-- Working tree before planning: modified user-owned `.claude/settings.local.json`; untracked `BUG_REPORT.md`, `public/sw.js`, `public/workbox-f1770938.js`, and `public/worker-2a484529a5551160.js`. Preserve them. Do not plan changes to local settings or generated service workers.
-- Existing root `PLAN.md` describes a completed, unrelated project-skill cleanup; it is not approval for this task. The primary saved copies of the previous root research and plan outside the repository before replacing the working artifacts.
-- No application files have changed in this planning task. No production access is authorized. Do not read `.env*`, credentials, participant-data logs, or anything outside the repository. Do not include personal participant values in plans; refer to the existing participant source symbolically and use synthetic test fixtures.
-- The preceding audit ran Node 22.15.0 unit tests (39 suites, 184 tests passed), lint (passed), synthetic in-memory/React reproductions, and isolated Firestore rules probes. Those are historical audit results, not verification of future fixes. Full integration, build, E2E, and actual FCM delivery were not run.
-- Host default Node is newer than the app supports; `/usr/local/bin/node` is verified Node 22.15.0. Primary commands must use a compatible PATH.
-- Planner launch verified: Claude CLI 2.1.321, explicit `--model claude-fable-5-2 --effort xhigh`; initialization and response metadata confirm `claude-fable-5-2`, tools exactly `Glob`, `Grep`, `Read`, no MCP servers, plan permission mode. Safe/restricted mode and disabled settings/skills prevent inherited execution paths. No bypass-permissions mode.
+## Ground truth and architecture
 
-## Ground truth relevant to a coherent fix
+### Legacy storage and reset
 
-### 1. Admission, profiles, and reset (#1, #6, #7, #8)
+Before this change, all year data lived in root `users`, `messages`, `reactions`, `lastRead` and `typing` collections. There was no year field or archive model. The old admin Reset deleted app data, including history, and reseeded participants. It could not safely perform this rollover.
 
-- `src/hooks/useUser.js` locally maintains auth/profile state. `src/app/page.js` and `src/context/RealtimeMessagesContext.js` both call it; this creates independent profile lookups and listeners.
-- First-login profile creation is a client email query followed by a random UUID `setDoc`. `src/lib/firestore.js:ensureAllParticipants` also queries then creates. Neither establishes uniqueness across clients/processes.
-- User document IDs and message endpoints are existing UUIDs, not Auth UIDs. Preserve existing IDs and relationships; never silently choose among duplicate profiles, re-key existing users, or rewrite messages as an incidental fix.
-- `firestore.rules:isSignedIn` only checks authentication. User creation matches token email but does not validate membership. Rules cannot import the JS participant array. A legitimate admission mechanism must not be based on the existence of a client-creatable profile or another client-writable flag.
-- Send and push routes use Admin SDK and bypass rules, so admission must cover server routes as well as direct client reads/writes. Audit every collection and route, including receipts, typing/reactions, init, reset, dev routes, and new identity mappings if proposed.
-- `useUser` has no stale-request generation guard and ignores profile deletion. Reset deletes all user docs and recreates participants with new UUIDs, which strands other clients on deleted IDs.
-- Design a single auth/profile owner with clear bootstrap/error/reset transitions. A reset can race bootstrap/seed and old network responses; define how they coordinate. New identity mappings/admission state, if any, need exact schemas, ownership, bootstrap order, reset semantics, and migration/rollout instructions.
-- No live duplicate-profile inventory exists. Any repair/migration needing real project reads/writes is a separately authorized primary action, not a delegate action or an automatic deployment side effect. Fail safely on conflicting existing records.
+Chosen design: **archive in place**, not copy/verify/delete.
 
-### 2. Pairing and routing (#4, #9, #14, #15)
+- Root collections remain the 2025 archive; later years use `years/{year}/…` with the same five collection names and document shapes.
+- Close is one transaction on `system/lifecycle` that freezes year-specific writes and publishes the year in `closedYears`.
+- Start requires the current year closed, a configured roster, and all five target collections empty. It creates fresh UUID profiles, updates participant indexes and advances the lifecycle/epoch in one transaction.
+- No bulk production reset/deletion remains in the new app. Ordinary active-year typing/reaction deletions and pairing updates remain allowed.
+- The old Reset endpoint returns 410, and the unsafe standalone production-capable seed script is removed.
+- Missing lifecycle/year metadata identifies legacy 2025, never 2026. An invalid existing lifecycle is not overwritten by server operations.
 
-- `RecipientSelector` uses a client transaction to set self `recipientId` and target `gifterId`. Keep that normal self-selection flow unless the user approves a product change.
-- Rules currently permit either one-sided write separately; their predicates inspect pre-write docs and do not restrict unrelated changed fields. The fix must enforce both sides at the database layer, including concurrent claims and post-write invariants.
-- `/api/messages/send` checks sender profile and recipient existence, accepts arbitrary optional `conversationId`, and writes using `create` for idempotency. Client retries include `clientMessageId` and `clientCreatedAt`. Preserve safe replay semantics: historical replay must not become a conflict or duplicate merely because assignment state changed after the original commit.
-- Directional IDs are `santa_{santaUUID}_recipient_{recipientUUID}`. Mutual pairs have two legitimate conversations. Do not collapse those or infer a direction that is ambiguous.
-- Direct message-write rules currently allow legacy fields but not the API's idempotency fields; decide explicitly which client write paths remain supported. Old persisted messages must stay readable even if new writes become stricter. Check dev injection and test fixture paths too.
-- `message-utils.filterMessages` routes unannotated legacy rows to a sorted-ID canonical direction even in nonmutual pairs; PublicFeed independently infers roles from assignments. Unread counts use a third, less precise filter and count legacy rows in both mutual tabs.
-- Prefer a shared pure resolver over multiple divergent routing implementations. Specify input context, malformed/historical row behavior, explicit metadata precedence, mutual ambiguity fallback, and how all callers obtain assignments without duplicating all-message listeners or introducing render-time reads.
+Keeping history in place eliminates bulk copy/delete jobs, partial migration publication and source-deletion recovery states. The necessary cost is consistent year-aware references across server operations, client writers, subscriptions and security rules.
 
-### 3. Outbox ownership/concurrency (#2, #3)
+### Admission, rosters and stale clients
 
-- `message-outbox.js` stores the entire queue under one localStorage key and writes stale snapshots after await boundaries. A newer enqueue can be overwritten in success, error, or retry paths.
-- `activeDrains` is per JS realm; it does not coordinate multiple tabs. Simply re-reading localStorage before an update is not a cross-tab transaction. Select a small, well-defined mutation strategy and explain fallback compatibility and data migration.
-- Queue items contain UUID `fromUserId`, not an immutable captured Auth UID. Token fetch uses whichever `clientAuth.currentUser` exists at that moment. Runtime cleanup removes scheduling listeners but does not cancel in-flight drains.
-- Define enqueue, retries, identity changes, cancellation, fetch completion, 401 refresh, storage events, sign-out, and server sender checks as one contract. Cancellation after server commit must preserve the same idempotency key for safe recovery; a network abort is not proof of non-delivery.
-- Preserve already queued drafts without assigning legacy items to a different account. Do not discard an old shared queue merely to change storage shape. Include deterministic deferred-promise tests, success/error-path interleavings, account changes before/after token resolution, and simultaneous-tab behavior.
+`src/lib/participant-admission.js` remains the server-side identity/profile owner. Admission uses the current year's roster, verified email outside development, UUID profiles and epoch-scoped server-written identity/index records.
 
-### 4. Read boundaries and feed state (#12, #13, #18, #19)
+`PARTICIPANTS` remains the known-person registry; `YEAR_ROSTERS` defines eligibility. Future years require a reviewed roster configuration change and deployment; unconfigured years cannot start.
 
-- `lastReadClient` stores a debounced execution-time `serverTimestamp`, not the observed boundary. Its flush helper has no caller. Timers/cache are module state and need explicit auth/reset lifecycle handling.
-- `useRealtimeUnreadCounts` primes own markers once and subscribes to a local event bus only; the actual Firestore subscription in `useOtherUserLastRead` watches the other participant's receipt.
-- Specify marker shape and migration compatibility, observed timestamp/message boundary behavior, monotonic updates across devices, pending-write ordering, stale snapshot handling, clock behavior, visibility, and permissions. Avoid merely swapping in client wall-clock time without considering skew or unseen messages loaded later.
-- PublicFeed uses one global `publicFeedLastViewed` localStorage key, merges it over user-specific remote markers, and advances markers only when clicking a thread. Do not import an unowned legacy key into a different account. Define migration and selected-thread/new-message visibility behavior.
-- Account reset and deleted profiles must not flush old-user writes under a new auth identity. Visibility/unload writes are best-effort; the plan must not promise browser shutdown guarantees it cannot provide.
-- Keep Firestore marker subscriptions scoped to active/relevant documents and cleanly shared where appropriate. Preserve the single all-messages listener.
+The epoch advances only on Start. Fresh annual UUIDs prevent old outbox payloads from becoming valid new-year messages, including when the same people pair again. Stale identities lose year-data access until readmitted; the excluded participant cannot be readmitted to 2026.
 
-### 5. Push, worker, and sounds (#5, #10, #11, #20, #21; conditional FCM risk)
+Old installed clients may read closed 2025 data but cannot write it. After Start they must reload: bootstrap without the year-aware client header returns `CLIENT_UPDATE_REQUIRED`, preventing the old root-profile subscription/rebootstrap loop.
 
-- `firebase-client` initializes the browser app with only apiKey/authDomain/projectId. Messaging requires appId and messagingSenderId, even when those environment variables exist separately.
-- Foreground listener attachment can throw synchronously inside the runtime effect. Unsupported environments or failed push setup must not break auth/chat.
-- Push client caches only the token globally. It neither tracks registration ownership nor persists desired opt-out state. Startup skips reconciliation if the token string is unchanged and re-enables after disable clears that string.
-- Push APIs authenticate independently. Server token docs are keyed by token hash; a device's ownership can move. Define token rotation, unregister ordering, auth-transition races, reset/server-registration loss, multiple controls, multiple tabs, and sign-out/device sharing semantics.
-- Choose exactly one background display owner. The installed SDK inspected by the primary automatically displays notification-payload messages before calling `onBackgroundMessage`; the worker displays a second custom notification with another tag. Planner must use repository source, not inspect dependencies; primary verified this behavior during the audit.
-- If choosing data-only custom display, specify awaited worker lifetime and click behavior; if keeping SDK display, preserve appropriate icons/click handling without adding a second display.
-- Auth/Firestore emulators do not emulate FCM. Include a fail-closed development/test push guard or a clearly separated authorization decision for real push, not credential-dependent accidental external dispatch.
-- `NotificationSoundRuntime` only initializes after seeing loading transition true to false, so a component mounted after provider hydration stays silent. Preserve initial-history suppression, identity resets, visibility/standalone/mute rules, and deduplication.
+### Archive fidelity and routing
 
-### 6. UI and utilities (#16, #17, #22)
+The archive uses the archived year's profiles and assignments, never the new year's profiles. It preserves directional conversations and mutual pairs, retains unroutable messages, separates ambiguous legacy rows without inventing a definite Santa, and lists pairings with no messages.
 
-- `ChatTabs` returns the same unkeyed `Chat` type for Recipient and Santa. Draft state persists across destination changes. A per-conversation key is the minimal isolation option; explicitly document whether returning to a tab clears or restores an unsent draft.
-- Desktop `Sidebar.onReset` is passed `refreshUser`, not a reset action. The mobile compact AdminPanel has the real authenticated confirmation/reset flow. Prefer shared action ownership rather than duplicating destructive-action implementations.
-- IMPORTANT PRODUCT DECISION: `plans/05-admin-assign-decision.md` already identifies unreachable Start Exchange as an unresolved choice. The live flow is self-selection. It recommends removing the unused shuffle UI/endpoint; alternatively exposing it requires overwrite protection because the current route reshuffles existing selections. Do not automatically add a destructive shuffle button merely because audit #17 noted it was unreachable. Surface the decision with a recommendation; user approval of the final plan can resolve it.
-- Utility scripts use a different emulator namespace from the app. Keep diagnostic/wipe/injection scripts explicitly emulator-only; do not solve the namespace mismatch by allowing an unset host to connect to production. Old hardcoded participant UUIDs in routing diagnostics become stale after reset; handle them without logging personal data or adding incidental cleanup.
+The live routing module is unchanged. Its grouping/routing regression tests remain in the gate.
 
-## Primary-verified external constraints
+Archive rendering is passive: no composer, lastRead markers, typing, reaction toggles or outbox activity. Old reactions render as static chips. Data is fetched on demand with three server reads, not permanent historical listeners. Only complete snapshots without pending writes are cached, keyed by auth identity/year; auth changes invalidate pending loads and cache entries. Offline first-load behaviour is an honest error with manual retry, not a partial archive silently memoized forever.
 
-Official Firebase rules documentation confirms that `getAfter()` evaluates post-transaction/batch state and can require sets of writes to occur together. Access limits are 10 document calls per operation and 20 per multi-operation request (cached calls may be excluded); document-dependent rules reads can be billed. Rules are not query filters. Source inspected by the primary: https://firebase.google.com/docs/firestore/security/rules-conditions . Account for these constraints in assignment/admission rules and listener-read budgeting; the planner must not execute external lookups.
+### Client lifecycle and scope races
 
-Additional primary-inspected references:
-- Firestore transactions require all reads before writes, may rerun their callbacks, and fail offline: https://firebase.google.com/docs/firestore/manage-data/transactions . Any transactional marker or bootstrap proposal must define offline/retry behavior and avoid external side effects inside retried callbacks.
-- IndexedDB transactions serialize overlapping readwrite work; they can auto-commit when no requests remain, and successful individual requests are not equivalent to transaction completion: https://developer.mozilla.org/en-US/docs/Web/API/IDBTransaction . If selected for the outbox, avoid holding a database transaction across network/token awaits and report success only after commit.
+The reviewed plan explicitly addresses:
 
-- The HTML Standard explicitly says localStorage users should assume no cross-agent-cluster locking; a check followed by setItem is not a cross-tab compare-and-swap: https://html.spec.whatwg.org/multipage/webstorage.html . This informed the preference-race review; immutable queue payloads/tombstones are acceptable without an IndexedDB dependency.
+- Publishing writable scope synchronously, outside replayable React state-updater functions.
+- Capturing scope/reference identity for read markers, typing timers and reaction toggles so delayed work cannot resolve a different year later.
+- Ignoring invalidated read-marker resolutions, rejections and confirmation reads.
+- Keeping a metadata listener for the signed-in session, acting only on server-confirmed snapshots.
+- Fencing bootstrap responses against the confirmed lifecycle; persistent disagreement produces a bounded retryable error rather than stale writable UI or an unbounded loop.
+- Bounded lifecycle-listener reattachment for either ordering of first-admission success and permission denial.
+- Tagging and cancelling user-list fetches so old-year/account results cannot overwrite new recipient options, even for one render.
+- Keeping archives reachable from the unassigned-participant Welcome screen, with a return action to current-year selection.
 
-## Planning progress and handoff (2026-11-09)
+### Rules and anonymity
 
-- Fable returned an original draft and three complete revisions; the latest complete text is saved as root `PLAN.md`, revision 4. The primary adversarially reviewed each version and recorded the remaining blocker in its status header. This is NOT user-approved or implementation-ready.
-- Major revisions corrected cross-instance reset fencing, dev-assignment writes during reset, immutable outbox/tombstone semantics and honest old-client cutover, single-flight marker writes, shared device push intent, non-reused registration preconditions, asynchronous preference overwrite races, invalid-token cleanup fencing, missing test coverage, and isolated verification that preserves user-generated assets.
-- One blocker remains: matching-state push reconciliation can return `unchanged` without a server mutation, so an older held enable/unregister can commit afterwards. Client convergence is insufficient if that older tab closes or loses its response. Fable was asked to revise the matching-state rule and add deterministic pre-commit interleaving tests; it did not return this final correction.
-- The CLI reported: `You've hit your 5-hour limit · resets 9:10pm (America/Vancouver)`. Do not silently substitute another model. Ask the user whether to resume Fable after reset or authorize another planner.
-- Primary operational metadata for resuming: Claude session `1a160f84-1f13-48b0-bda4-71243dc14479`, model `claude-fable-5-2`, effort `xhigh`, tools exactly `Read,Grep,Glob`, plan/restricted/safe modes, no MCP/skills/commands. The last submitted user instruction already contains the final counterexample and requests one complete replacement plan. Prior output and feedback are retained outside the repository; delegates must not read those paths.
-- Subsequent user request: have an Opus 5.5 xhigh subagent implement everything except the final push-notification race. That is the requested implementation scope; the final race is explicitly deferred. Preserve the plan's user-decision/approval gates before a write-capable handoff.
-- Opus availability preflight: explicit `--model claude-opus-5-5 --effort xhigh`, zero tools, safe/restricted/plan mode. CLI selected the requested model but returned a synthetic usage-limit response before inference: the same 5-hour limit, resetting 9:10pm America/Vancouver. No Opus implementation agent ran or edited files. Pi's catalog has no `claude-opus-5-5` alternative. Do not silently substitute another model or account.
-- No application code changed, and no application checks were rerun for planning. Historical audit results above are not verification of a future implementation. The primary owns eventual implementation diff review and every executed check, as the user explicitly requires.
+Rules allow year data to be read only for the current year or an explicitly closed earlier year, never a future or unlisted year. Writes are limited to the current open year. Server writers independently fence lifecycle/membership because Admin SDK operations bypass client rules.
 
-## Resumed task and latest user direction
+Rules validate lifecycle scalar fields, list type and current-year/state consistency. List-element typing/order, duplicates and other canonical-list checks are server-only; this documented residual does not permit future-year reads or non-current-year writes. Only the server writes lifecycle metadata, and rollout stops on invalid existing metadata.
 
-- The user now directs Fable to resolve the last push race and then Opus to implement the completed plan, with primary review/testing retained. This supersedes the earlier exclusion of the final race.
-- Latest explicit implementation effort override: **`claude-opus-5-5`, `--effort high`**, not xhigh. Fable remains `claude-fable-5-2`, xhigh, read/search only. No Opus implementation has started yet.
-- Fable completed revision 5 after the usage reset and recovery from sleep. CLI confirmed `claude-fable-5-2`, tools exactly `Glob,Grep,Read`, no MCP, plan permission mode; no delegate checks or edits occurred. The primary reviewed the complete final plan and confirmed the final fence: every successful reconcile writes a fresh epoch/revision even if desired state already matches; old held requests fail without their older realm running convergence.
-- Root `PLAN.md` now records **Status: APPROVED**, dated 2026-11-10, based on the user's explicit direction to finish Fable's last fix and then implement the plan, with the subsequent Opus **high** override. Scope includes all 22 bugs and the dev-FCM safeguard, recommended D1=A and D2–D7, but no production/deploy/live-FCM/data repair/dependency/Git authority. Manifest validation passed (24 creates, 74 modifies, 1 primary delete), full report-ID/risk coverage, no personal emails, protected hashes and whitespace checks. Production provider/account inspection remains unperformed and unauthorized.
-- A zero-tool Opus availability probe succeeded with an actual `claude-opus-5-5` response at explicit `--effort high`. The implementer has now been launched with the approved plan and latest user effort override. CLI initialization and actual response metadata confirm `claude-opus-5-5`, tools exactly `Edit,Glob,Grep,Read,Write`, no MCP, normal `acceptEdits` mode with no bypass. Safe mode, disabled settings/skills and tool filtering prevent inherited execution paths. The primary owns all code review and execution.
-- The primary saved protected-file hashes and prepared a disposable verification copy without `.env*`, local agent settings, private agent artifacts, logs, or existing generated service workers. Baseline on Node 22.15.0: lint exit 0; unit suite exit 0 (39 suites, 184 tests). These primary-executed baseline results are not future implementation verification.
-- The first resumed Fable output was interrupted by host sleep (the CLI explicitly reported computer sleep mid-response). The primary started a task-scoped `caffeinate -i` process and resumed the same read-only Fable session; it will be stopped after this task. Do not mistake partial streamed output for a complete reviewed plan.
+Current-year anonymity remains the existing UI/social trust convention, not a hard raw-data secrecy guarantee. Closed-year pairings are deliberately revealed to admitted participants.
 
-## Implementation and verification checkpoint (2026-11-10)
+## Planning and implementation evidence
 
-- Opus completed the approved 24 creates and 74 modifications using `claude-opus-5-5` at explicit **high** effort. The primary deleted the obsolete admin assignment route. Both launches were confirmed by CLI session output; only Read/Grep/Glob/Edit/Write were used, with no out-of-manifest writes or forbidden reads found in the audit. No delegate executed checks.
-- Primary review reproduced a missing marker-teardown guard: an invalidated rejected write still started a confirmation read. Opus corrected generation/live-entry checks and added regression coverage. The exact primary probe changed from one unexpected confirmation read (exit 1) to zero (exit 0). The primary also returned the actual lint failure; Opus corrected the test's render-time capture and removed two unused lint suppressions.
-- Primary-executed automated results on Node 22.15.0, in the isolated copy: **lint exit 0; 50 unit/API suites / 422 tests passed; 9 emulator integration suites / 68 tests passed; production build exit 0; 48 Chromium E2E tests passed with no skips**. The generated worker exists and the removed custom notification tag is absent. Public build values were fake; credentials were excluded, emulator hosts explicit, and push dispatch hard-off.
-- Additional primary probes passed: 15 real-emulator rule assertions; 5 admission/reset foundation cases; three outbox interleavings; both matching-state push fences with an older request held before server commit and its realm cancelled before release. These are separate from the suite counts.
-- Scope/whitespace audit passed: exactly 24 new files and 74 tracked manifest modifications, approved deletion absent, no unexpected paths, no staged files. User-owned settings and all three pre-existing generated assets retain their recorded hashes.
-- **Owner-confirmed local Google popup:** the user reported, “Popup closed and chat loaded,” after using the prepared disposable stack in a normal browser. This verifies that local sign-in path; it is not production/provider-inventory or real-FCM verification. Headless popup-relay attempts timed out and are not reported as passing.
-- **Completed additional primary browser checks:** the final attached-stack probe passed all five assertions using the existing development auth helper: two tabs share one profile; one global message listener remains before/after assignment; reading on one isolated browser clears the other browser's badge; reset re-bootstraps open browsers without reload; a real reset failure after profile deletion displays the reset notice and the admin recovery button completes recovery. Zero uncaught page errors, zero attempted external Firebase requests, and zero unclassified console errors; two typing-cleanup denials and six intentionally induced bootstrap-503 responses were recorded. Fresh concurrent profile creation/seed is separately covered by the real-emulator foundation/integration tests.
-- Earlier extra-browser attempts failed on relay/login timing or overly broad selectors; they remain failed experiments, not retroactive passes. An after-begin-only failure left profiles intact and did not produce the expected loading notice in the emulator; the completed deleted-profile recovery check injects failure via the real `afterDelete` hook instead. No application-code change was made to force these probe outcomes.
-- Browser logs are not clean: post-teardown typing deletes are denied by the new session/reset fences, and the unchanged single-tab persistence setup falls back to memory with multiple tabs. No unlisted typing-helper/cache-policy changes were made to hide these observations; any additional remediation needs its own scoped plan.
-- The owner popup check and additional browser checks used the fresh owned emulator/dev-server stack in the disposable copy; only its disposable test accounts/data were prepared or reset. Process metadata and redacted test logs remain outside the repository. The primary shut down those owned test processes after verification; ports 8080, 9099, 4000 and 3000 were confirmed clear, and the temporary primary-only Jest probe was removed from the disposable copy. At the local-verification checkpoint, no production reads/writes, deployment, live FCM, production data repair, dependency changes, commit or push had occurred. Production provider/verified-email confirmation and real-device push remain separate owner-authorized rollout checks.
-- **Subsequent Git authorization:** the user requested a pushed draft PR containing the task changes for review. The primary is publishing the approved manifest plus the audit/plan/research records on `fix/bug-sweep-remediation`, based on current `origin/main` (tree-identical to the validated base after the workflow PR's squash merge). User-owned local settings and the three pre-existing generated workers remain excluded. This authorizes neither deployment nor a direct/force push to `main`.
+Fable (`claude-fable-5-2`, xhigh) drafted and revised the plan using read/search tools only. Primary adversarial review resolved lifecycle validation, target-namespace cleanliness, cache fidelity, scope/callback races, old-client fences, rollout ordering and exact test/file contracts before requesting approval.
 
-## Required plan qualities
+After owner approval, Opus (`claude-opus-5-5`, xhigh) implemented **20 creates and 64 modifications** using only read/search/edit/write tools. Primary completed the **4 approved deletions**, reviewed the implementation and executed all checks. No delegate ran a command, test, build, browser, database or Git operation.
 
-- Return one complete self-contained `PLAN.md` as text. It must be DRAFT, with adversarial review indicated, a one-line goal, exact create/modify/delete manifest, precise exported signatures/import paths/data shapes/SDK choices, primary-executed steps, verification, and user decisions with recommendations.
-- Group changes by shared root cause and sequence dependencies to avoid rewriting auth, routing, read state, or push multiple times. All 22 report IDs and the conditional risk need an explicit implementation/test disposition.
-- Name every test/document/config file that must change. Inspect proposed files. Include concrete expected regression assertions, not only 'add tests' or commands. Update architecture docs for changed contracts; distinguish deferred unrelated cleanup.
-- Plan for compatibility with current UUID profiles, existing messages/receipts/outbox data, development login, seed/init/reset helpers, and existing tests/mocks. If direct-write support changes, name affected test and dev paths.
-- Include fail-safe rollout/backfill/migration prerequisites separately from ordinary local implementation. No deploy, real Firebase access, data wipes, installs/dependencies, settings changes, or generated asset overwrites are authorized by this planning request.
-- Primary must review the plan adversarially and seek revisions for blockers, then obtain user approval before launching Opus. During implementation the primary reviews the full diff, executes checks on Node 22, and supplies real failures to the implementer for in-scope corrections.
-- Verification should cover unit/API/rules integration, required `__tests__/unit/PublicFeed_grouping.test.js`, build/PWA behavior, E2E and multi-user browser scenarios, plus resource/listener cleanup and cross-tab races. Only the primary executes these. Port/process checks and real-service authorization boundaries apply. Do not claim future tests pass.
+Scope audits confirmed:
+
+- Every implementer edit was in the approved manifest; no forbidden file read or unexpected tool was found.
+- The rules match the approved full replacement.
+- No removed-export reference or SDK-boundary issue remains in the checked source/test/script paths.
+- Original owner settings and pre-existing generated service-worker assets remain byte-identical and are excluded from publication.
+- No dependency manifest/lockfile changes were made. Installed direct dependency versions match the lockfile.
+- Verified application source hashes remain unchanged after all checks.
+- Diff and new-file whitespace checks pass.
+
+## Primary-executed local checks (2026-11-11)
+
+Checks ran from a disposable copy with **Node 22.15.0**, isolated home/config/credentials, explicit loopback emulator hosts and push dispatch disabled. No `.env*` or user-owned settings were copied. The emulator stacks were started by the primary after checking ports 8080, 9099, 4000 and 3000.
+
+| Check | Actual result |
+|---|---|
+| `npm run lint` | Passed, no lint output beyond the command banner |
+| `npm test -- --runInBand` | **699 passed**, 57 suites |
+| Emulator rules compile/integration gate | **56 passed**, 5 suites; subset of the full integration suite |
+| Focused participant-admission integration rerun | **5 passed** |
+| Full `npm run test:integration`, two consecutive clean reruns | **127 passed**, 10 suites, each run |
+| `npm run build` | Passed |
+| Emulator-backed `npm run test:e2e` | **48 Chromium tests passed**, no failed/retried result |
+| Supplemental three-session browser probe | Passed the checks below |
+| Scope, reference, SDK, rules-equality and whitespace checks | Passed |
+
+Emulator commands used `npx firebase emulators:exec --project=xmasteak-app --only=firestore,auth "<npm script>"`. The project name is not a `demo-` ID, but all app/test data access was explicitly directed to owned local emulators with production credentials unavailable.
+
+The installed Java 16 runtime worked; CI specifies Java 17. Firebase CLI warned that a future major release requires Java 21. This was not silently presented as a Java-17 local run.
+
+### Initial integration failure, retained honestly
+
+The first full integration run had **126 passes and one failure**. Concurrent seeding/admission returned `3 INVALID_ARGUMENT: Transaction is invalid or closed` at the transaction's user query. Credential metadata discovery also emitted VM/dynamic-import warnings.
+
+Primary disabled credential metadata discovery **only in the isolated verification environment** using `METADATA_SERVER_DETECTION=none`, supported by the installed metadata package. The focused admission suite and two complete integration reruns then passed. No application source was changed to mask the failure. The initial run remains a failed attempt, not a claimed application fix or a proven root-cause diagnosis.
+
+### Supplemental browser evidence
+
+The final probe used three isolated browser contexts on a fresh owned emulator stack and verified:
+
+1. A 2025 message receives a real server acknowledgement and a reaction is created through normal UI clicks.
+2. All three already-open sessions become read-only without reload; archived message content and the static reaction remain visible.
+3. Start creates a fresh UUID without reload; the excluded already-open session becomes Access Denied.
+4. Archives are available before recipient selection, and Back returns to Welcome.
+5. A 2026 message is acknowledged, exists only in the new namespace, reaches the recipient's Santa tab, and supports a new-year UI reaction.
+6. Root users/messages/reactions remain deeply equal before and after Close/Start/new-year activity; retired Reset returns 410.
+
+There were **zero attempted external browser requests, zero uncaught page errors and zero unexpected console errors**. Three expected first-admission listener warnings and one expected admission-denial response were recorded. All owned processes shut down; the four checked ports were clear afterwards.
+
+### Earlier supplemental attempts and remaining caveats
+
+Two earlier supplemental attempts failed and are not counted as passes:
+
+- A normal click hit a first-row reaction-picker/header overlap in unchanged Chat/ReactionPicker components.
+- Initial navigation through the unchanged dev-login helper timed out.
+
+The final probe used lower synthetic fixture rows plus pre-created owned emulator accounts and a server-admission setup check, then normal physical UI clicks. No force-click or unlisted application fix was used. These unrelated/setup quirks remain outside this feature's scope.
+
+E2E logs also retain the unchanged single-tab IndexedDB persistence fallback when multiple tabs open. The historical `docs/runtime-verification.md` contains obsolete Reset/seed-script guidance and a delegate-read note inconsistent with `AGENTS.md`; it was inspected only by the primary and left outside this change's manifest. Do not follow its retired Reset instructions.
+
+Production Google popup sign-in, actual FCM push, production data shape and deployment topology were **not verified**.
+
+## Publication and production boundary
+
+The owner requested a draft PR for review. Publish only this task's explicit manifest and planning/research artifacts, not user-owned settings or generated files. No production Firebase read/write, credential change, deployment or live Close/Start has been performed.
+
+Production transitions default off behind `YEAR_TRANSITIONS_ENABLED`. Before enabling them, the owner must separately authorize and verify rollout, including retirement of older deployments/credential holders that could still run the destructive old Reset or other unfenced writers. Existing data is not copied, deleted or automatically rolled over on deployment or page load.
+
+## External documentation checked by primary
+
+- Server-only archive reads: https://firebase.google.com/docs/reference/js/firestore#getdocsfromserver
+- Independent cache/pending-write metadata: https://firebase.google.com/docs/reference/js/firestore.snapshotmetadata
+
+Documentation inspection supported planning; real offline runtime behaviour was not independently browser-tested.

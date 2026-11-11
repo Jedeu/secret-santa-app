@@ -161,7 +161,7 @@ export async function registerPushToken({
         });
 
         return { epoch: ctx.epoch, revision, enabled: desired };
-    });
+    }, { allowClosed: true });
 }
 
 export async function unregisterPushToken({ decodedToken, token, expectedEpoch, expectedRevision }) {
@@ -187,7 +187,7 @@ export async function unregisterPushToken({ decodedToken, token, expectedEpoch, 
         });
 
         return { epoch: ctx.epoch, revision, changed: true };
-    });
+    }, { allowClosed: true });
 }
 
 /**

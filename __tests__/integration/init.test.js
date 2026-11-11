@@ -1,35 +1,48 @@
 /**
- * Tests for /api/init endpoint - participant initialization
+ * Tests for /api/init endpoint - seeding the active year's roster
  */
 
 import { POST } from '@/app/api/init/route';
-import { getAllUsers, resetDatabase } from '@/lib/firestore';
+import { firestore } from '@/lib/firebase';
+import { getRoster } from '@/lib/participants';
+import { clearEmulatorFirestore } from './helpers/emulator-admin';
+
+const roster = getRoster(2025);
+
+async function allUsers() {
+    const snapshot = await firestore.collection('users').get();
+    return snapshot.docs.map((doc) => doc.data());
+}
+
+async function userByEmail(email) {
+    const snapshot = await firestore.collection('users').where('email', '==', email).limit(1).get();
+    return snapshot.empty ? null : snapshot.docs[0].data();
+}
 
 describe('POST /api/init', () => {
     beforeEach(async () => {
-        await resetDatabase();
+        await clearEmulatorFirestore();
     });
 
-    test('should initialize all 8 participants', async () => {
+    test('should initialize every participant of the 2025 roster', async () => {
         const response = await POST();
         const data = await response.json();
 
         expect(response.status).toBe(200);
         expect(data.success).toBe(true);
         expect(data.message).toContain('participants initialized');
+        expect(data.year).toBe(2025);
 
-        // Verify all 8 participants were created
-        const allUsers = await getAllUsers();
-        expect(allUsers).toHaveLength(8);
+        expect(await allUsers()).toHaveLength(roster.length);
     });
 
     test('should create participants with correct data structure', async () => {
         await POST();
 
-        const allUsers = await getAllUsers();
-        const expectedNames = ['Jed', 'Natalie', 'Chinh', 'Gaby', 'Jana', 'Peter', 'Louis', 'Genevieve'];
+        const users = await allUsers();
+        const expectedNames = roster.map((participant) => participant.name);
 
-        allUsers.forEach(user => {
+        users.forEach(user => {
             expect(user.id).toBeTruthy();
             expect(expectedNames).toContain(user.name);
             expect(user.email).toBeTruthy();
@@ -44,13 +57,13 @@ describe('POST /api/init', () => {
     test('should not create duplicates when called multiple times', async () => {
         // First initialization
         await POST();
-        const usersAfterFirst = await getAllUsers();
-        expect(usersAfterFirst).toHaveLength(8);
+        const usersAfterFirst = await allUsers();
+        expect(usersAfterFirst).toHaveLength(roster.length);
 
         // Second initialization
         await POST();
-        const usersAfterSecond = await getAllUsers();
-        expect(usersAfterSecond).toHaveLength(8);
+        const usersAfterSecond = await allUsers();
+        expect(usersAfterSecond).toHaveLength(roster.length);
 
         // IDs should be the same
         const ids1 = usersAfterFirst.map(u => u.id).sort();
@@ -63,19 +76,18 @@ describe('POST /api/init', () => {
         await POST();
 
         // Update a user
-        const { getUserByEmail, updateUser } = require('@/lib/firestore');
-        const jed = await getUserByEmail('jed.piezas@gmail.com');
-        await updateUser(jed.id, {
+        const before = await userByEmail(roster[0].email);
+        await firestore.collection('users').doc(before.id).update({
             oauthId: 'oauth123',
-            image: 'https://example.com/jed.jpg'
+            image: 'https://example.test/avatar.jpg'
         });
 
         // Re-initialize
         await POST();
 
         // Check that the updated data is preserved
-        const jedAfter = await getUserByEmail('jed.piezas@gmail.com');
-        expect(jedAfter.oauthId).toBe('oauth123');
-        expect(jedAfter.image).toBe('https://example.com/jed.jpg');
+        const after = await userByEmail(roster[0].email);
+        expect(after.oauthId).toBe('oauth123');
+        expect(after.image).toBe('https://example.test/avatar.jpg');
     });
 });

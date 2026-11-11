@@ -72,7 +72,7 @@ describe('POST /api/push/status', () => {
         ['ACCESS_DENIED', 403],
         ['EMAIL_NOT_VERIFIED', 403],
         ['PROFILE_CONFLICT', 409],
-        ['RESET_IN_PROGRESS', 503],
+        ['SERVICE_UNAVAILABLE', 503],
     ])('maps %s to %i', async (code, status) => {
         getPushRegistrationStatus.mockRejectedValue(new AdmissionError(code));
 

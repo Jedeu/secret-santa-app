@@ -1,12 +1,13 @@
 'use client';
 import { firestore, clientAuth } from '@/lib/firebase-client';
-import { doc, getDoc, setDoc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { getDoc, setDoc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { getWritableScope, scopedDocRef } from '@/lib/year-client';
 
 /**
  * Client-side Firestore operations for lastRead tracking.
  *
  * Data schema:
- * Collection: 'lastRead'
+ * Collection: the open year's 'lastRead' (root for 2025, years/{year}/lastRead after)
  * Document ID: `${userId}_${conversationId}`
  * Fields:
  *   - userId: string
@@ -15,6 +16,10 @@ import { doc, getDoc, setDoc, onSnapshot, Timestamp } from 'firebase/firestore';
  *
  * Writes are debounced and single-flight per key: at most one setDoc per key is in
  * flight; later observations only raise the pending entry's observedAt.
+ *
+ * Every entry and write token carries the writable scope captured when it was created
+ * (src/lib/year-client.js). Refs are built only from that scope, and a result applies
+ * only while it is still the current scope.
  */
 
 const DEBOUNCE_MS = 2000;
@@ -119,12 +124,24 @@ function mergeRemote(key, remote) {
 }
 
 /**
- * The only place a write result is applied.
+ * True only while the write described by `token` is still the live in-flight write:
+ * same state generation, its scope is still the writable scope, and the same pending
+ * entry (not a replacement for the key) is still in flight.
+ */
+function isTokenLive(token) {
+    if (token.generation !== stateGeneration) return false;
+    if (getWritableScope() !== token.scope) return false;
+    const entry = pending.get(token.key);
+    return !!entry && entry.entryId === token.entryId && entry.inFlight === true;
+}
+
+/**
+ * The only place a write result is applied. A result that is not live changes nothing:
+ * no cache, remoteSeen or pending mutation, no timer, no log.
  */
 function settle(token, outcome) {
-    if (token.generation !== stateGeneration) return;
+    if (!isTokenLive(token)) return undefined;
     const entry = pending.get(token.key);
-    if (!entry || entry.entryId !== token.entryId) return;
 
     entry.inFlight = false;
 
@@ -161,19 +178,9 @@ function settle(token, outcome) {
     return undefined;
 }
 
-/**
- * True only while the write described by `token` is still the live in-flight write:
- * same state generation and the same pending entry (not a replacement for the key).
- */
-function isTokenLive(token) {
-    if (token.generation !== stateGeneration) return false;
-    const entry = pending.get(token.key);
-    return !!entry && entry.entryId === token.entryId && entry.inFlight === true;
-}
-
 async function handleRejection(token, error) {
-    // Invalidated (reset, or the entry was replaced): no logging, no confirmation read,
-    // no retry and no state change.
+    // Invalidated (reset, scope change, or the entry was replaced): no logging, no
+    // confirmation read, no retry and no state change.
     if (!isTokenLive(token)) return undefined;
 
     if (error?.code !== 'permission-denied') {
@@ -188,7 +195,8 @@ async function handleRejection(token, error) {
     }
 
     try {
-        const snapshot = await getDoc(doc(firestore, 'lastRead', token.key));
+        // Reached only while the token's scope is still current; read at that scope's ref.
+        const snapshot = await getDoc(scopedDocRef(token.scope, 'lastRead', token.key));
         // Invalidated while confirming: apply nothing.
         if (!isTokenLive(token)) return undefined;
         const remote = snapshot.exists() ? normalizeLastReadValue(snapshot.data()?.lastReadAt) : null;
@@ -215,6 +223,11 @@ function startWrite(entry) {
     if (entry.inFlight) return null;
     clearTimers(entry);
 
+    if (getWritableScope() !== entry.scope) {
+        deleteEntry(entry);
+        return null;
+    }
+
     const currentUid = clientAuth?.currentUser?.uid ?? null;
     if (currentUid !== entry.ownerUid) {
         deleteEntry(entry);
@@ -226,13 +239,14 @@ function startWrite(entry) {
         entryId: entry.entryId,
         generation: stateGeneration,
         written: entry.observedAt,
+        scope: entry.scope,
     };
     entry.inFlight = true;
     entry.flushRequested = false;
 
     let writePromise;
     try {
-        writePromise = setDoc(doc(firestore, 'lastRead', entry.key), {
+        writePromise = setDoc(scopedDocRef(entry.scope, 'lastRead', entry.key), {
             userId: entry.userId,
             conversationId: entry.conversationId,
             lastReadAt: Timestamp.fromDate(new Date(token.written)),
@@ -261,6 +275,10 @@ export async function getLastReadTimestamp(userId, conversationId) {
     }
 
     const key = makeKey(userId, conversationId);
+    const scope = getWritableScope();
+    if (!scope) {
+        return cache.get(key) ?? EPOCH_ISO;
+    }
 
     if (cache.has(key)) {
         return cache.get(key);
@@ -268,13 +286,16 @@ export async function getLastReadTimestamp(userId, conversationId) {
 
     const generation = stateGeneration;
     try {
-        const snapshot = await getDoc(doc(firestore, 'lastRead', key));
-        if (generation !== stateGeneration) {
+        const snapshot = await getDoc(scopedDocRef(scope, 'lastRead', key));
+        if (generation !== stateGeneration || getWritableScope() !== scope) {
             return cache.get(key) ?? EPOCH_ISO;
         }
         const remote = snapshot.exists() ? normalizeLastReadValue(snapshot.data()?.lastReadAt) : null;
         return mergeRemote(key, remote);
     } catch (error) {
+        if (generation !== stateGeneration || getWritableScope() !== scope) {
+            return cache.get(key) ?? EPOCH_ISO;
+        }
         console.error('Error fetching lastRead timestamp:', error);
         return cache.get(key) ?? EPOCH_ISO;
     }
@@ -292,6 +313,10 @@ export async function getLastReadTimestamp(userId, conversationId) {
 export function updateLastReadTimestamp(userId, conversationId, observedAt) {
     if (!firestore || !userId || !conversationId || !isValidIso(observedAt)) return false;
 
+    // No writable scope (signed out, loading, closed year): nothing is recorded.
+    const scope = getWritableScope();
+    if (!scope) return false;
+
     const key = makeKey(userId, conversationId);
     const cached = cache.get(key);
     if (cached !== undefined && toMs(observedAt) <= toMs(cached)) {
@@ -301,6 +326,11 @@ export function updateLastReadTimestamp(userId, conversationId, observedAt) {
     cache.set(key, observedAt);
 
     let entry = pending.get(key);
+    if (entry && entry.scope !== scope) {
+        // An entry from another scope is replaced, never reused.
+        deleteEntry(entry);
+        entry = undefined;
+    }
     if (!entry) {
         entry = {
             entryId: nextEntryId++,
@@ -308,6 +338,7 @@ export function updateLastReadTimestamp(userId, conversationId, observedAt) {
             userId,
             conversationId,
             observedAt,
+            scope,
             ownerUid: clientAuth?.currentUser?.uid ?? null,
             debounceTimer: null,
             retryTimer: null,
@@ -337,12 +368,17 @@ export function subscribeToLastRead(userId, conversationId, callback) {
         return () => {};
     }
 
+    const scope = getWritableScope();
+    if (!scope) {
+        return () => {};
+    }
+
     const key = makeKey(userId, conversationId);
     const generation = stateGeneration;
     let active = true;
 
-    const unsubscribe = onSnapshot(doc(firestore, 'lastRead', key), (snapshot) => {
-        if (!active || generation !== stateGeneration) return;
+    const unsubscribe = onSnapshot(scopedDocRef(scope, 'lastRead', key), (snapshot) => {
+        if (!active || generation !== stateGeneration || getWritableScope() !== scope) return;
         const remote = snapshot.exists() ? normalizeLastReadValue(snapshot.data()?.lastReadAt) : null;
         const merged = mergeRemote(key, remote);
         try {
@@ -372,6 +408,11 @@ export function subscribeToLastRead(userId, conversationId, callback) {
 export async function flushPendingWrites() {
     const started = [];
     Array.from(pending.values()).forEach((entry) => {
+        if (getWritableScope() !== entry.scope) {
+            // Not the current scope: dropped, neither started nor flagged.
+            deleteEntry(entry);
+            return;
+        }
         if (entry.inFlight) {
             entry.flushRequested = true;
             return;

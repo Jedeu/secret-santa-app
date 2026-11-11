@@ -6,6 +6,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 import { useRealtimeAllMessages, useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
 import { RealtimeMessagesProvider } from '@/context/RealtimeMessagesContext';
 import { useUser } from '@/hooks/useUser';
+import { LEGACY_ACTIVE_SEASON } from '../helpers/useUser-mock';
 
 // Mock fetch for unread counts (still uses API polling)
 global.fetch = jest.fn();
@@ -96,6 +97,7 @@ describe('Realtime Hooks with Context', () => {
         // Default useUser to return authenticated user
         useUser.mockReturnValue({
             user: mockUser,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });

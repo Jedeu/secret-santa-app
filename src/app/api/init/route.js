@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { ensureAllParticipants } from '@/lib/firestore';
-import { PARTICIPANTS } from '@/lib/participants';
 import { auth as adminAuth } from '@/lib/firebase';
 import { isAdmin } from '@/lib/config';
 import { admissionErrorResponse } from '@/lib/participant-admission';
@@ -17,16 +16,16 @@ function initErrorResponse(error) {
 }
 
 /**
- * Initialize the application by ensuring all participants exist in the database
- * This should be called when the app starts or after a reset
+ * Seed the active year's roster (ensure every participant has a profile in that year).
+ * Refused in a closed year.
  * Requires admin authentication or development mode
  */
 export async function POST(request) {
     try {
         // Allow in development mode without auth
         if (process.env.NODE_ENV === 'development') {
-            await ensureAllParticipants(PARTICIPANTS);
-            return NextResponse.json({ success: true, message: 'All participants initialized' });
+            const result = await ensureAllParticipants();
+            return NextResponse.json({ success: true, message: 'All participants initialized', year: result.year });
         }
 
         // In production, require admin authentication
@@ -47,8 +46,8 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 403 });
         }
 
-        await ensureAllParticipants(PARTICIPANTS);
-        return NextResponse.json({ success: true, message: 'All participants initialized' });
+        const result = await ensureAllParticipants();
+        return NextResponse.json({ success: true, message: 'All participants initialized', year: result.year });
     } catch (error) {
         console.error('Failed to initialize participants:', error);
 

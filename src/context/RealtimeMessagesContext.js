@@ -1,8 +1,8 @@
 'use client';
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { firestore } from '@/lib/firebase-client';
-import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { query, onSnapshot, orderBy } from 'firebase/firestore';
 import { useUser } from '@/hooks/useUser';
+import { yearCollectionRef } from '@/lib/year-client';
 import { logListenerCreated, logListenerDestroyed, logSnapshotReceived } from '@/lib/firestore-listener-tracker';
 import {
     updateLastReadTimestamp as lastReadClientUpdate,
@@ -96,16 +96,20 @@ const getLastReadTimestamp = (userId, conversationId) => {
  * Key behaviors:
  * 1. Waits for authentication before creating Firestore listener
  * 2. Creates exactly ONE listener for all messages (singleton pattern preserved)
- * 3. Listeners are keyed on the user id, not the user object, so assignment
- *    updates do not recreate them
- * 4. Cleans up listener (and any pending retry) when auth is lost or on unmount
+ * 3. Listeners are keyed on the user id and the season year, not the user object, so
+ *    assignment updates do not recreate them
+ * 4. Listens only while the season's year is open, on that year's collections; a closed
+ *    year has no live listeners (its archive is read once by ArchiveViewer)
+ * 5. Cleans up listener (and any pending retry) when auth is lost or on unmount
  *
  * @param {Object} props
  * @param {React.ReactNode} props.children
  */
 export function RealtimeMessagesProvider({ children }) {
-    const { user, loading: authLoading } = useUser();
+    const { user, season, loading: authLoading } = useUser();
     const userId = user?.id ?? null;
+    const year = season?.year ?? null;
+    const yearOpen = season?.state === 'active';
 
     // Internal State
     const [allMessages, setAllMessages] = useState([]);
@@ -125,7 +129,7 @@ export function RealtimeMessagesProvider({ children }) {
             return undefined; // Still loading auth state
         }
 
-        if (!userId) {
+        if (!userId || !yearOpen) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setAllMessages([]);
             setAllMessagesLoading(false);
@@ -137,7 +141,7 @@ export function RealtimeMessagesProvider({ children }) {
 
         setAllMessagesLoading(true);
 
-        const messagesRef = collection(firestore, 'messages');
+        const messagesRef = yearCollectionRef(year, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'desc'));
 
         logListenerCreated('allMessages', { query: 'orderBy(timestamp, desc)' });
@@ -192,14 +196,14 @@ export function RealtimeMessagesProvider({ children }) {
                 listenerRef.current = null;
             }
         };
-    }, [userId, authLoading, messagesRetry]);
+    }, [userId, authLoading, year, yearOpen, messagesRetry]);
 
     useEffect(() => {
         if (authLoading) {
             return undefined;
         }
 
-        if (!userId) {
+        if (!userId || !yearOpen) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setAllReactions([]);
             return undefined;
@@ -208,7 +212,7 @@ export function RealtimeMessagesProvider({ children }) {
         let cancelled = false;
         let retryTimer = null;
 
-        const reactionsRef = collection(firestore, 'reactions');
+        const reactionsRef = yearCollectionRef(year, 'reactions');
         const q = query(reactionsRef, orderBy('createdAt', 'asc'));
         logListenerCreated('allReactions', { query: 'orderBy(createdAt, asc)' });
 
@@ -254,7 +258,7 @@ export function RealtimeMessagesProvider({ children }) {
                 reactionsListenerRef.current = null;
             }
         };
-    }, [userId, authLoading, reactionsRetry]);
+    }, [userId, authLoading, year, yearOpen, reactionsRetry]);
 
     // Best-effort read-marker flush when the page is hidden or unloaded;
     // drop all read-marker state when the user changes or the provider unmounts.

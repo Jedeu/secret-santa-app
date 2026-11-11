@@ -4,7 +4,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { APP_COLLECTIONS as SERVER_APP_COLLECTIONS } from '@/lib/firestore';
+import { GLOBAL_COLLECTIONS, YEAR_COLLECTIONS } from '@/lib/year-paths';
 
 const mockInitializeApp = jest.fn();
 const mockGetFirestore = jest.fn(() => ({ __fake: 'firestore' }));
@@ -56,9 +56,15 @@ describe('scripts/lib/emulator-firestore', () => {
         expect(clientSource).toContain(`'${EMULATOR_PROJECT_ID}'`);
     });
 
-    test('APP_COLLECTIONS equals the server list (same order)', () => {
+    test('APP_COLLECTIONS equals the global and year collection names (as sets)', () => {
         const { APP_COLLECTIONS } = loadHelper();
-        expect(APP_COLLECTIONS).toEqual(SERVER_APP_COLLECTIONS);
+        expect(new Set(APP_COLLECTIONS)).toEqual(new Set([...GLOBAL_COLLECTIONS, ...YEAR_COLLECTIONS]));
+        expect(APP_COLLECTIONS).toHaveLength(new Set(APP_COLLECTIONS).size);
+    });
+
+    test('clearEmulatorFirestore is exported for the emulator wipe script', () => {
+        const { clearEmulatorFirestore } = loadHelper();
+        expect(typeof clearEmulatorFirestore).toBe('function');
     });
 
     test('defaults to the loopback emulator host and initializes with the project id', () => {

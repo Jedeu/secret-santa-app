@@ -1,15 +1,17 @@
 'use client';
 import Chat from '@/components/Chat';
 import PublicFeed from '@/components/PublicFeed';
+import ArchiveViewer from '@/components/ArchiveViewer';
 
 /**
  * ChatTabs - Renders the appropriate chat view based on active tab
  *
  * Each Chat is keyed by its tab and conversation, so drafts and per-chat state never
- * follow a tab switch or an assignment change. PublicFeed is keyed by user id.
+ * follow a tab switch or an assignment change. PublicFeed is keyed by user id. The
+ * Archives tab renders the read-only ArchiveViewer for closed years.
  *
  * @param {Object} props
- * @param {'recipient'|'santa'|'feed'} props.activeTab - Currently active tab
+ * @param {'recipient'|'santa'|'feed'|'archive'} props.activeTab - Currently active tab
  * @param {Object} props.currentUser - Current authenticated user
  * @param {string|null} props.authUid - Firebase Auth uid that owns queued messages
  * @param {Object[]} props.allUsers - All users in the system
@@ -22,6 +24,8 @@ import PublicFeed from '@/components/PublicFeed';
  * @param {number} props.unreadCounts.santa - Unread count for santa tab
  * @param {string} props.recipientConversationId - Conversation ID for recipient chat
  * @param {string} props.santaConversationId - Conversation ID for santa chat
+ * @param {number[]} [props.archiveYears] - Closed years, newest first
+ * @param {number[]} [props.closedYears] - Closed years (lifecycle order)
  */
 export default function ChatTabs({
     activeTab,
@@ -34,8 +38,22 @@ export default function ChatTabs({
     santaMessages,
     unreadCounts,
     recipientConversationId,
-    santaConversationId
+    santaConversationId,
+    archiveYears = [],
+    closedYears = []
 }) {
+    if (activeTab === 'archive') {
+        return (
+            <ArchiveViewer
+                key="archive"
+                authUid={authUid}
+                years={archiveYears}
+                initialYear={archiveYears[0]}
+                closedYears={closedYears}
+            />
+        );
+    }
+
     // Get recipient user info
     const recipientUser = allUsers.find(u => u.id === currentUser?.recipientId);
 

@@ -1,5 +1,4 @@
 'use client';
-import { isAdmin } from '@/lib/config';
 
 /**
  * SidebarItem - Individual navigation item with optional unread badge
@@ -56,12 +55,13 @@ function SidebarItem({ active, onClick, children, unreadCount, icon }) {
  * Sidebar - Desktop navigation component
  * @param {Object} props
  * @param {Object} props.currentUser - The logged-in user object
- * @param {string} props.activeTab - 'recipient', 'santa', or 'feed'
+ * @param {string} props.activeTab - 'recipient', 'santa', 'feed' or 'archive'
  * @param {Function} props.onTabChange - (tabId) => void
  * @param {Object} props.unreadCounts - { recipient: number, santa: number }
  * @param {Function} props.onSignOut - () => void
- * @param {Function} props.onReset - () => void
  * @param {React.ReactNode} [props.pushControl] - Optional push notification toggle UI
+ * @param {React.ReactNode} [props.adminControl] - Optional admin season control (Close/Start)
+ * @param {boolean} [props.showArchive] - Show the "📚 Archives" item
  */
 export default function Sidebar({
     currentUser,
@@ -69,8 +69,9 @@ export default function Sidebar({
     onTabChange,
     unreadCounts,
     onSignOut,
-    onReset,
-    pushControl
+    pushControl,
+    adminControl = null,
+    showArchive = false
 }) {
     return (
         <div style={{
@@ -82,7 +83,7 @@ export default function Sidebar({
             padding: '20px 0 0 0', // Top padding to align with Chat header
             position: 'relative'
         }}>
-            {/* Header with Reset Button */}
+            {/* Header with admin season control */}
             < div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -99,29 +100,7 @@ export default function Sidebar({
                     {'Hi, ' + (currentUser?.name || 'User') + ' 👋'}
                 </h1>
 
-                {
-                    isAdmin(currentUser?.email) && (
-                        <button
-                            onClick={onReset}
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: '12px',
-                                color: 'var(--text-muted)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                padding: '4px',
-                                borderRadius: '4px',
-                                transition: 'color 0.2s'
-                            }}
-                            title="Reset App Data"
-                        >
-                            🔧 <span style={{ fontSize: '10px' }}>Reset</span>
-                        </button>
-                    )
-                }
+                {adminControl}
             </div >
 
             {/* Navigation Items */}
@@ -149,6 +128,15 @@ export default function Sidebar({
                 >
                     Public Feed
                 </SidebarItem>
+                {showArchive && (
+                    <SidebarItem
+                        active={activeTab === 'archive'}
+                        onClick={() => onTabChange('archive')}
+                        icon="📚"
+                    >
+                        Archives
+                    </SidebarItem>
+                )}
             </nav >
 
             {/* Footer - pushed to bottom with marginTop:auto */}

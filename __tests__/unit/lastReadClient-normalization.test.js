@@ -28,17 +28,20 @@ import {
     subscribeToLastRead,
     updateLastReadTimestamp,
 } from '@/lib/lastReadClient';
+import { setWritableScope } from '@/lib/year-client';
 
 describe('lastReadClient normalization boundary', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         jest.useFakeTimers();
         resetLastReadState();
+        setWritableScope({ key: 'a', year: 2025 });
         mockDoc.mockReturnValue('lastReadDocRef');
         mockSetDoc.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
+        setWritableScope(null);
         jest.useRealTimers();
     });
 

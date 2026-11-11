@@ -1,37 +1,23 @@
 import { NextResponse } from 'next/server';
 import { ensureAllParticipants } from '@/lib/firestore';
-import { PARTICIPANTS } from '@/lib/participants';
 import { admissionErrorResponse } from '@/lib/participant-admission';
 
+/**
+ * DEV-ONLY: Seed the active year's roster. 403 outside development.
+ * Refused in a closed year (YEAR_CLOSED).
+ */
 export async function POST() {
     if (process.env.NODE_ENV !== 'development') {
         return NextResponse.json({ error: 'Not allowed in production' }, { status: 403 });
     }
 
     try {
-        // Debug: Check if we are using Firestore or Local DB
-        const firebaseAdmin = await import('@/lib/firebase');
-        const usingFirestore = !!firebaseAdmin.firestore;
-
-        // Get Project ID from the initialized app if possible
-        const adminApp = (await import('firebase-admin/app')).getApps()[0];
-        const projectId = adminApp ? adminApp.options.projectId : 'unknown';
-
-        await ensureAllParticipants(PARTICIPANTS);
-
-        // Verify by reading back one user
-        const testUser = await (await import('@/lib/firestore')).getUserByEmail(PARTICIPANTS[0].email);
+        const result = await ensureAllParticipants();
 
         return NextResponse.json({
             success: true,
             message: 'Database seeded with participants',
-            debug: {
-                usingFirestore,
-                projectId,
-                envProjectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-                verification: testUser ? 'User found' : 'User NOT found',
-                testUserEmail: testUser?.email
-            }
+            ...result,
         });
     } catch (error) {
         const mapped = admissionErrorResponse(error);

@@ -7,6 +7,7 @@ import { useUser } from '@/hooks/useUser';
 import * as realtimeHooks from '@/hooks/useRealtimeMessages';
 import { clientAuth } from '@/lib/firebase-client';
 import * as messageOutbox from '@/lib/message-outbox';
+import { LEGACY_ACTIVE_SEASON } from '../helpers/useUser-mock';
 
 // Mock useUser hook
 jest.mock('@/hooks/useUser');
@@ -109,6 +110,7 @@ describe('UI Interaction Flows', () => {
         // Setup: User A logged in
         useUser.mockReturnValue({
             user: userA,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -148,6 +150,7 @@ describe('UI Interaction Flows', () => {
         // Setup: User A logged in
         useUser.mockReturnValue({
             user: userA,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -180,6 +183,7 @@ describe('UI Interaction Flows', () => {
         // Setup: User A logged in
         useUser.mockReturnValue({
             user: userA,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -224,6 +228,7 @@ describe('UI Interaction Flows', () => {
         // Setup: User B logged in
         useUser.mockReturnValue({
             user: userB,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -258,6 +263,7 @@ describe('UI Interaction Flows', () => {
         // Setup: User B logged in
         useUser.mockReturnValue({
             user: userB,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -287,6 +293,7 @@ describe('UI Interaction Flows', () => {
         // Setup: Any user logged in (e.g., User C)
         useUser.mockReturnValue({
             user: userC,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -335,6 +342,7 @@ describe('UI Interaction Flows', () => {
         // Setup: User A logged in
         useUser.mockReturnValue({
             user: userA,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });
@@ -374,6 +382,7 @@ describe('UI Interaction Flows', () => {
     test('8. Pending outbox messages do not appear in Public Feed before persistence', async () => {
         useUser.mockReturnValue({
             user: userA,
+            season: LEGACY_ACTIVE_SEASON,
             loading: false,
             error: null
         });

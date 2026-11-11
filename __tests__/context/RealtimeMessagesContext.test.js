@@ -9,6 +9,7 @@ import {
     updateLastReadTimestamp,
 } from '@/context/RealtimeMessagesContext';
 import { useUser } from '@/hooks/useUser';
+import { LEGACY_ACTIVE_SEASON } from '../helpers/useUser-mock';
 import {
     updateLastReadTimestamp as mockClientUpdate,
     flushPendingWrites as mockFlushPendingWrites,
@@ -102,7 +103,7 @@ describe('RealtimeMessagesContext', () => {
     });
 
     test('should load messages when authenticated', async () => {
-        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
 
         let snapshotCallback;
         mockOnSnapshot.mockImplementation((...args) => {
@@ -132,15 +133,72 @@ describe('RealtimeMessagesContext', () => {
         expect(screen.getByTestId('loading')).toHaveTextContent('false');
     });
 
+    test('listens on the root collections for the open 2025 season', async () => {
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
+
+        renderProvider();
+
+        await waitFor(() => {
+            expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
+        });
+        expect(mockCollection).toHaveBeenCalledWith({ _isMock: true }, 'messages');
+        expect(mockCollection).toHaveBeenCalledWith({ _isMock: true }, 'reactions');
+    });
+
+    test('a closed season creates no listeners and exposes empty data', async () => {
+        useUser.mockReturnValue({
+            user: { id: 'u1' },
+            season: { year: 2025, state: 'closed', epoch: 1, closedYears: [2025] },
+            loading: false,
+        });
+
+        renderProvider();
+
+        await waitFor(() => {
+            expect(screen.getByTestId('loading')).toHaveTextContent('false');
+        });
+        expect(screen.getByTestId('msg-count')).toHaveTextContent('0');
+        expect(mockOnSnapshot).not.toHaveBeenCalled();
+        expect(mockCollection).not.toHaveBeenCalled();
+    });
+
+    test('an active 2026 season listens on the years/2026 collections', async () => {
+        useUser.mockReturnValue({
+            user: { id: 'u1' },
+            season: { year: 2026, state: 'active', epoch: 2, closedYears: [2025] },
+            loading: false,
+        });
+
+        renderProvider();
+
+        await waitFor(() => {
+            expect(mockOnSnapshot).toHaveBeenCalledTimes(2);
+        });
+        expect(mockCollection).toHaveBeenCalledWith({ _isMock: true }, 'years', '2026', 'messages');
+        expect(mockCollection).toHaveBeenCalledWith({ _isMock: true }, 'years', '2026', 'reactions');
+        expect(mockCollection).not.toHaveBeenCalledWith({ _isMock: true }, 'messages');
+    });
+
+    test('a user without a season creates no listeners', async () => {
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: null, loading: false });
+
+        renderProvider();
+
+        await waitFor(() => {
+            expect(screen.getByTestId('loading')).toHaveTextContent('false');
+        });
+        expect(mockOnSnapshot).not.toHaveBeenCalled();
+    });
+
     test('a new user object with the same id does not recreate listeners', async () => {
-        useUser.mockReturnValue({ user: { id: 'u1', recipientId: null }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1', recipientId: null }, season: LEGACY_ACTIVE_SEASON, loading: false });
 
         const { rerender } = renderProvider();
         await waitFor(() => {
             expect(mockOnSnapshot).toHaveBeenCalledTimes(2); // messages + reactions
         });
 
-        useUser.mockReturnValue({ user: { id: 'u1', recipientId: 'u2' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1', recipientId: 'u2' }, season: LEGACY_ACTIVE_SEASON, loading: false });
         rerender(
             <RealtimeMessagesProvider>
                 <TestConsumer />
@@ -154,7 +212,7 @@ describe('RealtimeMessagesContext', () => {
         jest.useFakeTimers();
         jest.spyOn(console, 'error').mockImplementation(() => {});
         jest.spyOn(console, 'warn').mockImplementation(() => {});
-        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
 
         const errorCallbacks = [];
         mockOnSnapshot.mockImplementation((...args) => {
@@ -183,7 +241,7 @@ describe('RealtimeMessagesContext', () => {
         jest.useFakeTimers();
         jest.spyOn(console, 'error').mockImplementation(() => {});
         jest.spyOn(console, 'warn').mockImplementation(() => {});
-        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
 
         const errorCallbacks = [];
         mockOnSnapshot.mockImplementation((...args) => {
@@ -205,7 +263,7 @@ describe('RealtimeMessagesContext', () => {
     });
 
     test('flushes markers on pagehide and resets read state on unmount', () => {
-        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
 
         const { unmount } = renderProvider();
         act(() => {
@@ -218,7 +276,7 @@ describe('RealtimeMessagesContext', () => {
     });
 
     test('updateLastReadTimestamp notifies subscribers only when the client accepted the update', () => {
-        useUser.mockReturnValue({ user: { id: 'u1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'u1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
         const wrapper = ({ children }) => (
             <RealtimeMessagesProvider>{children}</RealtimeMessagesProvider>
         );

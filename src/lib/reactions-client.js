@@ -1,7 +1,10 @@
 'use client';
 
 import { firestore } from '@/lib/firebase-client';
-import { deleteDoc, doc, getDoc, setDoc } from 'firebase/firestore';
+import { deleteDoc, getDoc, setDoc } from 'firebase/firestore';
+import { getWritableScope, scopedDocRef } from '@/lib/year-client';
+
+const UNAVAILABLE_MESSAGE = 'Reactions are unavailable right now';
 
 function reactionDocId(messageId, userId, emoji) {
     return `${messageId}_${userId}_${emoji}`;
@@ -20,9 +23,19 @@ export async function toggleReaction(messageId, userId, emoji) {
         throw new Error('Invalid reaction payload');
     }
 
+    // Capture the writable scope when the toggle is requested; refs come only from it.
+    const scope = getWritableScope();
+    if (!scope) {
+        throw new Error(UNAVAILABLE_MESSAGE);
+    }
+
     const reactionId = reactionDocId(messageId, userId, emoji);
-    const reactionRef = doc(firestore, 'reactions', reactionId);
+    const reactionRef = scopedDocRef(scope, 'reactions', reactionId);
     const existing = await getDoc(reactionRef);
+
+    if (getWritableScope() !== scope) {
+        throw new Error(UNAVAILABLE_MESSAGE);
+    }
 
     if (existing.exists()) {
         await deleteDoc(reactionRef);

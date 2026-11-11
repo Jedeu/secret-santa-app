@@ -19,11 +19,17 @@ jest.mock('@/lib/firebase-client', () => ({
 }));
 
 import { toggleReaction } from '@/lib/reactions-client';
+import { setWritableScope } from '@/lib/year-client';
 
 describe('reactions-client', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        setWritableScope({ key: 'a', year: 2025 });
         mockDoc.mockReturnValue('reactionDocRef');
+    });
+
+    afterEach(() => {
+        setWritableScope(null);
     });
 
     test('creates reaction on first toggle', async () => {
@@ -51,5 +57,36 @@ describe('reactions-client', () => {
         expect(mockDoc).toHaveBeenCalledWith(expect.anything(), 'reactions', 'msg-2_user-2_🎄');
         expect(mockDeleteDoc).toHaveBeenCalledWith('reactionDocRef');
         expect(result).toEqual({ action: 'removed' });
+    });
+
+    test('a 2026 scope toggles under years/2026/reactions', async () => {
+        setWritableScope({ key: 'b', year: 2026 });
+        mockGetDoc.mockResolvedValue({ exists: () => false });
+        mockSetDoc.mockResolvedValue(undefined);
+
+        await toggleReaction('msg-3', 'user-3', '👍');
+
+        expect(mockDoc).toHaveBeenCalledWith(expect.anything(), 'years', '2026', 'reactions', 'msg-3_user-3_👍');
+    });
+
+    test('without a scope it throws and reads nothing', async () => {
+        setWritableScope(null);
+
+        await expect(toggleReaction('msg-4', 'user-4', '👍')).rejects.toThrow('Reactions are unavailable right now');
+        expect(mockGetDoc).not.toHaveBeenCalled();
+        expect(mockSetDoc).not.toHaveBeenCalled();
+    });
+
+    test('a getDoc held across a scope change throws and writes nothing', async () => {
+        let resolveGet;
+        mockGetDoc.mockReturnValue(new Promise((resolve) => { resolveGet = resolve; }));
+
+        const pending = toggleReaction('msg-5', 'user-5', '👍');
+        setWritableScope({ key: 'b', year: 2026 });
+        resolveGet({ exists: () => false });
+
+        await expect(pending).rejects.toThrow('Reactions are unavailable right now');
+        expect(mockSetDoc).not.toHaveBeenCalled();
+        expect(mockDeleteDoc).not.toHaveBeenCalled();
     });
 });

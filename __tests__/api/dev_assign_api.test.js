@@ -27,14 +27,24 @@ describe('POST /api/dev/assign', () => {
         expect(assignUsersInTransaction).not.toHaveBeenCalled();
     });
 
-    test('maps RESET_IN_PROGRESS to 503', async () => {
-        assignUsersInTransaction.mockRejectedValue(new AdmissionError('RESET_IN_PROGRESS'));
+    test('maps SERVICE_UNAVAILABLE to 503', async () => {
+        assignUsersInTransaction.mockRejectedValue(new AdmissionError('SERVICE_UNAVAILABLE'));
 
         const res = await POST();
         const data = await res.json();
 
         expect(res.status).toBe(503);
-        expect(data.code).toBe('RESET_IN_PROGRESS');
+        expect(data.code).toBe('SERVICE_UNAVAILABLE');
+    });
+
+    test('maps YEAR_CLOSED to 409', async () => {
+        assignUsersInTransaction.mockRejectedValue(new AdmissionError('YEAR_CLOSED'));
+
+        const res = await POST();
+        const data = await res.json();
+
+        expect(res.status).toBe(409);
+        expect(data.code).toBe('YEAR_CLOSED');
     });
 
     test('returns 400 when fewer than two users exist (buildUpdates returns null)', async () => {

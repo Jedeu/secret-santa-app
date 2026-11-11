@@ -1,7 +1,8 @@
 'use client';
 
 import { firestore } from '@/lib/firebase-client';
-import { deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { deleteDoc, setDoc } from 'firebase/firestore';
+import { getWritableScope, scopedDocRef } from '@/lib/year-client';
 
 const TYPING_THROTTLE_MS = 2000;
 const pendingTypingWrites = new Map(); // key -> timeout (trailing write)
@@ -21,10 +22,15 @@ function logTypingDebug(action, userId, conversationId) {
 
 // async so both sync throws and setDoc rejections land in the catch;
 // callers fire-and-forget, the returned promise never rejects.
-async function writeTyping(key, userId, conversationId) {
+// `scope` is the writable scope captured when the keystroke was requested; nothing is
+// written once it is no longer the current scope.
+async function writeTyping(scope, key, userId, conversationId) {
+    if (getWritableScope() !== scope) {
+        return;
+    }
     lastWriteAt.set(key, Date.now());
     try {
-        const docRef = doc(firestore, 'typing', key);
+        const docRef = scopedDocRef(scope, 'typing', key);
         await setDoc(docRef, {
             userId,
             conversationId,
@@ -45,13 +51,18 @@ export function setTyping(userId, conversationId) {
         return;
     }
 
+    const scope = getWritableScope();
+    if (!scope) {
+        return;
+    }
+
     const key = getTypingKey(userId, conversationId);
     const now = Date.now();
     const previousWriteAt = lastWriteAt.get(key) ?? 0;
     const elapsed = now - previousWriteAt;
 
     if (elapsed >= TYPING_THROTTLE_MS) {
-        writeTyping(key, userId, conversationId);
+        writeTyping(scope, key, userId, conversationId);
         return;
     }
 
@@ -63,7 +74,7 @@ export function setTyping(userId, conversationId) {
     const delay = previousWriteAt + TYPING_THROTTLE_MS - now;
     const timeout = setTimeout(() => {
         pendingTypingWrites.delete(key);
-        writeTyping(key, userId, conversationId);
+        writeTyping(scope, key, userId, conversationId);
     }, delay);
 
     pendingTypingWrites.set(key, timeout);
@@ -74,6 +85,7 @@ export function clearTyping(userId, conversationId) {
         return;
     }
 
+    const scope = getWritableScope();
     const key = getTypingKey(userId, conversationId);
     const existingTimeout = pendingTypingWrites.get(key);
     if (existingTimeout) {
@@ -82,9 +94,22 @@ export function clearTyping(userId, conversationId) {
     }
     lastWriteAt.delete(key);
 
-    const docRef = doc(firestore, 'typing', key);
+    if (!scope) {
+        return;
+    }
+
+    const docRef = scopedDocRef(scope, 'typing', key);
     deleteDoc(docRef).catch((error) => {
         console.error('Failed to clear typing state:', error);
     });
     logTypingDebug('clear', userId, conversationId);
+}
+
+/**
+ * Drop all local typing state (session change): cancels every trailing write.
+ */
+export function resetTypingState() {
+    pendingTypingWrites.forEach((timeout) => clearTimeout(timeout));
+    pendingTypingWrites.clear();
+    lastWriteAt.clear();
 }

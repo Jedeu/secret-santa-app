@@ -98,8 +98,8 @@ describe('firestore rules: admission, lifecycle and reciprocal claims', () => {
         await expectAllAccessDenied(db, 'user-a');
     });
 
-    test('everyone is denied while a reset is in progress', async () => {
-        await seedDoc(testEnv, 'system', 'lifecycle', { epoch: 1, state: 'resetting', resetId: 'r1' });
+    test('everyone is denied while the lifecycle state is unknown', async () => {
+        await seedDoc(testEnv, 'system', 'lifecycle', { epoch: 1, state: 'unknown-state' });
         const db = authedDb(testEnv, 'user-a', 'user-a@example.test');
         await expectAllAccessDenied(db, 'user-a');
     });
@@ -107,8 +107,13 @@ describe('firestore rules: admission, lifecycle and reciprocal claims', () => {
     test('server-only collections are never readable by clients', async () => {
         const db = authedDb(testEnv, 'user-a', 'user-a@example.test');
         await assertFails(getDoc(doc(db, 'authIdentities', 'user-a')));
-        await assertFails(getDoc(doc(db, 'system', 'lifecycle')));
         await assertFails(getDoc(doc(db, 'participantIndex', 'user-a@example.test')));
+    });
+
+    test('an admitted participant can get system/lifecycle but never write it', async () => {
+        const db = authedDb(testEnv, 'user-a', 'user-a@example.test');
+        await assertSucceeds(getDoc(doc(db, 'system', 'lifecycle')));
+        await assertFails(setDoc(doc(db, 'system', 'lifecycle'), { epoch: 2, state: 'active' }));
     });
 
     test('users create and messages create fail even for admitted participants', async () => {

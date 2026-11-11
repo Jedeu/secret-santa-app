@@ -1,7 +1,9 @@
 /**
  * @jest-environment jsdom
  *
- * lastReadClient: observed-boundary markers with single-flight, generation-fenced writes.
+ * lastReadClient: observed-boundary markers with single-flight, generation- and
+ * scope-fenced writes. Scope A = { key: 'a', year: 2025 } (root paths); scope B =
+ * { key: 'b', year: 2026 } (years/2026 paths).
  */
 
 const mockGetDoc = jest.fn();
@@ -36,6 +38,7 @@ import {
     resetLastReadState,
     getCachedTimestamp,
 } from '@/lib/lastReadClient';
+import { setWritableScope } from '@/lib/year-client';
 
 const T1 = '2026-03-01T10:00:00.000Z';
 const T2 = '2026-03-01T10:05:00.000Z';
@@ -58,6 +61,10 @@ function writtenValues() {
     return mockSetDoc.mock.calls.map(([, data]) => data.lastReadAt.__iso);
 }
 
+function writtenRefs() {
+    return mockSetDoc.mock.calls.map(([ref]) => ref);
+}
+
 function permissionDenied() {
     const error = new Error('Missing or insufficient permissions.');
     error.code = 'permission-denied';
@@ -69,13 +76,15 @@ describe('lastReadClient', () => {
         jest.clearAllMocks();
         jest.useFakeTimers();
         resetLastReadState();
+        setWritableScope({ key: 'a', year: 2025 });
         mockAuthState.uid = 'uid-1';
-        mockDoc.mockImplementation((db, collection, id) => `ref:${collection}/${id}`);
+        mockDoc.mockImplementation((db, ...segments) => `ref:${segments.join('/')}`);
         mockSetDoc.mockResolvedValue(undefined);
         mockGetDoc.mockResolvedValue({ exists: () => false });
     });
 
     afterEach(() => {
+        setWritableScope(null);
         jest.useRealTimers();
     });
 
@@ -384,6 +393,175 @@ describe('lastReadClient', () => {
             await flush();
             expect(writtenValues()).toEqual([T2, T1]);
             expect(mockGetDoc).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('writable scope (no resetLastReadState between scopes)', () => {
+        const SCOPE_B = { key: 'b', year: 2026 };
+
+        test('without a scope updateLastReadTimestamp returns false and leaves the cache untouched', () => {
+            setWritableScope(null);
+
+            expect(updateLastReadTimestamp('user1', 'conv1', T1)).toBe(false);
+            expect(getCachedTimestamp('user1', 'conv1')).toBeUndefined();
+
+            jest.advanceTimersByTime(600000);
+            expect(mockSetDoc).not.toHaveBeenCalled();
+        });
+
+        test('an entry enqueued under A whose debounce fires under B is dropped without a write', async () => {
+            expect(updateLastReadTimestamp('user1', 'conv1', T1)).toBe(true);
+            setWritableScope(SCOPE_B);
+
+            jest.advanceTimersByTime(2000);
+            await flushPendingWrites();
+            jest.advanceTimersByTime(600000);
+            await flush();
+
+            expect(mockSetDoc).not.toHaveBeenCalled();
+        });
+
+        test('a write under a 2026 scope goes to years/2026/lastRead', () => {
+            setWritableScope(SCOPE_B);
+
+            updateLastReadTimestamp('user1', 'conv1', T1);
+            jest.advanceTimersByTime(2000);
+
+            expect(mockDoc).toHaveBeenCalledWith({ _isMock: true }, 'years', '2026', 'lastRead', 'user1_conv1');
+            expect(writtenRefs()).toEqual(['ref:years/2026/lastRead/user1_conv1']);
+        });
+
+        test('late resolve: a write held under A that resolves under B changes nothing; the B entry keeps its own timers', async () => {
+            const held = deferred();
+            mockSetDoc.mockReturnValueOnce(held.promise);
+
+            updateLastReadTimestamp('user1', 'conv1', T1);
+            jest.advanceTimersByTime(2000);
+            expect(writtenRefs()).toEqual(['ref:lastRead/user1_conv1']);
+
+            setWritableScope(SCOPE_B);
+            expect(updateLastReadTimestamp('user1', 'conv1', T2)).toBe(true);
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(T2);
+
+            held.resolve();
+            await flush();
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(T2);
+
+            jest.advanceTimersByTime(2000);
+            await flush();
+            jest.advanceTimersByTime(120000);
+            await flush();
+
+            expect(writtenRefs()).toEqual(['ref:lastRead/user1_conv1', 'ref:years/2026/lastRead/user1_conv1']);
+            expect(writtenValues()).toEqual([T1, T2]);
+        });
+
+        test.each([
+            ['permission-denied', permissionDenied],
+            ['other error', () => new Error('unavailable')],
+        ])('late reject (%s): no confirmation read, no retry and no log', async (_label, makeError) => {
+            const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+            const held = deferred();
+            mockSetDoc.mockReturnValueOnce(held.promise);
+
+            updateLastReadTimestamp('user1', 'conv1', T1);
+            jest.advanceTimersByTime(2000);
+            setWritableScope(SCOPE_B);
+
+            held.reject(makeError());
+            await flush();
+            jest.advanceTimersByTime(60000);
+            await flush();
+            jest.advanceTimersByTime(600000);
+            await flush();
+
+            expect(mockGetDoc).not.toHaveBeenCalled();
+            expect(mockSetDoc).toHaveBeenCalledTimes(1);
+            expect(errorSpy).not.toHaveBeenCalled();
+            errorSpy.mockRestore();
+        });
+
+        test('confirmation in flight: a scope change before it resolves applies nothing', async () => {
+            const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+            const confirmation = deferred();
+            mockSetDoc.mockRejectedValueOnce(permissionDenied());
+            mockGetDoc.mockReturnValueOnce(confirmation.promise);
+
+            updateLastReadTimestamp('user1', 'conv1', T1);
+            jest.advanceTimersByTime(2000);
+            await flush();
+            expect(mockGetDoc).toHaveBeenCalledTimes(1);
+            expect(mockGetDoc).toHaveBeenCalledWith('ref:lastRead/user1_conv1');
+
+            setWritableScope(SCOPE_B);
+            confirmation.resolve({ exists: () => true, data: () => ({ lastReadAt: T3 }) });
+            await flush();
+
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(T1);
+            jest.advanceTimersByTime(600000);
+            await flush();
+            expect(mockSetDoc).toHaveBeenCalledTimes(1);
+            expect(mockGetDoc).toHaveBeenCalledTimes(1);
+            expect(errorSpy).not.toHaveBeenCalled();
+            errorSpy.mockRestore();
+        });
+
+        test('control: with A still current, the confirmation read uses A and settles as superseded', async () => {
+            const confirmation = deferred();
+            mockSetDoc.mockRejectedValueOnce(permissionDenied());
+            mockGetDoc.mockReturnValueOnce(confirmation.promise);
+
+            updateLastReadTimestamp('user1', 'conv1', T1);
+            jest.advanceTimersByTime(2000);
+            await flush();
+            expect(mockGetDoc).toHaveBeenCalledWith('ref:lastRead/user1_conv1');
+
+            confirmation.resolve({ exists: () => true, data: () => ({ lastReadAt: T3 }) });
+            await flush();
+
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(T3);
+            jest.advanceTimersByTime(600000);
+            await flush();
+            expect(mockSetDoc).toHaveBeenCalledTimes(1);
+        });
+
+        test('flushPendingWrites deletes an entry whose scope is not current', async () => {
+            updateLastReadTimestamp('user1', 'conv1', T1);
+            setWritableScope(SCOPE_B);
+
+            await flushPendingWrites();
+            jest.advanceTimersByTime(600000);
+            await flush();
+
+            expect(mockSetDoc).not.toHaveBeenCalled();
+        });
+
+        test('getLastReadTimestamp without a scope returns the cached value or epoch without a read', async () => {
+            setWritableScope(null);
+
+            expect(await getLastReadTimestamp('user1', 'conv1')).toBe(new Date(0).toISOString());
+            expect(mockGetDoc).not.toHaveBeenCalled();
+        });
+
+        test('subscribeToLastRead without a scope does not listen; after a scope change snapshots are ignored', () => {
+            setWritableScope(null);
+            const callback = jest.fn();
+            const unsubscribe = subscribeToLastRead('user1', 'conv1', callback);
+            expect(typeof unsubscribe).toBe('function');
+            expect(mockOnSnapshot).not.toHaveBeenCalled();
+
+            let next;
+            mockOnSnapshot.mockImplementation((ref, onNext) => {
+                next = onNext;
+                return jest.fn();
+            });
+            setWritableScope({ key: 'a2', year: 2025 });
+            subscribeToLastRead('user1', 'conv1', callback);
+            setWritableScope(SCOPE_B);
+            next({ exists: () => true, data: () => ({ lastReadAt: T1 }) });
+
+            expect(callback).not.toHaveBeenCalled();
+            expect(getCachedTimestamp('user1', 'conv1')).toBeUndefined();
         });
     });
 
