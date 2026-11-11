@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import {
     AdmissionError,
     admissionErrorResponse,
-    assertYearTransitionsEnabled,
     closeYear,
     verifyAdminRequest,
 } from '@/lib/participant-admission';
@@ -10,14 +9,13 @@ import { isValidYear } from '@/lib/year-paths';
 
 /**
  * Close a year: makes it read-only in one transaction on system/lifecycle. Idempotent.
- * Admin only; requires YEAR_TRANSITIONS_ENABLED=true outside development.
+ * Admin only: a valid ID token for an admin email, verified outside development.
  *
  * Body: { year }
  */
 export async function POST(request) {
     try {
         await verifyAdminRequest(request);
-        assertYearTransitionsEnabled();
 
         let body;
         try {

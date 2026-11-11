@@ -4,7 +4,6 @@ import {
     admitParticipant,
     assertAdmissibleToken,
     assertYearOpen,
-    assertYearTransitionsEnabled,
     closeYear,
     ensureParticipantProfiles,
     normalizeEmail,
@@ -155,22 +154,15 @@ function captureError(fn) {
 
 describe('participant-admission', () => {
     let savedNodeEnv;
-    let savedFlag;
 
     beforeEach(() => {
         jest.clearAllMocks();
         resetRosters();
         savedNodeEnv = process.env.NODE_ENV;
-        savedFlag = process.env.YEAR_TRANSITIONS_ENABLED;
     });
 
     afterEach(() => {
         process.env.NODE_ENV = savedNodeEnv;
-        if (savedFlag === undefined) {
-            delete process.env.YEAR_TRANSITIONS_ENABLED;
-        } else {
-            process.env.YEAR_TRANSITIONS_ENABLED = savedFlag;
-        }
     });
 
     describe('pure helpers', () => {
@@ -213,7 +205,6 @@ describe('participant-admission', () => {
             ['PROFILE_CONFLICT', 409],
             ['YEAR_CLOSED', 409],
             ['CLIENT_UPDATE_REQUIRED', 409],
-            ['TRANSITIONS_DISABLED', 409],
             ['YEAR_NOT_CLOSED', 409],
             ['YEAR_MISMATCH', 409],
             ['STALE_REQUEST', 409],
@@ -231,7 +222,6 @@ describe('participant-admission', () => {
             expect(new AdmissionError('YEAR_CLOSED').message).toBe("This year's exchange is closed and read-only.");
             expect(new AdmissionError('CLIENT_UPDATE_REQUIRED').message)
                 .toBe('A new version of the app is available. Reload the page (or close and reopen the app) to continue.');
-            expect(new AdmissionError('TRANSITIONS_DISABLED').message).toBe('Year transitions are not enabled on this deployment.');
         });
 
         test('admissionErrorResponse ignores other errors', () => {
@@ -243,22 +233,6 @@ describe('participant-admission', () => {
         function request(token = 'admin-token') {
             return { headers: { get: (name) => (name === 'Authorization' && token ? `Bearer ${token}` : null) } };
         }
-
-        test('assertYearTransitionsEnabled: the flag or development enables, otherwise TRANSITIONS_DISABLED', () => {
-            process.env.NODE_ENV = 'production';
-            delete process.env.YEAR_TRANSITIONS_ENABLED;
-            expect(captureError(() => assertYearTransitionsEnabled())).toMatchObject({ code: 'TRANSITIONS_DISABLED', status: 409 });
-
-            process.env.YEAR_TRANSITIONS_ENABLED = 'false';
-            expect(captureError(() => assertYearTransitionsEnabled())).toMatchObject({ code: 'TRANSITIONS_DISABLED' });
-
-            process.env.YEAR_TRANSITIONS_ENABLED = 'true';
-            expect(() => assertYearTransitionsEnabled()).not.toThrow();
-
-            delete process.env.YEAR_TRANSITIONS_ENABLED;
-            process.env.NODE_ENV = 'development';
-            expect(() => assertYearTransitionsEnabled()).not.toThrow();
-        });
 
         test('verifyAdminRequest: no token -> UNAUTHENTICATED', async () => {
             await expect(verifyAdminRequest(request(null))).rejects.toMatchObject({ code: 'UNAUTHENTICATED', status: 401 });

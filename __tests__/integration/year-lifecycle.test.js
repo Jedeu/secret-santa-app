@@ -158,6 +158,16 @@ const MALFORMED = [
     ['a listed year above year', { epoch: 1, state: 'active', year: 2025, closedYears: [2026] }],
 ];
 
+const LEGACY_FLAG_VALUES = [['unset', undefined], ['"false"', 'false'], ['"true"', 'true']];
+
+function setEnv(name, value) {
+    if (value === undefined) {
+        delete process.env[name];
+    } else {
+        process.env[name] = value;
+    }
+}
+
 describe('year lifecycle (emulator)', () => {
     let savedNodeEnv;
     let savedFlag;
@@ -661,28 +671,91 @@ describe('year lifecycle (emulator)', () => {
         });
     });
 
-    test('transitions gate: in production with the flag unset both routes return TRANSITIONS_DISABLED and write nothing', async () => {
-        await seedHistory();
-        const paths = [...GLOBAL_PATHS, ...H_PATHS, ...YEAR_2026_PATHS];
-        const before = await snapshotCollections(firestore, paths);
-        asCaller(ADMIN_DECODED);
+    describe('production admin routes ignore the retired YEAR_TRANSITIONS_ENABLED flag', () => {
+        test.each(LEGACY_FLAG_VALUES)(
+            'flag %s: Close then Start succeed through the routes and H is unchanged',
+            async (_label, value) => {
+                await seedHistory();
+                const H = await history();
+                const epochBefore = (await lifecycle()).epoch;
+                asCaller(ADMIN_DECODED);
 
-        delete process.env.YEAR_TRANSITIONS_ENABLED;
-        process.env.NODE_ENV = 'production';
-        let close;
-        let start;
-        try {
-            close = await closeRoute(request({ year: 2025 }));
-            start = await startRoute(request({ fromYear: 2025, targetYear: 2026 }));
-        } finally {
-            process.env.NODE_ENV = savedNodeEnv;
-        }
+                setEnv('YEAR_TRANSITIONS_ENABLED', value);
+                process.env.NODE_ENV = 'production';
+                let close;
+                let start;
+                try {
+                    close = await closeRoute(request({ year: 2025 }));
+                    start = await startRoute(request({ fromYear: 2025, targetYear: 2026 }));
+                } finally {
+                    process.env.NODE_ENV = savedNodeEnv;
+                }
 
-        expect(close.status).toBe(409);
-        expect((await close.json()).code).toBe('TRANSITIONS_DISABLED');
-        expect(start.status).toBe(409);
-        expect((await start.json()).code).toBe('TRANSITIONS_DISABLED');
-        expect(await snapshotCollections(firestore, paths)).toEqual(before);
+                expect(close.status).toBe(200);
+                expect(await close.json()).toEqual({
+                    success: true,
+                    year: 2025,
+                    state: 'closed',
+                    epoch: epochBefore,
+                    closedYears: [2025],
+                    changed: true,
+                });
+                expect(start.status).toBe(200);
+                expect(await start.json()).toEqual({
+                    success: true,
+                    year: 2026,
+                    state: 'active',
+                    epoch: epochBefore + 1,
+                    closedYears: [2025],
+                    changed: true,
+                    participants: ROSTER_2026.length,
+                });
+                expect(await lifecycle()).toMatchObject({
+                    epoch: epochBefore + 1,
+                    state: 'active',
+                    year: 2026,
+                    closedYears: [2025],
+                    startedAt: expect.any(String),
+                    closedAt: null,
+                });
+
+                const users2026 = await docs('years/2026/users');
+                expect(users2026.map((user) => user.email).sort()).toEqual(ROSTER_2026.map((p) => p.email).sort());
+                await expectIndexResolvesFor(ROSTER_2026, 2026, epochBefore + 1);
+                expect(await history()).toEqual(H);
+            }
+        );
+
+        test('flag "true" grants nothing: a non-admin and an unverified admin get 403 from both routes and nothing is written', async () => {
+            await seedHistory();
+            const paths = [...GLOBAL_PATHS, ...H_PATHS, ...YEAR_2026_PATHS];
+            const before = await snapshotCollections(firestore, paths);
+            const callers = [
+                [decoded(ALPHA), 'ADMIN_REQUIRED'],
+                [{ ...ADMIN_DECODED, email_verified: false }, 'EMAIL_NOT_VERIFIED'],
+            ];
+
+            setEnv('YEAR_TRANSITIONS_ENABLED', 'true');
+            process.env.NODE_ENV = 'production';
+            const responses = [];
+            try {
+                for (const [caller, code] of callers) {
+                    jest.restoreAllMocks();
+                    asCaller(caller);
+                    responses.push([await closeRoute(request({ year: 2025 })), code]);
+                    responses.push([await startRoute(request({ fromYear: 2025, targetYear: 2026 })), code]);
+                }
+            } finally {
+                process.env.NODE_ENV = savedNodeEnv;
+            }
+
+            expect(responses).toHaveLength(4);
+            for (const [res, code] of responses) {
+                expect(res.status).toBe(403);
+                expect((await res.json()).code).toBe(code);
+            }
+            expect(await snapshotCollections(firestore, paths)).toEqual(before);
+        });
     });
 
     test('the retired reset route returns 410 and changes nothing', async () => {
