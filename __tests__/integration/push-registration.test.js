@@ -5,22 +5,29 @@
 
 import { createHash } from 'node:crypto';
 import { auth as adminAuth, firestore } from '@/lib/firebase';
-import { resetDatabase } from '@/lib/firestore';
+import { closeYear, startNewYear } from '@/lib/participant-admission';
 import {
     cleanupInvalidTokens,
     getPushRegistrationStatus,
     registerPushToken,
     unregisterPushToken,
 } from '@/lib/push-server';
-import { PARTICIPANTS } from '@/lib/participants';
+import { getRoster } from '@/lib/participants';
 import { POST as registerRoute } from '@/app/api/push/register/route';
+import { clearEmulatorFirestore } from './helpers/emulator-admin';
 
 const TOKEN = 'it-device-token-push-000000001';
 const OTHER_TOKEN = 'it-device-token-push-000000002';
 const INVALID_RESPONSE = { responses: [{ success: false, error: { code: 'messaging/registration-token-not-registered' } }] };
 
-const memberA = { uid: 'it-push-uid-a', email: PARTICIPANTS[0].email, email_verified: true };
-const memberB = { uid: 'it-push-uid-b', email: PARTICIPANTS[1].email, email_verified: true };
+// Both members are on the 2025 and the 2026 rosters.
+const memberA = { uid: 'it-push-uid-a', email: getRoster(2026)[0].email, email_verified: true };
+const memberB = { uid: 'it-push-uid-b', email: getRoster(2026)[1].email, email_verified: true };
+
+async function closeAndStart2026() {
+    await closeYear({ year: 2025 });
+    await startNewYear({ fromYear: 2025, targetYear: 2026 });
+}
 
 function rowRef(token) {
     return firestore.collection('pushTokens').doc(createHash('sha256').update(token).digest('hex'));
@@ -52,7 +59,7 @@ function routeRequest(body) {
 
 describe('push registration (emulator)', () => {
     beforeEach(async () => {
-        await resetDatabase();
+        await clearEmulatorFirestore();
     });
 
     afterEach(() => {
@@ -120,10 +127,10 @@ describe('push registration (emulator)', () => {
         expect(seen.size).toBe(4);
     });
 
-    test('6. after a reset the pre-reset epoch gets 409 even with a null revision', async () => {
+    test('6. after Start the pre-Start epoch gets 409 even with a null revision', async () => {
         const before = await status();
 
-        await resetDatabase();
+        await closeAndStart2026();
 
         await expect(register(memberA, { epoch: before.epoch, revision: null }, true))
             .rejects.toMatchObject({ code: 'STALE_REGISTRATION' });
@@ -154,10 +161,10 @@ describe('push registration (emulator)', () => {
         expect(await row()).toMatchObject({ enabled: true, revision: reaffirmed.revision });
     });
 
-    test('9. cleanup after a reset with the old epoch writes nothing', async () => {
+    test('9. cleanup after Start with the old epoch writes nothing', async () => {
         const registered = await register(memberA, await status(), true);
 
-        await resetDatabase();
+        await closeAndStart2026();
 
         const cleaned = await cleanupInvalidTokens({
             epoch: registered.epoch,
@@ -165,7 +172,24 @@ describe('push registration (emulator)', () => {
             fcmResponse: INVALID_RESPONSE,
         });
         expect(cleaned).toBe(0);
-        expect((await firestore.collection('pushTokens').get()).size).toBe(0);
+        expect((await firestore.collection('pushTokens').get()).size).toBe(1);
+        const after = await row();
+        expect(after).toMatchObject({ enabled: true, revision: registered.revision });
+        expect(after.invalid).toBeUndefined();
+    });
+
+    test('9b. cleanup in a closed year writes nothing', async () => {
+        const registered = await register(memberA, await status(), true);
+
+        await closeYear({ year: 2025 });
+
+        const cleaned = await cleanupInvalidTokens({
+            epoch: registered.epoch,
+            sent: [{ token: TOKEN, revision: registered.revision }],
+            fcmResponse: INVALID_RESPONSE,
+        });
+        expect(cleaned).toBe(0);
+        expect(await row()).toMatchObject({ enabled: true, revision: registered.revision });
     });
 
     test('10. cleanup with a superseded revision leaves the newer enabled row untouched', async () => {

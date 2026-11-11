@@ -28,6 +28,7 @@ jest.mock('../../src/lib/firestore-listener-tracker', () => ({
 jest.mock('../../src/hooks/useUser', () => ({
     useUser: jest.fn(() => ({
         user: { id: 'user1', name: 'Test User' },
+        season: require('../helpers/useUser-mock').LEGACY_ACTIVE_SEASON,
         loading: false
     }))
 }));

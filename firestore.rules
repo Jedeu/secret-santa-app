@@ -3,102 +3,184 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function identityPath() { return /databases/$(database)/documents/authIdentities/$(request.auth.uid); }
     function lifecyclePath() { return /databases/$(database)/documents/system/lifecycle; }
-    function userPath(userId) { return /databases/$(database)/documents/users/$(userId); }
-    function isParticipant() {
+    function lifecycle() { return get(lifecyclePath()).data; }
+    // Absent `year` = the legacy 2025 exchange in the root collections. Absent closedYears = none.
+    function lifecycleYear() { return lifecycle().get('year', 2025); }
+    function lifecycleClosedYears() { return lifecycle().get('closedYears', []); }
+    // Rules subset of the server validation: scalar fields, list type and state/membership
+    // consistency. List element types and ordering are validated by the server only.
+    function lifecycleValid() {
+      return lifecycle().state in ['active', 'closed']
+        && lifecycle().epoch is int && lifecycle().epoch >= 1
+        && lifecycleYear() is int && lifecycleYear() >= 2025 && lifecycleYear() <= 9999
+        && lifecycleClosedYears() is list
+        && (lifecycle().state == 'closed') == (lifecycleYear() in lifecycleClosedYears())
+        && (lifecycleYear() == 2025 || lifecycleClosedYears().size() >= 1);
+    }
+    function isAdmitted() {
       return request.auth != null
         && exists(identityPath())
-        && get(lifecyclePath()).data.state == 'active'
-        && get(identityPath()).data.epoch == get(lifecyclePath()).data.epoch;
+        && lifecycleValid()
+        && get(identityPath()).data.epoch == lifecycle().epoch;
     }
+    // ys = year as a string: '2025' for the root collections, the {year} segment otherwise.
+    function isScopedYear(ys) { return ys.matches('^[0-9]{4}$') && int(ys) > 2025; }
+    function isCurrentYear(ys) { return isAdmitted() && int(ys) == lifecycleYear(); }
+    // Never a future year, never an unlisted past year.
+    function canReadYear(ys) {
+      return isAdmitted()
+        && int(ys) >= 2025 && int(ys) <= lifecycleYear()
+        && (int(ys) == lifecycleYear() || int(ys) in lifecycleClosedYears());
+    }
+    function canWriteYear(ys) { return isCurrentYear(ys) && lifecycle().state == 'active'; }
     function myUserId() { return get(identityPath()).data.userId; }
-    function authMatchesUser(userId) {
-      return isParticipant() && myUserId() == userId && exists(userPath(userId));
+    function userExists(ys, userId) {
+      return (ys == '2025' && exists(/databases/$(database)/documents/users/$(userId)))
+        || (ys != '2025' && exists(/databases/$(database)/documents/years/$(ys)/users/$(userId)));
+    }
+    function messageExists(ys, messageId) {
+      return (ys == '2025' && exists(/databases/$(database)/documents/messages/$(messageId)))
+        || (ys != '2025' && exists(/databases/$(database)/documents/years/$(ys)/messages/$(messageId)));
+    }
+    function userAfterHasGifter(ys, targetId, gifterId) {
+      return (ys == '2025' && getAfter(/databases/$(database)/documents/users/$(targetId)).data.gifterId == gifterId)
+        || (ys != '2025' && getAfter(/databases/$(database)/documents/years/$(ys)/users/$(targetId)).data.gifterId == gifterId);
+    }
+    function userAfterHasRecipient(ys, targetId, recipientId) {
+      return (ys == '2025' && getAfter(/databases/$(database)/documents/users/$(targetId)).data.recipientId == recipientId)
+        || (ys != '2025' && getAfter(/databases/$(database)/documents/years/$(ys)/users/$(targetId)).data.recipientId == recipientId);
+    }
+    function authMatchesUser(ys, userId) {
+      return canWriteYear(ys) && myUserId() == userId && userExists(ys, userId);
     }
     function onlyChanges(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
-    function isAllowedSelfRecipientSelection(userId) {
-      return authMatchesUser(userId) && onlyChanges(['recipientId'])
+    function isAllowedSelfRecipientSelection(ys, userId) {
+      return authMatchesUser(ys, userId) && onlyChanges(['recipientId'])
         && resource.data.recipientId == null
         && request.resource.data.recipientId is string
         && request.resource.data.recipientId != userId
-        && getAfter(userPath(request.resource.data.recipientId)).data.gifterId == userId;
+        && userAfterHasGifter(ys, request.resource.data.recipientId, userId);
     }
-    function isAllowedRecipientClaimUpdate(recipientUserId) {
+    function isAllowedRecipientClaimUpdate(ys, recipientUserId) {
       return onlyChanges(['gifterId'])
         && resource.data.gifterId == null
         && request.resource.data.gifterId is string
         && request.resource.data.gifterId != recipientUserId
-        && authMatchesUser(request.resource.data.gifterId)
-        && getAfter(userPath(request.resource.data.gifterId)).data.recipientId == recipientUserId;
+        && authMatchesUser(ys, request.resource.data.gifterId)
+        && userAfterHasRecipient(ys, request.resource.data.gifterId, recipientUserId);
     }
-    match /users/{userId} {
-      allow read: if isParticipant();
-      allow create, delete: if false;
-      allow update: if isAllowedSelfRecipientSelection(userId) || isAllowedRecipientClaimUpdate(userId);
+    function canReadLastRead(ys, lastReadId) {
+      return isCurrentYear(ys)
+        && (lastReadId.matches('^' + myUserId() + '_.+$')
+          || (lastReadId.matches('^[^_]+_.+$') && !lastReadId.matches('^[^_]+_publicFeed_.*$')));
     }
-    match /messages/{messageId} {
-      allow read: if isParticipant();
-      allow create, update, delete: if false;
-    }
-    function ownsLastReadId(lastReadId) {
-      return isParticipant() && lastReadId.matches('^' + myUserId() + '_.+$');
-    }
-    function isAllowedLastReadWrite(lastReadId) {
+    function isAllowedLastReadWrite(ys, lastReadId) {
       return request.resource.data.keys().hasOnly(['userId','conversationId','lastReadAt'])
         && request.resource.data.userId is string
         && request.resource.data.conversationId is string
         && request.resource.data.lastReadAt is timestamp
         && lastReadId == request.resource.data.userId + '_' + request.resource.data.conversationId
         && request.resource.data.lastReadAt <= request.time + duration.value(5, 'm')
-        && authMatchesUser(request.resource.data.userId);
+        && authMatchesUser(ys, request.resource.data.userId);
     }
     function isMonotonicLastRead() {
       return !(resource.data.lastReadAt is timestamp)
         || request.resource.data.lastReadAt >= resource.data.lastReadAt;
     }
-    match /lastRead/{lastReadId} {
-      allow read: if ownsLastReadId(lastReadId)
-        || (isParticipant() && lastReadId.matches('^[^_]+_.+$')
-            && !lastReadId.matches('^[^_]+_publicFeed_.*$'));
-      allow create: if isAllowedLastReadWrite(lastReadId);
-      allow update: if isAllowedLastReadWrite(lastReadId) && isMonotonicLastRead();
-      allow delete: if false;
-    }
-
-    match /typing/{typingId} {
-      allow read: if isParticipant();
-      allow create, update: if isParticipant()
-        && request.resource.data.keys().hasOnly(['userId', 'conversationId', 'typingAt'])
+    function isAllowedTypingWrite(ys, typingId) {
+      return request.resource.data.keys().hasOnly(['userId', 'conversationId', 'typingAt'])
         && request.resource.data.userId is string
         && request.resource.data.conversationId is string
         && request.resource.data.typingAt is string
-        && authMatchesUser(request.resource.data.userId)
+        && authMatchesUser(ys, request.resource.data.userId)
         && typingId == (request.resource.data.conversationId + '_' + request.resource.data.userId);
-      // resource == null: deleting a nonexistent doc is a no-op; clients call
-      // clearTyping unconditionally (unmount/blur), so don't deny it as an error.
-      allow delete: if isParticipant()
-        && (resource == null
-          || (resource.data.userId is string
-            && authMatchesUser(resource.data.userId)));
     }
-
-    match /reactions/{reactionId} {
-      allow read: if isParticipant();
-      allow create: if isParticipant()
-        && request.resource.data.keys().hasOnly(['messageId', 'userId', 'emoji', 'createdAt'])
+    // resource == null: deleting a nonexistent doc is a no-op.
+    function isAllowedTypingDelete(ys) {
+      return canWriteYear(ys)
+        && (resource == null || (resource.data.userId is string && authMatchesUser(ys, resource.data.userId)));
+    }
+    function isAllowedReactionCreate(ys, reactionId) {
+      return request.resource.data.keys().hasOnly(['messageId', 'userId', 'emoji', 'createdAt'])
         && request.resource.data.messageId is string
         && request.resource.data.userId is string
         && request.resource.data.emoji is string
         && request.resource.data.emoji.size() <= 4
         && request.resource.data.createdAt is string
-        && authMatchesUser(request.resource.data.userId)
+        && authMatchesUser(ys, request.resource.data.userId)
         && reactionId == (request.resource.data.messageId + '_' + request.resource.data.userId + '_' + request.resource.data.emoji)
-        && exists(/databases/$(database)/documents/messages/$(request.resource.data.messageId));
-      allow delete: if isParticipant()
-        && resource.data.userId is string
-        && authMatchesUser(resource.data.userId);
+        && messageExists(ys, request.resource.data.messageId);
+    }
+    function isAllowedReactionDelete(ys) {
+      return resource.data.userId is string && authMatchesUser(ys, resource.data.userId);
+    }
+
+    // Season metadata only (no participant data); server-written. Readable by any account that
+    // has ever been admitted, so a tab whose admission just went stale still learns of a Start.
+    match /system/lifecycle {
+      allow get: if request.auth != null && exists(identityPath());
+      allow list, write: if false;
+    }
+
+    // Root collections = the legacy 2025 exchange.
+    match /users/{userId} {
+      allow read: if canReadYear('2025');
+      allow create, delete: if false;
+      allow update: if isAllowedSelfRecipientSelection('2025', userId) || isAllowedRecipientClaimUpdate('2025', userId);
+    }
+    match /messages/{messageId} {
+      allow read: if canReadYear('2025');
+      allow create, update, delete: if false;
+    }
+    match /reactions/{reactionId} {
+      allow read: if canReadYear('2025');
+      allow create: if isAllowedReactionCreate('2025', reactionId);
+      allow delete: if isAllowedReactionDelete('2025');
       allow update: if false;
+    }
+    match /lastRead/{lastReadId} {
+      allow read: if canReadLastRead('2025', lastReadId);
+      allow create: if isAllowedLastReadWrite('2025', lastReadId);
+      allow update: if isAllowedLastReadWrite('2025', lastReadId) && isMonotonicLastRead();
+      allow delete: if false;
+    }
+    match /typing/{typingId} {
+      allow read: if isCurrentYear('2025');
+      allow create, update: if isAllowedTypingWrite('2025', typingId);
+      allow delete: if isAllowedTypingDelete('2025');
+    }
+
+    // 2026 onwards: one namespace per year.
+    match /years/{year} {
+      match /users/{userId} {
+        allow read: if isScopedYear(year) && canReadYear(year);
+        allow create, delete: if false;
+        allow update: if isScopedYear(year)
+          && (isAllowedSelfRecipientSelection(year, userId) || isAllowedRecipientClaimUpdate(year, userId));
+      }
+      match /messages/{messageId} {
+        allow read: if isScopedYear(year) && canReadYear(year);
+        allow create, update, delete: if false;
+      }
+      match /reactions/{reactionId} {
+        allow read: if isScopedYear(year) && canReadYear(year);
+        allow create: if isScopedYear(year) && isAllowedReactionCreate(year, reactionId);
+        allow delete: if isScopedYear(year) && isAllowedReactionDelete(year);
+        allow update: if false;
+      }
+      match /lastRead/{lastReadId} {
+        allow read: if isScopedYear(year) && canReadLastRead(year, lastReadId);
+        allow create: if isScopedYear(year) && isAllowedLastReadWrite(year, lastReadId);
+        allow update: if isScopedYear(year) && isAllowedLastReadWrite(year, lastReadId) && isMonotonicLastRead();
+        allow delete: if false;
+      }
+      match /typing/{typingId} {
+        allow read: if isScopedYear(year) && isCurrentYear(year);
+        allow create, update: if isScopedYear(year) && isAllowedTypingWrite(year, typingId);
+        allow delete: if isScopedYear(year) && isAllowedTypingDelete(year);
+      }
     }
 
     // Deny any other collections by default.

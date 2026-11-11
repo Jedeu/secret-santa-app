@@ -23,7 +23,8 @@ npm run test:integration
 - **firestore-rules-typing.test.js**: Validates `typing` ID integrity and auth-match write constraints
 - **firestore-rules-reactions.test.js**: Validates `reactions` create/delete/update constraints and message existence
 - **participant-admission.test.js**: Concurrent admissions, seeding and linking resolve to exactly one UUID profile per participant
-- **reset-fencing.test.js**: Overlapping, crashed and held resets (via test barrier hooks) fence assignments, delayed sends, push registration and admission
+- **year-lifecycle.test.js**: Close/Start transitions, idempotency, atomic failure, held-transaction races, roster exclusion, old-client and delayed-send fences, and a second rollover
+- **firestore-rules-years.test.js**: Year-scoped read/write rules, closed-year immutability, skipped- and future-year denial, and malformed lifecycle metadata
 - **firestore-rules-admission.test.js**: Rules admit only current-epoch participants, deny client user/message creates, and require reciprocal recipient claims
 - **push-registration.test.js**: Push status/register/unregister epoch+revision preconditions and fenced invalid-token cleanup (crafted FCM responses, no real FCM)
 

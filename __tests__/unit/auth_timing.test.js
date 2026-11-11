@@ -9,6 +9,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useRealtimeAllMessages } from '@/hooks/useRealtimeMessages';
 import { RealtimeMessagesProvider } from '@/context/RealtimeMessagesContext';
 import { useUser } from '@/hooks/useUser';
+import { LEGACY_ACTIVE_SEASON } from '../helpers/useUser-mock';
 
 // Mock Firebase Firestore SDK
 const mockOnSnapshot = jest.fn();
@@ -74,7 +75,7 @@ describe('Authentication Timing & Gating', () => {
     });
 
     test('should subscribe when user IS authenticated', async () => {
-        useUser.mockReturnValue({ user: { id: 'user1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'user1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
 
         renderHook(() => useRealtimeAllMessages(), { wrapper });
 
@@ -101,7 +102,7 @@ describe('Authentication Timing & Gating', () => {
         expect(mockOnSnapshot).not.toHaveBeenCalled();
 
         // Finish loading, user authenticated
-        useUser.mockReturnValue({ user: { id: 'user1' }, loading: false });
+        useUser.mockReturnValue({ user: { id: 'user1' }, season: LEGACY_ACTIVE_SEASON, loading: false });
         rerender();
 
         // Should now subscribe

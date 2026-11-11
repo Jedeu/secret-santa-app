@@ -383,6 +383,29 @@ describe('push-server', () => {
             return tx;
         }
 
+        test('register and unregister run in a fenced transaction that allows a closed year', async () => {
+            useFencedRow({ userId: 'user-1', enabled: true, revision: 'rev-1' });
+
+            const registered = await registerPushToken({
+                decodedToken,
+                token: 'push-token-1234567890',
+                expectedEpoch: 3,
+                expectedRevision: 'rev-1',
+                enabled: true,
+            });
+            expect(runFencedTransaction).toHaveBeenLastCalledWith(decodedToken, expect.any(Function), { allowClosed: true });
+
+            useFencedRow({ userId: 'user-1', enabled: true, revision: registered.revision });
+            await unregisterPushToken({
+                decodedToken,
+                token: 'push-token-1234567890',
+                expectedEpoch: 3,
+                expectedRevision: registered.revision,
+            });
+            expect(runFencedTransaction).toHaveBeenLastCalledWith(decodedToken, expect.any(Function), { allowClosed: true });
+            expect(runFencedTransaction).toHaveBeenCalledTimes(2);
+        });
+
         test('register on an unchanged owner and enabled state still writes a new revision', async () => {
             const tx = useFencedRow({ userId: 'user-1', enabled: true, revision: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' });
 

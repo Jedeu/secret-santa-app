@@ -1,14 +1,15 @@
-import { test, expect, Page, Browser } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { PARTICIPANTS } from '../src/lib/participants';
 import { ADMIN_EMAILS } from '../src/lib/config';
 
 /**
- * Admission and reset (emulators only).
+ * Admission (emulators only).
  *
  * - An outsider account is denied by the Firestore rules and by /api/auth/bootstrap.
  * - A chat draft does not follow a tab switch.
- * - An admin reset from the desktop sidebar re-bootstraps another open browser to the
- *   Welcome screen with a new profile id, without a reload.
+ *
+ * The retired admin Reset is covered by e2e/year-rollover.spec.ts (410), together with
+ * Close year / Start new year.
  *
  * Participant names/emails are read from the source list; nothing personal is hardcoded.
  */
@@ -47,13 +48,6 @@ async function waitForAssignedUser(page: Page): Promise<{ id: string; recipientI
         return Boolean(data?.id && data?.recipientId && data?.gifterId);
     }, { timeout: 20000 }).toBeTruthy();
     return page.evaluate(() => (window as any).__e2eUserData__);
-}
-
-async function newLoggedInPage(browser: Browser, name: string): Promise<Page> {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const page = await context.newPage();
-    await devLogin(page, name);
-    return page;
 }
 
 test.describe('Admission and reset', () => {
@@ -96,34 +90,5 @@ test.describe('Admission and reset', () => {
 
         await sidebar.getByRole('button', { name: /recipient/i }).click();
         await expect(page.getByPlaceholder('Type a message...')).toHaveValue('');
-    });
-
-    test('an admin reset re-bootstraps another open browser to Welcome with a new profile id', async ({ browser }) => {
-        expect(adminParticipant, 'an admin must be on the participant list').toBeTruthy();
-
-        const setupPage = await browser.newPage();
-        await setupPage.goto('/');
-        await seedAndAssign(setupPage);
-        await setupPage.close();
-
-        const adminPage = await newLoggedInPage(browser, adminParticipant!.name);
-        await waitForAssignedUser(adminPage);
-
-        const otherPage = await newLoggedInPage(browser, otherParticipant!.name);
-        const before = await waitForAssignedUser(otherPage);
-
-        adminPage.on('dialog', (dialog) => dialog.accept());
-        await adminPage.getByTitle('Reset App Data').click();
-        await expect(adminPage.getByText('System reset successfully.')).toBeVisible({ timeout: 30000 });
-
-        // No reload of the other browser.
-        await expect(otherPage.getByText(`Welcome, ${otherParticipant!.name}!`)).toBeVisible({ timeout: 30000 });
-        await expect.poll(async () => {
-            const data = await otherPage.evaluate(() => (window as any).__e2eUserData__);
-            return data?.id && data.id !== before.id;
-        }, { timeout: 15000 }).toBeTruthy();
-
-        await adminPage.context().close();
-        await otherPage.context().close();
     });
 });

@@ -1,23 +1,31 @@
 'use client';
 import { useRef, useState } from 'react';
-import { collection, query, where, getDocs, limit, doc, runTransaction } from 'firebase/firestore';
+import { query, where, getDocs, limit, runTransaction } from 'firebase/firestore';
 import { firestore } from '@/lib/firebase-client';
 import { signOutCurrentUser } from '@/lib/sign-out';
-import { getParticipantNames, getParticipantEmail } from '@/lib/participants';
-import { isAdmin } from '@/lib/config';
+import { getRosterNames, getRosterEmail } from '@/lib/participants';
+import { yearCollectionRef, yearDocRef } from '@/lib/year-client';
 import { useToast } from '@/components/ClientProviders';
-import { useAdminReset } from '@/hooks/useAdminReset';
 
 /**
- * RecipientSelector - First-time user recipient selection flow
+ * RecipientSelector - First-time user recipient selection flow for the open year
  *
  * @param {Object} props
  * @param {Object} props.currentUser - Current authenticated user
  * @param {string[]} props.availableRecipients - List of available recipient names
+ * @param {number} props.year - The open year (selection happens in that year's users)
  * @param {Function} props.onComplete - Called after successful selection
- * @param {Function} [props.onReset] - Called after successful reset (optional)
+ * @param {React.ReactNode} [props.adminControl] - Admin season control (Close/Start), if any
+ * @param {Function|null} [props.onBrowseArchive] - Shows "Browse past years" when provided
  */
-export default function RecipientSelector({ currentUser, availableRecipients, onComplete, onReset }) {
+export default function RecipientSelector({
+    currentUser,
+    availableRecipients,
+    year,
+    onComplete,
+    adminControl = null,
+    onBrowseArchive = null
+}) {
     const [recipientInput, setRecipientInput] = useState('');
     const [loading, setLoading] = useState(false);
     const submitLockRef = useRef(false);
@@ -31,8 +39,8 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
         setLoading(true);
 
         try {
-            // Validate recipient is in the allowed list
-            const ALLOWED_RECIPIENTS = getParticipantNames();
+            // Validate recipient is on this year's roster
+            const ALLOWED_RECIPIENTS = getRosterNames(year);
             const normalizedRecipientName = ALLOWED_RECIPIENTS.find(
                 name => name.toLowerCase() === recipientInput.toLowerCase()
             );
@@ -43,16 +51,16 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
                 return;
             }
 
-            // Get the email for this recipient from the hardcoded list
-            const recipientEmail = getParticipantEmail(normalizedRecipientName);
+            // Get the email for this recipient from this year's roster
+            const recipientEmail = getRosterEmail(year, normalizedRecipientName);
             if (!recipientEmail) {
                 showToast('Could not find email for this recipient.');
                 setLoading(false);
                 return;
             }
 
-            // Find the recipient in Firestore by email
-            const usersCollection = collection(firestore, 'users');
+            // Find the recipient in this year's users by email
+            const usersCollection = yearCollectionRef(year, 'users');
             const recipientQuery = query(usersCollection, where('email', '==', recipientEmail), limit(1));
             const recipientSnapshot = await getDocs(recipientQuery);
 
@@ -65,7 +73,7 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
             const recipientDoc = recipientSnapshot.docs[0];
             const recipient = recipientDoc.data();
             const recipientId = recipient.id || recipientDoc.id;
-            const currentUserRef = doc(firestore, 'users', currentUser.id);
+            const currentUserRef = yearDocRef(year, 'users', currentUser.id);
             const recipientRef = recipientDoc.ref;
 
             // Atomic recipient claim: prevents check-then-act race condition.
@@ -114,8 +122,6 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
         }
     };
 
-    const handleReset = useAdminReset({ onComplete: onReset });
-
     return (
         <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
             <div className="card login-card">
@@ -141,24 +147,33 @@ export default function RecipientSelector({ currentUser, availableRecipients, on
                     </button>
                 </form>
 
-                {/* Admin Reset on Welcome Screen */}
-                {isAdmin(currentUser.email) && (
+                {adminControl && (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px' }}>
+                        {adminControl}
+                    </div>
+                )}
+
+                {onBrowseArchive && (
                     <button
-                        onClick={handleReset}
+                        type="button"
+                        onClick={() => onBrowseArchive()}
                         style={{
-                            marginTop: '20px',
-                            background: '#dc3545',
-                            color: 'white',
-                            width: '100%',
-                            padding: '10px',
+                            color: 'var(--primary)',
+                            fontSize: '14px',
+                            marginTop: '16px',
+                            background: 'none',
                             border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
+                            width: '100%'
                         }}
                     >
-                        Reset App (Admin)
+                        Browse past years
                     </button>
                 )}
+
+                <p className="text-muted" style={{ textAlign: 'center', marginTop: '12px', fontSize: '13px' }}>
+                    {`${year} exchange`}
+                </p>
 
                 <button
                     onClick={() => {

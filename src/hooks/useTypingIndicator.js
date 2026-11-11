@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { onSnapshot } from 'firebase/firestore';
 import { firestore } from '@/lib/firebase-client';
+import { getWritableScope, scopedDocRef } from '@/lib/year-client';
 
 const TYPING_ACTIVE_WINDOW_MS = 5000;
 const TYPING_TICK_MS = 1000;
@@ -29,10 +30,21 @@ export function useTypingIndicator(conversationId, otherUserId) {
             return undefined;
         }
 
+        // Typing documents exist only in the open year: listen at the captured scope's
+        // path, and not at all without a writable scope.
+        const scope = getWritableScope();
+        if (!scope) {
+            return undefined;
+        }
+
         const typingDocId = `${conversationId}_${otherUserId}`;
-        const docRef = doc(firestore, 'typing', typingDocId);
+        const docRef = scopedDocRef(scope, 'typing', typingDocId);
 
         const unsubscribe = onSnapshot(docRef, (snapshot) => {
+            if (getWritableScope() !== scope) {
+                return;
+            }
+
             if (!snapshot.exists()) {
                 setTypingAt(null);
                 return;

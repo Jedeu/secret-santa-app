@@ -52,11 +52,19 @@ function createRequest({ token = 'token', body = {} } = {}) {
     };
 }
 
+function yearPath(year, name) {
+    return year === 2025 ? name : `years/${year}/${name}`;
+}
+
 /**
- * In-memory store + fake fenced transaction. `work` receives a tx with getAll/create.
+ * In-memory store keyed by the joined collection path + fake fenced transaction for the
+ * open `year`. `work` receives a tx with getAll/create and a ctx with year and state.
+ * `extra` seeds other collections (for example root users while the year is 2026).
  */
-function useStore({ users, messages = {}, sender }) {
-    const store = { users: { ...users }, messages: { ...messages } };
+function useStore({ users, messages = {}, sender, year = 2025, extra = {} }) {
+    const usersPath = yearPath(year, 'users');
+    const messagesPath = yearPath(year, 'messages');
+    const store = { ...extra, [usersPath]: { ...users }, [messagesPath]: { ...messages } };
     runFencedTransaction.mockImplementation(async (decoded, work) => {
         const creates = [];
         const tx = {
@@ -70,9 +78,12 @@ function useStore({ users, messages = {}, sender }) {
             uid: 'auth-uid',
             email: 'sender@example.test',
             epoch: 1,
-            user: store.users[sender],
+            year,
+            state: 'active',
+            user: store[usersPath][sender],
         });
         creates.forEach(({ ref, data }) => {
+            store[ref.__collection] = store[ref.__collection] || {};
             store[ref.__collection][ref.id] = data;
         });
         return result;
@@ -373,17 +384,83 @@ describe('POST /api/messages/send', () => {
         expect(sendIncomingMessagePush).not.toHaveBeenCalled();
     });
 
-    test('RESET_IN_PROGRESS returns 503 without push', async () => {
-        runFencedTransaction.mockRejectedValue(new AdmissionError('RESET_IN_PROGRESS'));
+    test('YEAR_CLOSED returns 409 without push', async () => {
+        runFencedTransaction.mockRejectedValue(new AdmissionError('YEAR_CLOSED'));
 
         const res = await POST(createRequest({
             body: { toId: RECIPIENT_ID, content: 'Hi', conversationId: CONV_SANTA_TO_RECIPIENT }
         }));
         const data = await res.json();
 
-        expect(res.status).toBe(503);
-        expect(data.code).toBe('RESET_IN_PROGRESS');
+        expect(res.status).toBe(409);
+        expect(data.code).toBe('YEAR_CLOSED');
         expect(runFencedTransaction).toHaveBeenCalledTimes(1);
+        expect(sendIncomingMessagePush).not.toHaveBeenCalled();
+    });
+
+    test('SERVICE_UNAVAILABLE returns 503 without push', async () => {
+        runFencedTransaction.mockRejectedValue(new AdmissionError('SERVICE_UNAVAILABLE'));
+
+        const res = await POST(createRequest({
+            body: { toId: RECIPIENT_ID, content: 'Hi', conversationId: CONV_SANTA_TO_RECIPIENT }
+        }));
+
+        expect(res.status).toBe(503);
+        expect(sendIncomingMessagePush).not.toHaveBeenCalled();
+    });
+
+    test('the route runs the fenced transaction without allowClosed', async () => {
+        useStore({ users: oneWayUsers, sender: SANTA_ID });
+
+        await POST(createRequest({
+            body: { toId: RECIPIENT_ID, content: 'Hi', conversationId: CONV_SANTA_TO_RECIPIENT }
+        }));
+
+        expect(runFencedTransaction).toHaveBeenCalledTimes(1);
+        expect(runFencedTransaction.mock.calls[0]).toHaveLength(2);
+        expect(runFencedTransaction).toHaveBeenCalledWith({ uid: 'auth-uid', email: 'sender@example.test' }, expect.any(Function));
+    });
+
+    test('in 2026 the recipient is read from years/2026/users and the message created under years/2026/messages', async () => {
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID, year: 2026, extra: { users: {}, messages: {} } });
+
+        const res = await POST(createRequest({
+            body: {
+                toId: RECIPIENT_ID,
+                content: 'Hello 2026',
+                conversationId: CONV_SANTA_TO_RECIPIENT,
+                clientMessageId: CLIENT_MESSAGE_ID,
+            }
+        }));
+
+        expect(res.status).toBe(200);
+        expect(store['years/2026/messages'][CLIENT_MESSAGE_ID]).toEqual(expect.objectContaining({
+            id: CLIENT_MESSAGE_ID,
+            fromId: SANTA_ID,
+            toId: RECIPIENT_ID,
+            conversationId: CONV_SANTA_TO_RECIPIENT,
+        }));
+        expect(store.messages).toEqual({});
+        expect(store.users).toEqual({});
+    });
+
+    test('in 2026 a recipient that exists only at the root returns 400 and writes nothing', async () => {
+        const store = useStore({
+            users: { [SANTA_ID]: oneWayUsers[SANTA_ID] },
+            sender: SANTA_ID,
+            year: 2026,
+            extra: { users: { [RECIPIENT_ID]: oneWayUsers[RECIPIENT_ID] }, messages: {} },
+        });
+
+        const res = await POST(createRequest({
+            body: { toId: RECIPIENT_ID, content: 'Hi', conversationId: CONV_SANTA_TO_RECIPIENT }
+        }));
+        const data = await res.json();
+
+        expect(res.status).toBe(400);
+        expect(data.error).toBe('Recipient not found');
+        expect(store['years/2026/messages']).toEqual({});
+        expect(store.messages).toEqual({});
         expect(sendIncomingMessagePush).not.toHaveBeenCalled();
     });
 

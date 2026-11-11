@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { firestore } from '@/lib/firebase';
 import { v4 as uuidv4 } from 'uuid';
-import { assertLifecycleActive, admissionErrorResponse } from '@/lib/participant-admission';
+import { assertYearOpen, admissionErrorResponse } from '@/lib/participant-admission';
 import { getConversationId, resolveAuthorizedConversationId } from '@/lib/message-utils';
+import { yearCollectionPath } from '@/lib/year-paths';
 
 class InjectError extends Error {
     constructor(status, message) {
@@ -14,7 +15,8 @@ class InjectError extends Error {
 /**
  * DEV-ONLY: Inject a message into Firestore for E2E testing
  * Uses the Admin SDK (clients cannot create messages under the security rules).
- * fromId must be toId's Santa with a reciprocal assignment.
+ * fromId must be toId's Santa with a reciprocal assignment. Writes to the open year only
+ * (YEAR_CLOSED in a closed year).
  *
  * Usage: POST /api/dev/inject-message
  * Body: { fromId, toId, content, displayName? }  (displayName is accepted but not stored)
@@ -40,10 +42,12 @@ export async function POST(request) {
         const messageId = uuidv4();
 
         const message = await firestore.runTransaction(async (tx) => {
-            await assertLifecycleActive(tx);
+            const { year } = await assertYearOpen(tx);
+            const usersCollection = firestore.collection(yearCollectionPath(year, 'users').join('/'));
+            const messagesCollection = firestore.collection(yearCollectionPath(year, 'messages').join('/'));
             const [fromSnap, toSnap] = await tx.getAll(
-                firestore.collection('users').doc(fromId),
-                firestore.collection('users').doc(toId)
+                usersCollection.doc(fromId),
+                usersCollection.doc(toId)
             );
             if (!fromSnap.exists || !toSnap.exists) {
                 throw new InjectError(400, 'Both users must exist');
@@ -67,7 +71,7 @@ export async function POST(request) {
                 timestamp: new Date().toISOString(),
                 conversationId: resolved.conversationId,
             };
-            tx.create(firestore.collection('messages').doc(messageId), messageData);
+            tx.create(messagesCollection.doc(messageId), messageData);
             return messageData;
         });
 

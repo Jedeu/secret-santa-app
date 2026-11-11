@@ -16,18 +16,21 @@ jest.mock('@/lib/firebase-client', () => ({
     firestore: { _isMock: true },
 }));
 
-import { clearTyping, setTyping } from '@/lib/typing-client';
+import { clearTyping, resetTypingState, setTyping } from '@/lib/typing-client';
+import { setWritableScope } from '@/lib/year-client';
 
 describe('typing-client', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         jest.useFakeTimers();
+        setWritableScope({ key: 'a', year: 2025 });
         mockDoc.mockReturnValue('typingDocRef');
         mockSetDoc.mockResolvedValue(undefined);
         mockDeleteDoc.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
+        setWritableScope(null);
         jest.useRealTimers();
     });
 
@@ -40,6 +43,7 @@ describe('typing-client', () => {
             conversationId: 'conv1',
             typingAt: expect.any(String),
         }));
+        expect(mockDoc).toHaveBeenCalledWith({ _isMock: true }, 'typing', 'conv1_user1');
 
         // Rapid subsequent keystrokes within the window do not add writes.
         setTyping('user1', 'conv1');
@@ -101,5 +105,62 @@ describe('typing-client', () => {
             process.off('unhandledRejection', unhandled);
             consoleError.mockRestore();
         }
+    });
+
+    test('a 2026 scope writes under years/2026/typing', () => {
+        setWritableScope({ key: 'b', year: 2026 });
+
+        setTyping('user1', 'conv5');
+
+        expect(mockDoc).toHaveBeenCalledWith({ _isMock: true }, 'years', '2026', 'typing', 'conv5_user1');
+    });
+
+    test('without a scope nothing is written', () => {
+        setWritableScope(null);
+
+        setTyping('user1', 'conv6');
+        jest.advanceTimersByTime(5000);
+
+        expect(mockSetDoc).not.toHaveBeenCalled();
+    });
+
+    test('a trailing write is dropped after a scope change', async () => {
+        setTyping('user1', 'conv7'); // leading write under scope a
+        setTyping('user1', 'conv7'); // trailing write scheduled under scope a
+        expect(mockSetDoc).toHaveBeenCalledTimes(1);
+
+        setWritableScope({ key: 'b', year: 2026 });
+        jest.advanceTimersByTime(2000);
+        await Promise.resolve();
+
+        expect(mockSetDoc).toHaveBeenCalledTimes(1);
+    });
+
+    test('clearTyping without a scope clears timers but sends no delete', async () => {
+        setTyping('user1', 'conv8');
+        setTyping('user1', 'conv8'); // trailing write scheduled
+        setWritableScope(null);
+
+        clearTyping('user1', 'conv8');
+        jest.advanceTimersByTime(2000);
+        await Promise.resolve();
+
+        expect(mockDeleteDoc).not.toHaveBeenCalled();
+        expect(mockSetDoc).toHaveBeenCalledTimes(1);
+    });
+
+    test('resetTypingState cancels pending trailing writes and the throttle window', async () => {
+        setTyping('user1', 'conv9');
+        setTyping('user1', 'conv9'); // trailing write scheduled
+        expect(mockSetDoc).toHaveBeenCalledTimes(1);
+
+        resetTypingState();
+        jest.advanceTimersByTime(2000);
+        await Promise.resolve();
+        expect(mockSetDoc).toHaveBeenCalledTimes(1);
+
+        // The throttle window was forgotten: the next keystroke writes immediately.
+        setTyping('user1', 'conv9');
+        expect(mockSetDoc).toHaveBeenCalledTimes(2);
     });
 });

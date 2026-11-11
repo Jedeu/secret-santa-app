@@ -50,16 +50,17 @@ function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
 }
 
 /**
- * TabNavigation - Tab bar for switching between Recipient, Santa, and Public Feed
+ * TabNavigation - Tab bar for switching between Recipient, Santa, Public Feed and Archives
  *
  * @param {Object} props
- * @param {'recipient'|'santa'|'feed'} props.activeTab - Currently active tab
+ * @param {'recipient'|'santa'|'feed'|'archive'} props.activeTab - Currently active tab
  * @param {Function} props.onTabChange - Called with tab ID when tab is clicked
  * @param {Object} props.unreadCounts - Object with recipient and santa unread counts
  * @param {number} props.unreadCounts.recipient - Unread count for recipient tab
  * @param {number} props.unreadCounts.santa - Unread count for santa tab
+ * @param {boolean} [props.showArchive] - Show the "📚 Archives" tab
  */
-export default function TabNavigation({ activeTab, onTabChange, unreadCounts }) {
+export default function TabNavigation({ activeTab, onTabChange, unreadCounts, showArchive = false }) {
     return (
         <div style={{
             display: 'flex',
@@ -92,6 +93,14 @@ export default function TabNavigation({ activeTab, onTabChange, unreadCounts }) 
             >
                 {'\ud83c\udf84 Public Feed'}
             </TabButton>
+            {showArchive && (
+                <TabButton
+                    active={activeTab === 'archive'}
+                    onClick={() => onTabChange('archive')}
+                >
+                    {'\ud83d\udcda Archives'}
+                </TabButton>
+            )}
         </div>
     );
 }

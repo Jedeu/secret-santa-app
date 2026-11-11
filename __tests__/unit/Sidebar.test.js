@@ -4,32 +4,22 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import Sidebar from '@/components/Sidebar';
 import TabNavigation from '@/components/TabNavigation';
-import * as config from '@/lib/config';
-
-// Mock the isAdmin function
-jest.mock('@/lib/config', () => ({
-    ...jest.requireActual('@/lib/config'),
-    isAdmin: jest.fn()
-}));
 
 describe('Sidebar Component', () => {
     const mockCurrentUser = { id: 'user-1', name: 'Test User', email: 'test@example.com' };
     const mockOnTabChange = jest.fn();
     const mockOnSignOut = jest.fn();
-    const mockOnReset = jest.fn();
 
     const defaultProps = {
         currentUser: mockCurrentUser,
         activeTab: 'recipient',
         onTabChange: mockOnTabChange,
         unreadCounts: { recipient: 0, santa: 0 },
-        onSignOut: mockOnSignOut,
-        onReset: mockOnReset
+        onSignOut: mockOnSignOut
     };
 
     beforeEach(() => {
         jest.clearAllMocks();
-        config.isAdmin.mockReturnValue(false);
     });
 
     // 1. Renders user info correctly
@@ -78,20 +68,37 @@ describe('Sidebar Component', () => {
         expect(badges).toHaveLength(0);
     });
 
-    // 6. Admin Panel (Reset Button)
-    test('shows Reset button for admin users', () => {
-        config.isAdmin.mockReturnValue(true);
-        render(<Sidebar {...defaultProps} />);
-        expect(screen.getByTitle('Reset App Data')).toBeInTheDocument();
+    // 6. Admin season control
+    test('renders a supplied adminControl node', () => {
+        render(<Sidebar {...defaultProps} adminControl={<button type="button">Close 2025</button>} />);
+        expect(screen.getByRole('button', { name: 'Close 2025' })).toBeInTheDocument();
     });
 
-    test('hides Reset button for non-admin users', () => {
-        config.isAdmin.mockReturnValue(false);
+    test('renders nothing admin-related without an adminControl', () => {
         render(<Sidebar {...defaultProps} />);
-        expect(screen.queryByTitle('Reset App Data')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /close|start|reset/i })).not.toBeInTheDocument();
+        expect(screen.queryByText(/Reset/)).not.toBeInTheDocument();
     });
 
-    // 7. Sign Out
+    // 7. Archives item
+    test('has no Archives item when showArchive is false', () => {
+        render(<Sidebar {...defaultProps} />);
+        expect(screen.queryByRole('button', { name: /archives/i })).not.toBeInTheDocument();
+    });
+
+    test('with showArchive, the Archives item calls onTabChange("archive") and shows active styling', () => {
+        const { rerender } = render(<Sidebar {...defaultProps} showArchive />);
+        const archives = screen.getByRole('button', { name: /📚\s*Archives/ });
+        expect(archives).toHaveStyle({ fontWeight: '400' });
+
+        fireEvent.click(archives);
+        expect(mockOnTabChange).toHaveBeenCalledWith('archive');
+
+        rerender(<Sidebar {...defaultProps} showArchive activeTab="archive" />);
+        expect(screen.getByRole('button', { name: /archives/i })).toHaveStyle({ fontWeight: '600' });
+    });
+
+    // 8. Sign Out
     test('calls onSignOut when clicked', () => {
         render(<Sidebar {...defaultProps} />);
         const signOutButton = screen.getByRole('button', { name: /sign out/i });
@@ -110,5 +117,19 @@ describe('Sidebar Component', () => {
 
         expect(screen.getByLabelText('Recipient: 2 unread messages')).toHaveAttribute('aria-live', 'polite');
         expect(screen.getByLabelText('Santa: 1 unread messages')).toHaveAttribute('aria-live', 'polite');
+    });
+
+    test('tab navigation has no Archives tab when showArchive is false', () => {
+        render(<TabNavigation activeTab="recipient" onTabChange={jest.fn()} unreadCounts={{}} />);
+        expect(screen.queryByRole('button', { name: /archives/i })).not.toBeInTheDocument();
+    });
+
+    test('tab navigation Archives tab calls onTabChange("archive")', () => {
+        const onTabChange = jest.fn();
+        render(<TabNavigation activeTab="recipient" onTabChange={onTabChange} unreadCounts={{}} showArchive />);
+
+        fireEvent.click(screen.getByRole('button', { name: '📚 Archives' }));
+
+        expect(onTabChange).toHaveBeenCalledWith('archive');
     });
 });
