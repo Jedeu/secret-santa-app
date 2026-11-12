@@ -10,6 +10,8 @@ import {
     interpretLifecycle,
     yearCollectionPath,
 } from '@/lib/year-paths';
+import { DRAW_MODE_AUTO, hasDrawMode } from '@/lib/recipient-reveal';
+import { drawRecipientCycle, isCompletePairing } from '@/lib/recipient-draw';
 
 /**
  * Server-side participant admission, lifecycle fencing and the annual Close / Start
@@ -25,7 +27,10 @@ import {
  *
  * Profiles live in the year's `users` collection (root for 2025, years/{year}/users
  * afterwards). The epoch bumps only on Start; the year number is the idempotency and
- * staleness token of a transition.
+ * staleness token of a transition. Profiles created by Start also carry
+ * `drawMode: 'auto'` (their pairs are drawn at Start) and the reveal acknowledgment
+ * fields `revealAckRecipientId` and `revealAckAt` (null at Start; written only by
+ * POST /api/reveal/acknowledge). Profiles without `drawMode` use manual selection.
  */
 
 const LIFECYCLE_COLLECTION = 'system';
@@ -284,6 +289,11 @@ async function resolveProfileInTransaction(tx, db, { year, state, email, name, e
             // A closed year never gains a profile.
             throw new AdmissionError('ACCESS_DENIED');
         }
+        if (usersSnap.docs.some((doc) => hasDrawMode(doc.data()))) {
+            // Recipients for this year were drawn at Start: a profile added now would have no
+            // place in the draw and must never reach manual selection.
+            throw new AdmissionError('PROFILE_CONFLICT');
+        }
         const user = {
             id: uuidv4(),
             name: toTitleCase(name),
@@ -463,10 +473,11 @@ export async function resolveParticipant(decoded, { verifyIndex = false, require
 }
 
 /**
- * Run `work(tx, { uid, email, epoch, year, state, user })` inside a transaction fenced on
- * the lifecycle and the caller's admission. Order: unavailable -> 503; roster check;
- * closed and !allowClosed -> YEAR_CLOSED (before any admission write); identity/profile
- * validity -> admit once and retry.
+ * Run `work(tx, { uid, email, epoch, year, state, user, profileId })` inside a
+ * transaction fenced on the lifecycle and the caller's admission. `profileId` is the
+ * profile document id from the admission record read in this transaction. Order:
+ * unavailable -> 503; roster check; closed and !allowClosed -> YEAR_CLOSED (before any
+ * admission write); identity/profile validity -> admit once and retry.
  */
 export async function runFencedTransaction(decoded, work, { allowClosed = false } = {}) {
     const { uid, email } = assertAdmissibleToken(decoded);
@@ -497,6 +508,7 @@ export async function runFencedTransaction(decoded, work, { allowClosed = false 
             year: lifecycle.year,
             state: lifecycle.state,
             user: valid.user,
+            profileId: userId,
         });
     });
 
@@ -684,6 +696,11 @@ function isValidRoster(roster) {
  * entry in the empty target namespace, point each participantIndex row at it at the new
  * epoch, and activate the target year. Idempotent.
  *
+ * Every participant's recipient is drawn here (one random ring, see recipient-draw.js),
+ * once per call and before the transaction, so a retried callback writes the same ids
+ * and pairs. The created profiles carry drawMode 'auto' and null reveal acknowledgment
+ * fields. A repeated Start writes nothing and never redraws.
+ *
  * @returns {Promise<{ year, state, epoch, closedYears, changed, participants }>}
  */
 export async function startNewYear({ fromYear, targetYear } = {}) {
@@ -696,16 +713,26 @@ export async function startNewYear({ fromYear, targetYear } = {}) {
         throw new AdmissionError('ROSTER_NOT_CONFIGURED');
     }
 
-    // Built before the transaction so a retried callback reuses the same ids.
-    const profiles = roster.map((participant) => ({
+    // Built before the transaction so a retried callback reuses the same ids and the same draw.
+    const base = roster.map((participant) => ({
         id: uuidv4(),
         name: toTitleCase(participant.name),
         email: participant.email,
         oauthId: null,
         image: null,
-        recipientId: null,
-        gifterId: null,
     }));
+    const draw = drawRecipientCycle(base.map((profile) => profile.id));
+    const profiles = base.map((profile) => ({
+        ...profile,
+        recipientId: draw.get(profile.id).recipientId,
+        gifterId: draw.get(profile.id).gifterId,
+        drawMode: DRAW_MODE_AUTO,
+        revealAckRecipientId: null,
+        revealAckAt: null,
+    }));
+    if (!isCompletePairing(profiles)) {
+        throw new Error('Recipient draw failed validation');
+    }
 
     const db = requireFirestore();
 

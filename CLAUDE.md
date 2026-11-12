@@ -64,7 +64,7 @@ Always run `npm run emulators` before starting development. The emulators must b
 User authentication is a server-mediated handshake:
 1. Users sign in with Google OAuth via Firebase Auth.
 2. `src/context/UserContext.js` is the single auth/profile owner (`useUser()` reads it). It POSTs the ID token to `/api/auth/bootstrap`.
-3. `src/lib/participant-admission.js` reads `system/lifecycle`, checks the email against that year's roster in `src/lib/participants.js` (and `email_verified` outside development), then atomically resolves or creates the UUID profile in that year's `users` collection and writes a server-only `authIdentities/{authUid}` record. In a closed year it links an existing profile but never creates one.
+3. `src/lib/participant-admission.js` reads `system/lifecycle`, checks the email against that year's roster in `src/lib/participants.js` (and `email_verified` outside development), then atomically resolves or creates the UUID profile in that year's `users` collection and writes a server-only `authIdentities/{authUid}` record. In a closed year it links an existing profile but never creates one. In a year that holds profiles drawn at Start it also never creates one (`PROFILE_CONFLICT`).
 4. Firestore rules admit only callers whose admission record matches the current `system/lifecycle` epoch. Emails not on the active year's roster get ACCESS_DENIED.
 
 Clients never create `users` documents. Profile UUIDs are new every year. Open clients watch `system/lifecycle` and re-bootstrap after a server-confirmed Close or Start. To remove a participant mid-season, remove them from that year's roster and delete their `authIdentities` document.
@@ -112,7 +112,10 @@ Key utilities in `src/lib/message-utils.js`:
   oauthId: string,      // Firebase uid
   image: string,        // Google profile photo
   recipientId: string,  // UUID of who they're buying for
-  gifterId: string      // UUID of who's buying for them
+  gifterId: string,     // UUID of who's buying for them
+  drawMode?: 'auto',                    // only on profiles created by Start new year; absent = manual selection
+  revealAckRecipientId?: string | null, // recipientId confirmed on the one-time reveal screen (server-written)
+  revealAckAt?: string | null           // ISO 8601 time of that confirmation
 }
 ```
 
@@ -159,7 +162,7 @@ Auth conventions: routes verify a Firebase **Bearer ID token** (`Authorization: 
 - **POST /api/init**: Seed the active year's roster. No auth in development; requires an admin Bearer token in production. Refused in a closed year.
 - **POST /api/admin/reset**: Retired. Always returns 410 `RESET_RETIRED`.
 - **POST /api/admin/year/close**: Body `{ year }`. Makes that year read-only in one transaction. Admin only; idempotent.
-- **POST /api/admin/year/start**: Body `{ fromYear, targetYear }`. Requires `fromYear` closed and a roster for `targetYear`; creates the new year's profiles and bumps the epoch in one transaction. Admin only; idempotent.
+- **POST /api/admin/year/start**: Body `{ fromYear, targetYear }`. Requires `fromYear` closed and a roster for `targetYear`; creates the new year's profiles, draws every participant's recipient (one random ring), and bumps the epoch in one transaction. Admin only; idempotent.
 - **POST /api/dev/assign**: Dev-only assignment helper. 403 outside development.
 - **POST /api/dev/inject-message**: Dev-only message injection for testing. 403 outside development.
 - **POST /api/dev/seed**: Dev-only seed data from the participants list. 403 outside development.
@@ -167,6 +170,7 @@ Auth conventions: routes verify a Firebase **Bearer ID token** (`Authorization: 
 - **POST /api/push/status**: Report this device token's registration state (epoch, revision, ownership). Requires a Bearer token.
 - **POST /api/push/register**: Register a Web Push subscription for the authenticated user. Requires Bearer token. Requires expectedEpoch and expectedRevision from /api/push/status.
 - **POST /api/push/unregister**: Remove a Web Push subscription. Requires Bearer token. Requires expectedEpoch and expectedRevision from /api/push/status.
+- **POST /api/reveal/acknowledge**: Body `{ year, epoch, userId, recipientId }`. Records that the caller saw their recipient. Requires a Bearer token; writes only the caller's own profile, only when all four values match the server's state; idempotent; refused in a closed year.
 
 ### Testing Strategy
 
@@ -184,6 +188,9 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - `src/lib/firestore.js`: Server helpers (`ensureAllParticipants`, `assignUsersInTransaction`)
 - `src/lib/year-paths.js`: Year storage layout and lifecycle interpretation (pure; shared by client and server)
 - `src/components/ArchiveViewer.js`: Read-only view of closed years
+- `src/components/RecipientReveal.js`: One-time recipient reveal
+- `src/lib/recipient-reveal.js`: Pure reveal-state rules (shared by client and server)
+- `src/lib/recipient-draw.js`: Server-only recipient draw
 - `firebase.json`: Emulator configuration
 - `firestore.rules`: Firestore security rules (authoritative; summarized under Important Notes)
 - `AGENTS.md`: Agent workflow contract (roles, approval loop, safety boundaries)
@@ -195,7 +202,7 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - Production requires environment variables: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (server Admin SDK), plus the `NEXT_PUBLIC_FIREBASE_*` client config including `NEXT_PUBLIC_FIREBASE_VAPID_KEY`. Push notifications go through Firebase Cloud Messaging (Admin SDK `messaging`), so they reuse the server Admin credentials — there is no separate web-push private key.
 - **Firestore rules are hardened** (`firestore.rules`), not minimal. The rules file is authoritative; this list is a reading aid, not a guarantee:
   - Per-collection field allowlists (`keys().hasOnly([...])`) on every create/update.
-  - Clients cannot create users or messages; both are written only by the server. Recipient selection must update both users reciprocally in one transaction.
+  - Clients cannot create users or messages; both are written only by the server. Recipient selection must update both users reciprocally in one transaction. Profiles with `drawMode` are never client-writable.
   - lastRead doc ids must equal {userId}_{conversationId}; markers are monotonic; a user can read their own markers, and other users' DM markers for read receipts, but never another user's public-feed markers.
   - `typing` and `reactions` enforce deterministic doc-id shapes and owner identity.
   - `allow delete: if false` on users/messages/lastRead. `messages` also deny `update`; `users` and `lastRead` allow only the specific updates the rules check. `typing` and `reactions` let a signed-in user delete their own docs. A catch-all denies every other collection.
@@ -203,6 +210,7 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - The message outbox stores one localStorage entry per queued message under secret-santa-message-outbox-v2:*; the v1 key is read-only legacy input. Tabs running an older build must reload before the outbox fixes apply.
 - Year lifecycle: `Close year` and `Start new year` are the only season transitions. The app has no bulk reset or deletion of year data and never writes to a closed year; the open year keeps its normal writes (messages, pairing claims, read markers, and adding or removing typing and reaction documents). In the app, only `POST /api/admin/year/close` and `POST /api/admin/year/start` call `closeYear` and `startNewYear`; these routes accept only an admin's Bearer ID token (verified email outside development), and no environment variable enables or disables them. The admin panel calls a route only after the admin types the year, and no deploy, sign-in, page load or background task starts a transition.
 - Firestore rules allow reads of the current year and of earlier years listed in `closedYears`, never a later year, and writes only in the single open year.
+- Automatic draw and reveal: `Start new year` is the only thing that draws recipients; there is no reroll. A profile with `drawMode: 'auto'` shows the reveal until `revealAckRecipientId` equals `recipientId`. Only `POST /api/reveal/acknowledge` writes that; bootstrap never does. The reveal is a UI step, not secrecy. Profiles without `drawMode` use manual selection.
 - **Anonymity is a trust model, not a hard guarantee.** The Public Feed and Santa/Recipient split hide identities in the UI for the open year, but `messages` are readable by any admitted participant, so identities are technically discoverable by inspecting raw data. Closing a year reveals its pairings to all admitted participants in the archive. Treat anonymity as social convention enforced by the client.
 
 ## Workflows & Guidelines

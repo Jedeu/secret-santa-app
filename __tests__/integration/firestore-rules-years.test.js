@@ -19,6 +19,7 @@ const {
     getDocs,
     setDoc,
     Timestamp,
+    updateDoc,
     writeBatch,
 } = jest.requireActual('firebase/firestore');
 
@@ -315,6 +316,78 @@ describe('firestore rules: year-scoped storage and lifecycle', () => {
                 typingAt: new Date().toISOString(),
             }));
         }
+    });
+
+    test('automatic-draw profiles are never client-writable', async () => {
+        await setLifecycle(testEnv, { epoch: 2, state: 'active', year: 2026, closedYears: [2025] });
+        const users = col('2026', 'users');
+        const autoDoc = (id, email, recipientId, gifterId) => ({
+            id,
+            name: id,
+            email,
+            oauthId: null,
+            image: null,
+            recipientId,
+            gifterId,
+            drawMode: 'auto',
+            revealAckRecipientId: null,
+            revealAckAt: null,
+        });
+        // A three-profile ring drawn at Start, plus two automatic profiles with null pairings.
+        const A = 'y2026-auto-a';
+        const B = 'y2026-auto-b';
+        const C = 'y2026-auto-c';
+        const D = 'y2026-auto-d';
+        const E = 'y2026-auto-e';
+        await seedDoc(testEnv, users, A, autoDoc(A, EMAIL, B, C));
+        await seedDoc(testEnv, users, B, autoDoc(B, 'b@example.test', C, A));
+        await seedDoc(testEnv, users, C, autoDoc(C, 'c@example.test', A, B));
+        await seedDoc(testEnv, users, D, autoDoc(D, 'd@example.test', null, null));
+        await seedDoc(testEnv, users, E, autoDoc(E, 'e@example.test', null, null));
+
+        await seedIdentity(testEnv, AUTH_UID, A, EMAIL, 2);
+        const db = signedIn();
+        const mine = doc(db, users, A);
+
+        await assertFails(updateDoc(mine, { revealAckRecipientId: B }));
+        await assertFails(updateDoc(mine, { revealAckRecipientId: B, revealAckAt: new Date().toISOString() }));
+        await assertFails(updateDoc(mine, { drawMode: null }));
+        await assertFails(updateDoc(mine, { recipientId: C }));
+        await assertFails(setDoc(mine, { revealAckRecipientId: B }, { merge: true }));
+
+        const reclaim = writeBatch(db);
+        reclaim.update(mine, { recipientId: C });
+        reclaim.update(doc(db, users, C), { gifterId: A });
+        await assertFails(reclaim.commit());
+
+        // Two automatic profiles with null pairings cannot claim each other.
+        await seedIdentity(testEnv, AUTH_UID, D, EMAIL, 2);
+        const asD = signedIn();
+        const autoClaim = writeBatch(asD);
+        autoClaim.update(doc(asD, users, D), { recipientId: E });
+        autoClaim.update(doc(asD, users, E), { gifterId: D });
+        await assertFails(autoClaim.commit());
+
+        // An automatic profile with a null recipient cannot claim a manual one.
+        const { me: manualMe, other: manualOther } = ids('2026');
+        const autoOnManual = writeBatch(asD);
+        autoOnManual.update(doc(asD, users, D), { recipientId: manualOther });
+        autoOnManual.update(doc(asD, users, manualOther), { gifterId: D });
+        await assertFails(autoOnManual.commit());
+
+        // A manual profile cannot claim an automatic one.
+        await seedIdentity(testEnv, AUTH_UID, manualMe, EMAIL, 2);
+        const asManual = signedIn();
+        const manualOnAuto = writeBatch(asManual);
+        manualOnAuto.update(doc(asManual, users, manualMe), { recipientId: E });
+        manualOnAuto.update(doc(asManual, users, E), { gifterId: manualMe });
+        await assertFails(manualOnAuto.commit());
+
+        // Reads of the automatic profiles succeed.
+        for (const id of [A, B, C, D, E]) {
+            await assertSucceeds(getDoc(doc(asManual, users, id)));
+        }
+        await assertSucceeds(getDocs(collection(asManual, users)));
     });
 
     test('a skipped year is never readable', async () => {

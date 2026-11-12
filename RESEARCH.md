@@ -1,139 +1,45 @@
-# Research: iPhone notification setup stuck on “Saving…”
+# Research: full-height recipient reveal on mobile
 
-## Request, workflow and boundaries
+## Request and workflow override
 
-**PR integration update (2026-11-12):** #64 was squash-merged as `c2c3530`, and #65 now targets `main`. Merging `origin/main` produced conflicts only in the root `PLAN.md` and `RESEARCH.md`; the current notification versions were retained. Before adding this execution note, the entire staged tree was identical to the previously verified notification HEAD (`62f668b`), so no runtime/test changes or new application verification claims result. Owner-file hashes were unchanged. Earlier notes about waiting for #64 or retargeting #65 are historical; the normal conflict-resolution push triggers CI on the current `main` target.
+The owner requested full height for the mobile recipient reveal shown in the screenshots, then explicitly directed using Opus 5.5 without Fable because this is a small change. Primary will use Opus only, in a fresh visible Herdr tab, for the bounded presentation-only adjustment in PLAN.md. The owner's request authorizes this mobile-height follow-up; no new drawing, acknowledgment, routing or desktop behavior is requested. Previous feature implementation, approval and verification evidence is preserved in commit 5f8b797 (draft PR #66).
 
-The owner reports that after adding the app to the iPhone Home Screen, tapping Enable notifications leaves the control stuck on “Saving…”. The owner requested investigating this after completing the year-transition flag-removal PR.
+## Current code
 
-That separate change is complete: PR **#64**, https://github.com/Jedeu/secret-santa-app/pull/64, commit `7080d5b`. Its primary checks passed (725 unit/API, 48 lifecycle integration, lint/build). At the latest GitHub check, **all checks passed**, including Vercel preview, lint, unit, integration and E2E. It is not part of this notification change.
+- src/components/RecipientReveal.js shares the container/card/login-card classes with other screens. Its main element centers the naturally sized card using inline justifyContent/alignItems. All four display states use the same card shell. Continue, retry, archive, admin controls, year line and sign-out are already implemented and must remain unchanged.
+- src/app/globals.css defines container height 100vh, then 100dvh and 10px padding on mobile. It clips container overflow. Card has a 16px radius, 16px bottom margin and padding. Login-card overrides padding to 40px 32px, width 100% and max-width 420px; desktop at min-width 800px uses max-width 480px and padding 48px 40px.
+- The screenshot at 390x844 shows the naturally sized card vertically centered with large empty areas above/below. Dedicated reveal-only classes can remove mobile outer padding, fill the available viewport, remove the floating-card border/radius/margin and keep internal scrolling, without touching auth/legacy selector/chat layouts.
+- Desktop begins at 800px. The existing max-width 800px mobile rule overlaps desktop at exactly 800px. A new strictly-below-800 rule avoids changing the established desktop boundary.
+- src/app/layout.js has device-width and initialScale 1 and does not request viewport-fit cover. No layout metadata change is needed. Safe-area-aware card padding is a local defensive measure for installed/mobile contexts.
+- __tests__/unit/RecipientReveal.test.js already covers ready/loading/error/invalid, Continue/failed retry, controls and unmount. JSDOM cannot prove CSS geometry; browser measurement and screenshots are required.
+- e2e/mobile-layout.spec.ts covers the existing chat layout, not the reveal. Existing year-rollover E2E covers reveal behavior and persistence. No permanent E2E file needs changing for this presentational follow-up; primary can measure the real screen with the already-created synthetic screenshot harness.
 
-This branch is `fix/iphone-push-saving`, based on `origin/main` at `687b9b8` when created. At research start, notification source was identical to that in PR #64; the fixes have no application-code dependency. Prior archives research/plan remain in Git at `4b65590`; the gate-removal research/plan at `7080d5b`.
+## Bounded approach
 
-The owner explicitly changed the small-fix workflow: **Opus plans and implements; primary performs adversarial review and all checks/Git**. Do not use Fable. A reviewed plan still needs owner approval before implementation. The owner approved reviewed revision 2 and a separate notification PR on 2026-11-12 by answering “Yes” to the primary's explicit approval request. No production Firebase access, deploy, configuration/credentials change or real push test is authorized.
+Add reveal-only main/card classes, and one mobile-only CSS rule below 800px. Make the card edge-to-edge and full-height within the viewport, retain existing content order and inline spacing, allow vertical card scrolling on short screens, and keep desktop's centered card unchanged. The owner then explicitly clarified that the content must also be vertically centered. Use a mobile-only flex column with equal empty before/after flex spacers and non-shrinking real children: spare height is split equally; overflowing content starts at the top and stays scrollable. No DOM wrapper or unsafe negative-overflow centering is needed. Do not redesign controls.
 
-Protect the owner's pre-existing `.claude/settings.local.json` and untracked `public/sw.js`, `public/workbox-f1770938.js`, `public/worker-2a484529a5551160.js`. They remain unchanged and must not be edited or staged. The separate screenshot demo is still running on owned default ports and must not be stopped or wiped.
+## Verification/runtime resources
 
-## What is known and what is not
+- Supported Node 22.15.0 is cached locally and was used for prior checks.
+- Primary-owned screenshot harness: /tmp/secret-santa-recipient-preview.al5rE0. It uses an isolated copy, synthetic Alex/Jamie/Casey registry/admin fixtures, clean HOME/environment, explicit local emulator hosts, disabled push and existing Playwright. Its emulator/dev servers were stopped; ports 8080/9099/4000/3000 were rechecked free at task start.
+- Previous mobile/desktop screenshots are preserved under that harness's screenshots directory. Primary will create a fresh isolated copy for the updated capture and leave the real registry/config untouched.
+- Only primary runs commands, emulators, browser checks and screenshot capture. Opus may not read runtime procedures, secrets, settings.local.json, outside-repository files or invoke commands/skills/delegates/MCP.
+- Pre-existing owner changes remain .claude/settings.local.json and untracked public/sw.js, public/workbox-f1770938.js, public/worker-2a484529a5551160.js; preserve and exclude them. No production operation is requested. No new commit/push was required merely to capture the adjusted layout; the owner subsequently explicitly requested publication as recorded below.
 
-- The owner confirmed iPhone plus Home Screen installation, and now sees the actionable toggle rather than “Notifications unavailable”.
-- Primary asked: did iOS show an Allow Notifications prompt, and did the owner tap Allow before the stall? An answer is pending. Do not infer permission state, iOS version or the precise stalled stage.
-- No Safari remote inspector trace or real-device reproduction is available. The code defects below are independently reproducible pending-promise paths, not proof of which path is happening on this phone.
-- Static-only HTTPS checks executed no app scripts and touched no Firebase/API endpoints. The immutable Production deployment URL from GitHub redirects its `/sw.js` and manifest requests to Vercel (protection/login), so those responses do not reveal the app's worker state. The repository homepage URL returns 404 for both assets and may be stale. The actual URL installed on the phone is unconfirmed; do not treat either result as evidence that the phone's worker is missing. Results are recorded in the notification artifact directory.
-- Home Screen push support is a platform requirement, not a guarantee of successful registration or delivery.
+## Risk flags
 
-## Baseline code ground truth (before this fix)
+No message routing, Firebase SDK imports, listeners/reads, security rules, anonymity, assignment or acknowledgment changes. Only mobile geometry can regress: scope selectors exclusively to RecipientReveal, preserve 800px+ styling, permit short-viewport scrolling and ensure controls remain reachable. No external documentation/API research is needed.
 
-### UI: `src/components/PushNotificationsControl.js`
+## Opus handoffs and actual verification (2026-11-11 MST)
 
-- `togglePush` sets `loading=true` before awaiting `enablePushForCurrentUser` or `disablePushForCurrentUser`. Only its `finally` sets `loading=false`.
-- Consequently, any never-settling operation leaves the disabled button labelled “Saving…” forever.
-- Support checks run after mount to avoid hydration mismatch. They require browser APIs and three public Firebase push settings via `isPushSupported`.
-- The existing iOS install hint is behind the unsupported early return; this is a distinct UX issue and not necessary to solve the reported post-install stall.
-- The label reflects **desired preference + permission**, not server-registration success. A failed enable with permission granted currently leaves “Disable notifications” plus an explicit not-registered note. Preserve that distinction or explicitly plan a narrow, tested change; never claim delivery is active merely because permission was granted.
-- The current generic enable error note says it will retry when the app opens. There is no explicit retry action in this component.
+- Initial full-height pass: fresh Herdr tab w5:t9, claude-opus-5-5/xhigh, read/search/edit/write tools only. Opus made exactly the two class additions, mobile CSS and four markup test cases. Primary reviewed the diff and ran focused component tests (24 passed), full unit/API tests (968 passed), lint and build in a credential-free copy using Node 22.15.0.
+- After the owner clarified vertical centering, a second fresh tab w5:tA launched claude-opus-5-5/xhigh with the same restricted tools. Opus edited only globals.css to add the approved flex-column/spacer/non-shrink rules. No Fable was used, no delegate command/check was executed and no behavior changed.
+- Primary reran the full 968-test unit/API suite, lint and build after centering; all passed. Real Chromium with synthetic fixtures proved full-height mobile bounds at 375x667, 799x900, 390x390, 390x280 and 390x844. For fitting content, top/bottom free gaps were exactly equal: 114/114px, 239/239px and 202.5/202.5px at the three larger mobile sizes. Short screens scrolled only inside the card (scrollTop 9px and 159px; page scroll zero), with heading and sign-out reachable.
+- Desktop at 800px and 1440px retained its 480x432 centered card, padding and radius. The new 1440x900 screenshot is byte-identical to the previous desktop screenshot. The centered mobile screenshot was inspected; paragraph-margin effects of flex layout do not introduce clipping or an unacceptable visual gap.
+- The real local Continue route still opened chats, synchronized the second browser and stayed dismissed after reload. All screenshot emulator/dev/browser processes stopped afterward. No real roster/config data was used in screenshots, and only the disposable fixture copy's registry/admin values were replaced.
+- Full integration/rules and full E2E were not rerun for this presentation-only change; no new backend/security/listener behavior exists. Real-device safe-area rendering remains unverified. At verification completion, no production operations, deployment, new dependency or Git publication had occurred; owner files are preserved.
 
-### Client pipeline: `src/lib/push-client.js` (Client SDK only)
+## Publication authorized (2026-11-11 MST)
 
-Imports `firebase/app`, `firebase/messaging` and `clientAuth` from `@/lib/firebase-client`. No Admin SDK belongs here.
-
-Enable order:
-1. Validate support and authUid.
-2. Synchronously persist that account's desired enabled preference, write the device-intent id, create the operation and notify subscribers.
-3. Call `Notification.requestPermission()` if needed.
-4. `reconcile(op)` -> `obtainFcmToken(op)` -> `navigator.serviceWorker.ready` -> Firebase `getToken(messaging, { vapidKey, serviceWorkerRegistration })`.
-5. Up to three rounds of authenticated `/api/push/status` then `/api/push/register`, using fresh epoch/revision and the latest stored preference every round.
-
-Unbounded waits:
-- `Notification.requestPermission()`.
-- `navigator.serviceWorker.ready` (specifically never rejects and may wait forever).
-- Firebase `getToken()`.
-- `op.user.getIdToken()` before each API call.
-- HTTP response-body `response.json()`: the existing 15-second AbortController timer is cleared immediately after `fetch` returns headers, before JSON is read.
-
-The only request timeout currently covers the `fetch` await, not the entire operation. `enablePushForCurrentUser`, `disablePushForCurrentUser` and `syncPushTokenIfGranted` have no overall settlement bound. `releasePushRegistration` already has its own bounded timeout, marks its op cancelled and aborts its fetch controllers; it returns false and never changes the preference.
-
-### Existing concurrency and authorization contracts (must survive)
-
-- Desired preference is per account (`secret-santa-push-pref:{authUid}`), written only by an explicit enable/disable click before its first await. Never roll it back or write it after an await; sync, release and retries never write preference.
-- Device intent, realm generation, captured auth user and epoch/revision are independent fences. `ensureCurrent(op)` runs after awaits and immediately before network work. An obsolete operation returns `aborted` and starts no further app API requests.
-- A bare UI Promise.race that merely clears the spinner is insufficient: abandoned work could later resume and mutate registration or overwrite a retry's UI. Any timeout/cancellation must preserve those fences. Browser prompts/SDK promises themselves may not be cancellable; do not claim otherwise.
-- The server registration protocol must remain unchanged: status then register on every reconcile round, even if already matching; three conflict rounds maximum; revisions rotate; unregister is owner checked.
-- `cancelPushOperations` is used by `UserContext` session/lifecycle cleanup, `PushNotificationsRuntime` effect cleanup and sign-out. `src/lib/sign-out.js` limits cleanup to three seconds; do not make sign-out wait longer.
-- Background sync is opt-in/per-account and must never prompt for permission. iOS permission invocation must still occur directly from the explicit user gesture, before introducing any await ahead of it.
-- JS timers may be suspended while iOS backgrounds an app; no precise wall-clock guarantee can be made while execution is suspended.
-
-### Worker/install configuration
-
-- `next.config.js`: next-pwa, `register: true`, `skipWaiting: true`, custom source `worker`, disabled only in development.
-- `worker/index.js`: Firebase messaging SW initialization when public messaging config is present; notificationclick behavior. No missing registration logic was proven here.
-- `public/manifest.json`: `display: standalone`, start URL `/`; layout links the manifest and Apple web-app metadata.
-- No evidence currently justifies changing the manifest, worker, next-pwa setup, dependencies, push server, API contracts, Firestore rules or Firebase configuration.
-
-## Executed research probe (not a real-device or real-FCM test)
-
-Primary ran the **actual unmodified** `push-client.js` in isolated Node 22.15.0 VM modules. All Firebase imports, browser APIs, auth and fetch were synthetic; no network, credentials or database were used. The existing HTTP timer was accelerated to 20ms; observation was 100ms. A normal synthetic flow registered successfully. Each isolated pending stage left enable unsettled:
-
-| Scenario | Result at observation | App API fetches |
-|---|---|---|
-| Normal synthetic success | `registered` | 2 |
-| Service-worker ready pending | unsettled | 0 |
-| FCM token pending | unsettled | 0 |
-| Permission pending | unsettled | 0 |
-| Auth token pending | unsettled | 0 |
-| Response JSON pending | unsettled, its fetch timer already cleared | 1 |
-
-The source has no other bound on these waits, and the UI awaits that result before its finally. This confirms a code path that can produce the reported indefinite “Saving…” behavior; it does not establish the phone's precise cause or prove actual push delivery.
-
-Artifacts: `/tmp/secret-santa-iphone-push-saving.JwbbBh/probe.mjs`, `probe-results.jsonl`, `probe.stderr`. Probe exit code 0 means its expected success/pending observations matched, not that the bug was fixed.
-
-## Existing tests and verification considerations
-
-- `__tests__/unit/push_client.test.js`: two synthetic realms, shared storage, mocked messaging and a stateful revision-fenced fake server. Covers ordering races, account switch, delayed permission, preference-write audit, conflicts, release timeout, listener/storage behavior and sync. Worker readiness, token acquisition and most calls are currently immediately-resolved mocks; there is no never-ready/token/body bound test.
-- `__tests__/unit/PushNotificationsControl.test.js`: success, generic failure and aborted states, account preference updates, install hint; no stuck-operation/retry test.
-- Related untouched regressions: `PushNotificationsRuntime.test.js`, `worker_push_display.test.js`, `pwa_manifest_assets.test.js`, `next_config_pwa.test.js`, UserContext and sign-out tests.
-- Keep real device limitations explicit. Unit/fake-timer coverage can prove deterministic settlement, actionable feedback and stale-completion fencing, but not iPhone push delivery. Any real-device verification must be performed separately with the owner.
-- Node >=22.13.0 <23 required; supported 22.15.0 binary is available. Primary runs lint, relevant focused regressions, full unit/API suite and production build in a disposable copy, excluding `.env*`, credentials, owner settings and generated files. Use an allowlisted environment and isolated HOME/config; no production keys or real FCM dispatch.
-- Emulator suites wipe entire databases and default ports are occupied by the screenshot demo. No new emulator check is obviously necessary for a client-only fix that leaves the server protocol unchanged; the planner should scale checks accordingly and explicitly list suites not run.
-
-## Risk areas
-
-Client SDK separation, operation/identity/lifecycle cancellation, permission user-gesture timing, misleading success UI, timer cleanup, retry races and late non-cancellable SDK completions. Message routing, Firestore listeners, security rules, the anonymity model, rosters and year transitions need no changes.
-
-## External sources checked by primary
-
-- MDN `ServiceWorkerContainer.ready`: promise never rejects and waits indefinitely for an active worker. https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerContainer/ready
-- Firebase messaging API: `getToken` returns a promise, accepts the service-worker registration; don't migrate messaging APIs/SDK versions as part of this fix. https://firebase.google.com/docs/reference/js/messaging
-- WebKit iOS push: Home Screen web apps, iOS/iPadOS 16.4+, permission request from direct user interaction. https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/
-
-## Opus handoff and adversarial review
-
-Opus (`claude-opus-5-5`, xhigh) drafted a four-file plan and returned a complete revision after primary adversarial review. Both CLI init records confirmed read/search tools only (`Read`, `Grep`, `Glob`), plan permission mode, no MCP servers or skills. The delegate did not implement or execute checks.
-
-The primary challenged cleanup that depended on abort-cooperative promises, stale account/attempt UI updates, held in-flight request and late-rejection coverage, permission-timeout classification, and overstated device/timing guarantees. Revision 2 specifies immediate request/timer cleanup, scoped UI-attempt guards, preference-aware retry feedback and deterministic regressions, while preserving server fencing and the three-second sign-out bound. No blocking objection remains. The owner subsequently approved revision 2 and publication of a separate notification PR on 2026-11-12. Root `PLAN.md` now records APPROVED; Opus is implementing the four listed files.
-
-## Implementation and initial verification (2026-11-12 UTC)
-
-Opus implemented exactly the four approved files using only read/search/edit/write tools. CLI init confirmed `claude-opus-5-5`, xhigh launch, `acceptEdits`, no MCP servers or skills. The primary audited every tool/read/edit path and reviewed both runtime files and new test blocks. No blocking defect or scope deviation remained; both pre-existing test blocks were preserved verbatim.
-
-Primary checks ran under Node **22.15.0**, an allowlisted credential-free environment, isolated HOME/config, synthetic test mocks and a disposable copy without `.env*` or owner settings:
-
-| Check | Actual result |
-|---|---|
-| Unmodified branch baseline | **699 unit/API passed**, 57 suites |
-| Updated full unit/API suite | **741 passed**, 57 suites (+42) |
-| Focused push client/control suites | **73 passed**, 2 suites, three consecutive runs |
-| Related runtime/worker/manifest/config/UserContext/recipient/app-flow regressions | **60 passed**, 7 suites |
-| Lint | Passed |
-| Production build | Passed without real credentials/client config |
-| Scope/SDK/whitespace and existing-test preservation | Passed |
-
-No unhandled-rejection or PromiseRejectionHandledWarning diagnostics appeared. Jest itself also detects unhandled rejections; the additional process listener follows the existing test pattern but is not treated as the sole oracle. All four owner-file hashes and the default-port demo listener/PID records remained unchanged.
-
-The draft notification PR is stacked on PR #64 so the two PRs do not conflict over their root planning artifacts. The fixes are independent in application behavior; only Git publication is sequenced (**merge #64 first**). The primary merged the reviewed #64 base without rewriting history; only the two primary-owned planning artifacts conflicted, and this notification plan/research was retained. All four notification implementation files stayed byte-identical to the initially verified copy.
-
-The combined tree was reverified in the isolated workspace: **767 unit/API tests passed**, 57 suites (725 in #64 + 42 new notification tests); **73 focused tests passed** again; lint and production build passed again. No unhandled-rejection diagnostics appeared. No notification source correction was needed. Final owner-file hashes, demo listener/PID records and verified source-copy comparisons were unchanged; the disposable workspace was then deleted, retaining redacted logs under `/tmp/secret-santa-iphone-push-saving.JwbbBh`.
-
-CI sequencing: `.github/workflows/ci.yml` filters pull requests to `main`, so a draft stacked against `fix/remove-year-transition-gate` does not trigger that workflow yet. After #64 merges, retarget this PR to `main` and synchronize the branch (a normal merge/update, not a history rewrite); run the full GitHub CI gate before merging the notification PR. Vercel preview status is separate from that gate.
-
-Not run locally: integration, rules, Playwright E2E, real iPhone token acquisition or push delivery. No production Firebase access, real push send, credentials/configuration change, deployment command or live rollover occurred.
+- The owner directed “Push and create a PR.” Primary fetched origin and confirmed draft PR #66 remains open for feat/annual-recipient-reveal against main. The follow-up is being committed and normally pushed to that existing feature branch, updating the existing draft PR without duplicate PR creation or history rewriting.
+- Publication scope is the three approved mobile presentation/test files plus PLAN.md and RESEARCH.md. Source matches the passing verification copy. Owner-owned local settings and the three generated public workers remain excluded and hash-checked. No deployment, production access, force push or direct-main push is authorized.

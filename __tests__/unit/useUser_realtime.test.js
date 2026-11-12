@@ -11,6 +11,8 @@
  *   bootstrap responses are retried at most three times
  * - a lifecycle listener that ends is reattached at most once per accepted 2xx bootstrap
  * - 403/409 surface as errors
+ * - recipient reveal: the acknowledgment operation is bounded, fenced and settles
+ *   synchronously on abandonment; the acknowledgment is monotonic for one tuple
  */
 
 import { StrictMode } from 'react';
@@ -23,6 +25,7 @@ import { resetLastReadState } from '@/lib/lastReadClient';
 import { resetTypingState } from '@/lib/typing-client';
 import { clearYearArchiveCache } from '@/hooks/useYearArchive';
 import { getWritableScope, setWritableScope } from '@/lib/year-client';
+import { getRevealState } from '@/lib/recipient-reveal';
 
 let mockAuthCallback = null;
 // When set (not undefined), onAuthStateChanged delivers this user synchronously on registration.
@@ -847,6 +850,773 @@ describe('UserProvider / useUser', () => {
             await flush();
             expect(global.fetch).toHaveBeenCalledTimes(2);
             expect(lifecycleSubs()).toHaveLength(1);
+        });
+    });
+
+    describe('recipient reveal', () => {
+        const ACK_URL = '/api/reveal/acknowledge';
+        const BOOT_URL = '/api/auth/bootstrap';
+        const ACK_AT = '2026-11-11T10:00:00.000Z';
+        const TIMEOUT_MS = 15000;
+
+        const SEASON_CLOSED_2026 = { year: 2026, yearState: 'closed', epoch: 2, closedYears: [2025, 2026] };
+        const LIFECYCLE_CLOSED_2026 = { epoch: 2, state: 'closed', year: 2026, closedYears: [2025, 2026] };
+        const SEASON_2027 = { year: 2027, yearState: 'active', epoch: 3, closedYears: [2025, 2026] };
+        const LIFECYCLE_2027 = { epoch: 3, state: 'active', year: 2027, closedYears: [2025, 2026] };
+
+        // Synthetic 2026 automatic-draw profiles (ring Alpha -> Bravo -> Charlie).
+        const autoPending = {
+            id: 'alpha-2026',
+            name: 'Alpha',
+            email: 'alpha@example.test',
+            recipientId: 'bravo-2026',
+            gifterId: 'charlie-2026',
+            drawMode: 'auto',
+            revealAckRecipientId: null,
+            revealAckAt: null,
+        };
+        const autoAcked = { ...autoPending, revealAckRecipientId: 'bravo-2026', revealAckAt: ACK_AT };
+        const betaPending = {
+            id: 'bravo-2026',
+            name: 'Beta',
+            email: 'beta@example.test',
+            recipientId: 'charlie-2026',
+            gifterId: 'alpha-2026',
+            drawMode: 'auto',
+            revealAckRecipientId: null,
+            revealAckAt: null,
+        };
+        const manualAssigned = {
+            id: 'alpha-2026',
+            name: 'Alpha',
+            email: 'alpha@example.test',
+            recipientId: 'bravo-2026',
+            gifterId: 'charlie-2026',
+        };
+        const ACK_REQUEST = { year: 2026, epoch: 2, userId: 'alpha-2026', recipientId: 'bravo-2026' };
+
+        let unhandled;
+        let routes;
+
+        function makeUser({ uid = 'uid-alpha', email = 'alpha@example.test', token = 'token-alpha' } = {}) {
+            return { uid, email, getIdToken: jest.fn(() => Promise.resolve(token)) };
+        }
+
+        function ackResponse(status, body) {
+            return { ok: status >= 200 && status < 300, status, json: async () => body };
+        }
+
+        function ackBody(overrides = {}) {
+            return { success: true, changed: true, ...ACK_REQUEST, acknowledgedAt: ACK_AT, ...overrides };
+        }
+
+        function fetchCalls(url) {
+            return global.fetch.mock.calls.filter(([calledUrl]) => calledUrl === url);
+        }
+
+        function profileSnapshot(data, fromCache = false) {
+            return { exists: () => true, data: () => data, metadata: { fromCache } };
+        }
+
+        // Handlers are attached at once so that no rejection is ever unhandled across clock advances.
+        function track(promise) {
+            const run = { promise, done: false, value: undefined, error: undefined };
+            run.settled = promise.then(
+                (value) => {
+                    run.done = true;
+                    run.value = value;
+                    return value;
+                },
+                (error) => {
+                    run.done = true;
+                    run.error = error;
+                    return undefined;
+                }
+            );
+            return run;
+        }
+
+        async function start(latest) {
+            let run;
+            await act(async () => {
+                run = track(latest.c0.acknowledgeReveal());
+            });
+            await flush();
+            return run;
+        }
+
+        async function advance(ms) {
+            await act(async () => { jest.advanceTimersByTime(ms); });
+            await flush();
+        }
+
+        async function signedIn(firebaseUser = makeUser()) {
+            const utils = renderWithConsumers();
+            await signIn(firebaseUser);
+            return { ...utils, alpha: firebaseUser };
+        }
+
+        beforeEach(() => {
+            unhandled = jest.fn();
+            process.on('unhandledRejection', unhandled);
+            routes = {
+                bootstrap: () => ok(autoPending, SEASON_2026),
+                acknowledge: () => Promise.resolve(ackResponse(200, ackBody())),
+            };
+            global.fetch.mockImplementation((url, init) => {
+                if (url === BOOT_URL) return routes.bootstrap(init);
+                if (url === ACK_URL) return routes.acknowledge(init);
+                return Promise.reject(new Error(`unexpected request ${url}`));
+            });
+        });
+
+        afterEach(async () => {
+            jest.useRealTimers();
+            // One real macrotask so that Node reports any rejection the test left unhandled.
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            process.off('unhandledRejection', unhandled);
+            expect(unhandled).not.toHaveBeenCalled();
+        });
+
+        describe('operation', () => {
+            test('O1 request shape; a 200 publishes both ack fields and resolves acknowledged; no listener is added or removed', async () => {
+                const { latest, alpha } = await signedIn();
+                expect(latest.c0.user).toEqual(autoPending);
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+                const listenerCount = mockSnapshots.length;
+                const unsubscribeCounts = mockSnapshots.map((entry) => entry.unsubscribe.mock.calls.length);
+                alpha.getIdToken.mockClear();
+
+                const run = await start(latest);
+
+                expect(alpha.getIdToken).toHaveBeenCalledTimes(1);
+                expect(alpha.getIdToken).toHaveBeenCalledWith(false);
+                const calls = fetchCalls(ACK_URL);
+                expect(calls).toHaveLength(1);
+                const [, init] = calls[0];
+                expect(init.method).toBe('POST');
+                expect(init.headers).toEqual({ Authorization: 'Bearer token-alpha', 'Content-Type': 'application/json' });
+                expect(JSON.parse(init.body)).toEqual(ACK_REQUEST);
+                expect(run.value).toEqual({ status: 'acknowledged' });
+                expect(latest.c0.user).toEqual(autoAcked);
+                expect(getRevealState(latest.c0.user)).toBe('acknowledged');
+                expect(mockSnapshots).toHaveLength(listenerCount);
+                mockSnapshots.forEach((entry, i) => {
+                    expect(entry.unsubscribe.mock.calls.length).toBe(unsubscribeCounts[i]);
+                });
+            });
+
+            test.each([
+                ['a manual profile', () => ok(manualAssigned, SEASON_2026)],
+                ['an acknowledged profile', () => ok(autoAcked, SEASON_2026)],
+                ['an invalid profile', () => ok({ ...autoPending, recipientId: null }, SEASON_2026)],
+                ['a closed season', () => ok(autoPending, SEASON_CLOSED_2026)],
+            ])('O2 %s resolves stale with no token request and no fetch', async (_label, bootstrap) => {
+                routes.bootstrap = bootstrap;
+                const { latest, alpha } = await signedIn();
+                expect(latest.c0.user).not.toBeNull();
+                alpha.getIdToken.mockClear();
+                global.fetch.mockClear();
+
+                const run = await start(latest);
+
+                expect(run.value).toEqual({ status: 'stale' });
+                expect(alpha.getIdToken).not.toHaveBeenCalled();
+                expect(global.fetch).not.toHaveBeenCalled();
+            });
+
+            test('O3 two calls for the same scope while one is in flight share one promise and one fetch', async () => {
+                const held = deferred();
+                routes.acknowledge = () => held.promise;
+                const { latest } = await signedIn();
+
+                let first;
+                let second;
+                let run;
+                await act(async () => {
+                    first = latest.c0.acknowledgeReveal();
+                    run = track(first);
+                    second = latest.c0.acknowledgeReveal();
+                });
+                await flush();
+
+                expect(second).toBe(first);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                expect(run.done).toBe(false);
+
+                held.resolve(ackResponse(200, ackBody()));
+                await flush();
+
+                expect(run.value).toEqual({ status: 'acknowledged' });
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+            });
+
+            test.each([
+                ['a 500', { acknowledge: () => Promise.resolve(ackResponse(500, { code: 'INTERNAL' })) }, 'INTERNAL'],
+                ['a 400', { acknowledge: () => Promise.resolve(ackResponse(400, { code: 'INVALID_REQUEST' })) }, 'INVALID_REQUEST'],
+                ['a rejected fetch', { acknowledge: () => Promise.reject(new TypeError('offline')) }, 'NETWORK'],
+                ['a rejected token', { token: () => Promise.reject(new Error('token unavailable')) }, 'NETWORK'],
+                ['a 200 with a missing echo', {
+                    acknowledge: () => Promise.resolve(ackResponse(200, { success: true, changed: true, acknowledgedAt: ACK_AT })),
+                }, 'REQUEST_FAILED'],
+                ['a 200 with a mismatched echo', {
+                    acknowledge: () => Promise.resolve(ackResponse(200, ackBody({ recipientId: 'delta-2026' }))),
+                }, 'REQUEST_FAILED'],
+            ])('O4 while live, %s gives failed; the user is unchanged; a later call sends a new request and succeeds', async (_label, failure, code) => {
+                const { latest, alpha } = await signedIn();
+                const before = latest.c0.user;
+                if (failure.acknowledge) {
+                    routes.acknowledge = failure.acknowledge;
+                }
+                if (failure.token) {
+                    alpha.getIdToken.mockImplementationOnce(failure.token);
+                }
+
+                const failed = await start(latest);
+
+                expect(failed.value).toEqual({ status: 'failed', code });
+                expect(latest.c0.user).toBe(before);
+                const failedFetches = fetchCalls(ACK_URL).length;
+                expect(failedFetches).toBe(failure.token ? 0 : 1);
+
+                routes.acknowledge = () => Promise.resolve(ackResponse(200, ackBody()));
+                const retried = await start(latest);
+
+                expect(retried.value).toEqual({ status: 'acknowledged' });
+                expect(fetchCalls(ACK_URL)).toHaveLength(failedFetches + 1);
+                expect(latest.c0.user).toEqual(autoAcked);
+            });
+
+            test('O4 a non-string token gives failed with no fetch', async () => {
+                const { latest, alpha } = await signedIn();
+                alpha.getIdToken.mockImplementationOnce(() => Promise.resolve(undefined));
+
+                const run = await start(latest);
+
+                expect(run.value).toEqual({ status: 'failed', code: 'AUTH' });
+                expect(fetchCalls(ACK_URL)).toHaveLength(0);
+                expect(latest.c0.user).toEqual(autoPending);
+            });
+
+            test('O5 a token that never settles: TIMEOUT at 15 000 ms and not before; no fetch, even after a late token', async () => {
+                jest.useFakeTimers();
+                const { latest, alpha } = await signedIn();
+                const token = deferred();
+                alpha.getIdToken.mockImplementationOnce(() => token.promise);
+
+                const run = await start(latest);
+                await advance(TIMEOUT_MS - 1);
+                expect(run.done).toBe(false);
+                await advance(1);
+
+                expect(run.value).toEqual({ status: 'failed', code: 'TIMEOUT' });
+                expect(fetchCalls(ACK_URL)).toHaveLength(0);
+
+                token.resolve('token-alpha');
+                await flush();
+
+                expect(fetchCalls(ACK_URL)).toHaveLength(0);
+                expect(latest.c0.user).toEqual(autoPending);
+            });
+
+            test('O6 a fetch that never settles and ignores abort: TIMEOUT at 15 000 ms, the signal is aborted, a late 200 starts nothing; the listener then publishes', async () => {
+                jest.useFakeTimers();
+                const held = deferred();
+                let signal = null;
+                routes.acknowledge = (init) => {
+                    signal = init.signal;
+                    return held.promise;
+                };
+                const { latest, alpha } = await signedIn();
+
+                const run = await start(latest);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                expect(signal.aborted).toBe(false);
+                await advance(TIMEOUT_MS - 1);
+                expect(run.done).toBe(false);
+                await advance(1);
+
+                expect(run.value).toEqual({ status: 'failed', code: 'TIMEOUT' });
+                expect(signal.aborted).toBe(true);
+
+                const fetches = global.fetch.mock.calls.length;
+                const tokens = alpha.getIdToken.mock.calls.length;
+                held.resolve(ackResponse(200, ackBody()));
+                await flush();
+
+                expect(latest.c0.user).toEqual(autoPending);
+                expect(global.fetch.mock.calls.length).toBe(fetches);
+                expect(alpha.getIdToken.mock.calls.length).toBe(tokens);
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot(autoAcked));
+                expect(latest.c0.user).toEqual(autoAcked);
+            });
+
+            test('O7 a body that never settles and ignores abort: TIMEOUT at 15 000 ms; the late body publishes and starts nothing', async () => {
+                jest.useFakeTimers();
+                const body = deferred();
+                routes.acknowledge = () => Promise.resolve({ ok: true, status: 200, json: () => body.promise });
+                const { latest, alpha } = await signedIn();
+
+                const run = await start(latest);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                await advance(TIMEOUT_MS - 1);
+                expect(run.done).toBe(false);
+                await advance(1);
+
+                expect(run.value).toEqual({ status: 'failed', code: 'TIMEOUT' });
+
+                const fetches = global.fetch.mock.calls.length;
+                const tokens = alpha.getIdToken.mock.calls.length;
+                body.resolve(ackBody());
+                await flush();
+
+                expect(latest.c0.user).toEqual(autoPending);
+                expect(global.fetch.mock.calls.length).toBe(fetches);
+                expect(alpha.getIdToken.mock.calls.length).toBe(tokens);
+            });
+
+            test.each([
+                [401, 'UNAUTHENTICATED'],
+                [409, 'REVEAL_STALE'],
+                [403, 'ACCESS_DENIED'],
+            ])('O8 after a timeout, a late %i starts no token request, no fetch and no bootstrap', async (status, code) => {
+                jest.useFakeTimers();
+                const held = deferred();
+                routes.acknowledge = () => held.promise;
+                const { latest, alpha } = await signedIn();
+
+                const run = await start(latest);
+                await advance(TIMEOUT_MS);
+                expect(run.value).toEqual({ status: 'failed', code: 'TIMEOUT' });
+                const tokens = alpha.getIdToken.mock.calls.length;
+                const acks = fetchCalls(ACK_URL).length;
+                const boots = fetchCalls(BOOT_URL).length;
+
+                held.resolve(ackResponse(status, { code, error: 'Nope' }));
+                await flush();
+                await advance(TIMEOUT_MS);
+
+                expect(alpha.getIdToken.mock.calls.length).toBe(tokens);
+                expect(fetchCalls(ACK_URL)).toHaveLength(acks);
+                expect(fetchCalls(BOOT_URL)).toHaveLength(boots);
+                expect(latest.c0.user).toEqual(autoPending);
+            });
+
+            test('O9 a 401 retries once with a forced token under the same deadline: TIMEOUT at 15 000 ms in total', async () => {
+                jest.useFakeTimers();
+                const first = deferred();
+                const second = deferred();
+                const pending = [first, second];
+                routes.acknowledge = () => pending.shift().promise;
+                const { latest, alpha } = await signedIn();
+                alpha.getIdToken.mockClear();
+
+                const run = await start(latest);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                await advance(5000);
+                first.resolve(ackResponse(401, { code: 'UNAUTHENTICATED' }));
+                await flush();
+
+                expect(alpha.getIdToken.mock.calls).toEqual([[false], [true]]);
+                expect(fetchCalls(ACK_URL)).toHaveLength(2);
+                await advance(TIMEOUT_MS - 5000 - 1);
+                expect(run.done).toBe(false);
+                await advance(1);
+
+                expect(run.value).toEqual({ status: 'failed', code: 'TIMEOUT' });
+
+                second.resolve(ackResponse(200, ackBody()));
+                await flush();
+                expect(latest.c0.user).toEqual(autoPending);
+                expect(fetchCalls(ACK_URL)).toHaveLength(2);
+            });
+
+            test('O9 a second 401 gives failed UNAUTHENTICATED after exactly two fetches', async () => {
+                routes.acknowledge = () => Promise.resolve(ackResponse(401, { code: 'UNAUTHENTICATED' }));
+                const { latest, alpha } = await signedIn();
+                alpha.getIdToken.mockClear();
+
+                const run = await start(latest);
+                await flush();
+
+                expect(run.value).toEqual({ status: 'failed', code: 'UNAUTHENTICATED' });
+                expect(fetchCalls(ACK_URL)).toHaveLength(2);
+                expect(alpha.getIdToken.mock.calls).toEqual([[false], [true]]);
+            });
+
+            test('O9 a scope change between the 401 and the forced token gives no second fetch', async () => {
+                routes.acknowledge = () => Promise.resolve(ackResponse(401, { code: 'UNAUTHENTICATED' }));
+                const { latest, alpha } = await signedIn();
+                const forced = deferred();
+                alpha.getIdToken.mockImplementation((forceRefresh) => (
+                    forceRefresh ? forced.promise : Promise.resolve('token-alpha')
+                ));
+
+                const run = await start(latest);
+                expect(alpha.getIdToken).toHaveBeenLastCalledWith(true);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                expect(run.done).toBe(false);
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoPending, recipientId: 'delta-2026' }));
+                expect(run.value).toEqual({ status: 'stale' });
+
+                forced.resolve('token-alpha-forced');
+                await flush();
+
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+            });
+
+            test.each([
+                [409, 'REVEAL_STALE'],
+                [403, 'ACCESS_DENIED'],
+            ])('O10 a live %i gives failed with the server code and starts exactly one refresh bootstrap', async (status, code) => {
+                routes.acknowledge = () => Promise.resolve(ackResponse(status, { code, error: 'Nope' }));
+                const { latest } = await signedIn();
+                const boots = fetchCalls(BOOT_URL).length;
+
+                const run = await start(latest);
+                await flush();
+
+                expect(run.value).toEqual({ status: 'failed', code });
+                expect(fetchCalls(BOOT_URL)).toHaveLength(boots + 1);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                expect(latest.c0.user).toEqual(autoPending);
+            });
+
+            const ABANDON_SCENARIOS = [
+                ['sign-out', async () => {
+                    await act(async () => { mockAuthCallback(null); });
+                    await flush();
+                }],
+                ['an account switch', async () => {
+                    routes.bootstrap = (init) => (init.headers.Authorization === 'Bearer token-beta'
+                        ? ok(betaPending, SEASON_2026)
+                        : ok(autoPending, SEASON_2026));
+                    await signIn(makeUser({ uid: 'uid-beta', email: 'beta@example.test', token: 'token-beta' }));
+                }],
+                ['a server-confirmed lifecycle change', async () => {
+                    routes.bootstrap = () => ok(autoPending, SEASON_CLOSED_2026);
+                    await deliver(lastLifecycle(), serverLifecycle(LIFECYCLE_CLOSED_2026));
+                }],
+                ['a server-confirmed missing profile', async () => {
+                    await deliver(lastSnapshotFor('alpha-2026'), { exists: () => false, metadata: { fromCache: false } });
+                }],
+                ['a snapshot that changes the recipient', async () => {
+                    await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoPending, recipientId: 'delta-2026' }));
+                }],
+                ['unmount', async ({ unmount }) => {
+                    unmount();
+                    await flush();
+                }],
+            ];
+            const ABANDON_CASES = ABANDON_SCENARIOS.flatMap(([name, abandon]) => (
+                [200, 401, 409].map((status) => [name, status, abandon])
+            ));
+
+            test.each(ABANDON_CASES)('O11 %s with the fetch held: stale at once and the signal aborted; a late %i does nothing', async (name, status, abandon) => {
+                jest.useFakeTimers();
+                const held = deferred();
+                let signal = null;
+                routes.acknowledge = (init) => {
+                    signal = init.signal;
+                    return held.promise;
+                };
+                const utils = await signedIn();
+                const { latest, alpha } = utils;
+
+                const run = await start(latest);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+                expect(run.done).toBe(false);
+
+                // No clock advance: abandonment settles the operation by itself.
+                await abandon(utils);
+
+                expect(run.value).toEqual({ status: 'stale' });
+                expect(signal.aborted).toBe(true);
+                if (name === 'sign-out' || name === 'unmount') {
+                    // jest.getTimerCount() also counts the fake microtask queue: each awaited
+                    // act(async () => ...) leaves one fake queueMicrotask job (React's DEV
+                    // "act was not awaited" check). Drain only that queue: runAllTicks runs
+                    // queued microtasks, never advances the clock and never runs or clears
+                    // a timeout or interval, so any timer left by the operation still counts.
+                    const now = Date.now();
+                    jest.runAllTicks();
+                    expect(Date.now()).toBe(now);
+                    expect(jest.getTimerCount()).toBe(0);
+                }
+                const userAfter = latest.c0.user;
+                const fetches = global.fetch.mock.calls.length;
+                const tokens = alpha.getIdToken.mock.calls.length;
+
+                await advance(TIMEOUT_MS);
+
+                expect(run.value).toEqual({ status: 'stale' });
+                expect(global.fetch.mock.calls.length).toBe(fetches);
+                expect(alpha.getIdToken.mock.calls.length).toBe(tokens);
+
+                held.resolve(ackResponse(status, status === 200
+                    ? ackBody()
+                    : { code: status === 401 ? 'UNAUTHENTICATED' : 'REVEAL_STALE', error: 'Nope' }));
+                await flush();
+                await advance(TIMEOUT_MS);
+
+                expect(global.fetch.mock.calls.length).toBe(fetches);
+                expect(alpha.getIdToken.mock.calls.length).toBe(tokens);
+                expect(latest.c0.user).toBe(userAfter);
+                if (userAfter) {
+                    expect(getRevealState(userAfter)).not.toBe('acknowledged');
+                }
+            });
+
+            test('O12 the listener confirms mid-flight: acknowledged at once, the signal aborted, the late response ignored', async () => {
+                const held = deferred();
+                let signal = null;
+                routes.acknowledge = (init) => {
+                    signal = init.signal;
+                    return held.promise;
+                };
+                const { latest } = await signedIn();
+
+                const run = await start(latest);
+                expect(run.done).toBe(false);
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot(autoAcked));
+
+                expect(run.value).toEqual({ status: 'acknowledged' });
+                expect(signal.aborted).toBe(true);
+                expect(latest.c0.user).toEqual(autoAcked);
+                const userAfter = latest.c0.user;
+                const fetches = global.fetch.mock.calls.length;
+
+                held.resolve(ackResponse(200, ackBody({ acknowledgedAt: '2026-11-12T00:00:00.000Z' })));
+                await flush();
+
+                expect(latest.c0.user).toBe(userAfter);
+                expect(global.fetch.mock.calls.length).toBe(fetches);
+            });
+
+            test('O13 a newer operation is isolated from an older one', async () => {
+                jest.useFakeTimers();
+                const heldA = deferred();
+                const heldB = deferred();
+                const pending = [heldA, heldB];
+                routes.acknowledge = () => pending.shift().promise;
+                const { latest } = await signedIn();
+
+                // A starts at t = 0 (deadline 15 s) for recipient R1.
+                const runA = await start(latest);
+                expect(fetchCalls(ACK_URL)).toHaveLength(1);
+
+                // The recipient changes to R2 at t = 5 s: A ends stale.
+                await advance(5000);
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoPending, recipientId: 'delta-2026' }));
+                expect(runA.value).toEqual({ status: 'stale' });
+                const userR2 = latest.c0.user;
+                expect(getRevealState(userR2)).toBe('pending');
+
+                // B starts at t = 5 s (deadline 20 s) for R2.
+                const runB = await start(latest);
+                expect(fetchCalls(ACK_URL)).toHaveLength(2);
+                expect(JSON.parse(fetchCalls(ACK_URL)[1][1].body)).toEqual({ ...ACK_REQUEST, recipientId: 'delta-2026' });
+
+                // A's late 200, then past A's original deadline but before B's.
+                heldA.resolve(ackResponse(200, ackBody()));
+                await flush();
+                await advance(TIMEOUT_MS - 5000 + 1);
+
+                expect(runB.done).toBe(false);
+                let third;
+                await act(async () => {
+                    third = latest.c0.acknowledgeReveal();
+                });
+                expect(third).toBe(runB.promise);
+                expect(fetchCalls(ACK_URL)).toHaveLength(2);
+                expect(latest.c0.user).toBe(userR2);
+
+                heldB.resolve(ackResponse(200, ackBody({ recipientId: 'delta-2026' })));
+                await flush();
+
+                expect(runB.value).toEqual({ status: 'acknowledged' });
+                expect(latest.c0.user).toMatchObject({
+                    recipientId: 'delta-2026',
+                    revealAckRecipientId: 'delta-2026',
+                    revealAckAt: ACK_AT,
+                });
+            });
+        });
+
+        describe('monotonic acknowledgment', () => {
+            test.each([
+                ['M1 server-flagged', false],
+                ['M2 cached', true],
+            ])('%s: after API success, a pending snapshot for the same recipient keeps the acknowledgment and the same object', async (_label, fromCache) => {
+                const { latest } = await signedIn();
+                const run = await start(latest);
+                expect(run.value).toEqual({ status: 'acknowledged' });
+                const acked = latest.c0.user;
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot(autoPending, fromCache));
+
+                expect(latest.c0.user).toBe(acked);
+                expect(getRevealState(latest.c0.user)).toBe('acknowledged');
+            });
+
+            test('M3 a refresh bootstrap held from before the acknowledgment and released after it with a pending body keeps it', async () => {
+                const { latest } = await signedIn();
+                const heldBoot = deferred();
+                routes.bootstrap = () => heldBoot.promise;
+                await act(async () => { await latest.c0.refreshUser(); });
+                await flush();
+                expect(fetchCalls(BOOT_URL)).toHaveLength(2);
+
+                const run = await start(latest);
+                expect(run.value).toEqual({ status: 'acknowledged' });
+
+                heldBoot.resolve(okBody(autoPending, SEASON_2026));
+                await flush();
+
+                expect(getRevealState(latest.c0.user)).toBe('acknowledged');
+                expect(latest.c0.user).toMatchObject({ revealAckRecipientId: 'bravo-2026', revealAckAt: ACK_AT });
+            });
+
+            test('M4 acknowledged from the initial bootstrap, then a cached pending snapshot, then an acknowledged snapshot: acknowledged throughout', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                const acked = latest.c0.user;
+                expect(getRevealState(acked)).toBe('acknowledged');
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot(autoPending, true));
+                expect(latest.c0.user).toBe(acked);
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot(autoAcked, false));
+                expect(latest.c0.user).toBe(acked);
+                expect(getRevealState(latest.c0.user)).toBe('acknowledged');
+            });
+
+            test.each([
+                ['cached', true],
+                ['server-flagged', false],
+            ])('M5 pending, then a %s snapshot carrying the acknowledgment is published', async (_label, fromCache) => {
+                const { latest } = await signedIn();
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot(autoAcked, fromCache));
+
+                expect(latest.c0.user).toEqual(autoAcked);
+            });
+
+            test('M6 a changed recipient through a snapshot replaces the user and reads as pending', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                const before = latest.c0.user;
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoAcked, recipientId: 'delta-2026' }));
+
+                expect(latest.c0.user).not.toBe(before);
+                expect(latest.c0.user).toMatchObject({ recipientId: 'delta-2026', revealAckRecipientId: 'bravo-2026' });
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+            });
+
+            test('M6 a changed recipient through a bootstrap response reads as pending', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                routes.bootstrap = () => ok({ ...autoAcked, recipientId: 'delta-2026' }, SEASON_2026);
+
+                await act(async () => { await latest.c0.refreshUser(); });
+                await flush();
+
+                expect(latest.c0.user).toMatchObject({ recipientId: 'delta-2026', revealAckRecipientId: 'bravo-2026' });
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+            });
+
+            test('M7 account isolation: account B is pending even with the same profile and recipient ids', async () => {
+                routes.bootstrap = (init) => (init.headers.Authorization === 'Bearer token-beta'
+                    ? ok({ ...autoPending, email: 'beta@example.test' }, SEASON_2026)
+                    : ok(autoAcked, SEASON_2026));
+                const { latest } = await signedIn();
+                expect(getRevealState(latest.c0.user)).toBe('acknowledged');
+
+                await signIn(makeUser({ uid: 'uid-beta', email: 'beta@example.test', token: 'token-beta' }));
+
+                expect(latest.c0.authUid).toBe('uid-beta');
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+            });
+
+            test('M7 year isolation: a server-confirmed Start and a 2027 bootstrap with a new pending profile read as pending', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                await deliver(lastLifecycle(), serverLifecycle(LIFECYCLE_2026));
+                expect(getRevealState(latest.c0.user)).toBe('acknowledged');
+                const pending2027 = { ...autoPending, id: 'alpha-2027', recipientId: 'bravo-2027', gifterId: 'echo-2027' };
+                routes.bootstrap = () => ok(pending2027, SEASON_2027);
+
+                await deliver(lastLifecycle(), serverLifecycle(LIFECYCLE_2027));
+
+                expect(latest.c0.season).toEqual({ year: 2027, state: 'active', epoch: 3, closedYears: [2025, 2026] });
+                expect(latest.c0.user).toEqual(pending2027);
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+            });
+
+            test('M7 profile isolation: a bootstrap for the same account with a different profile id reads as pending', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                routes.bootstrap = () => ok({ ...autoPending, id: 'alpha-2026-other' }, SEASON_2026);
+
+                await act(async () => { await latest.c0.refreshUser(); });
+                await flush();
+
+                expect(latest.c0.user.id).toBe('alpha-2026-other');
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+            });
+
+            test('M8 acknowledged, then a snapshot with an unknown drawMode: the user is replaced and reads as invalid', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                const before = latest.c0.user;
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoAcked, drawMode: 'other' }));
+
+                expect(latest.c0.user).not.toBe(before);
+                expect(latest.c0.user.drawMode).toBe('other');
+                expect(getRevealState(latest.c0.user)).toBe('invalid');
+            });
+        });
+
+        describe('change detection', () => {
+            test('D1 a snapshot that only adds drawMode auto to an assigned manual profile replaces the user (now pending)', async () => {
+                routes.bootstrap = () => ok(manualAssigned, SEASON_2026);
+                const { latest } = await signedIn();
+                const before = latest.c0.user;
+                expect(getRevealState(before)).toBe('manual');
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...manualAssigned, drawMode: 'auto' }));
+
+                expect(latest.c0.user).not.toBe(before);
+                expect(getRevealState(latest.c0.user)).toBe('pending');
+            });
+
+            test('D2 a snapshot that only changes drawMode from auto to another value replaces the user (now invalid)', async () => {
+                const { latest } = await signedIn();
+                const before = latest.c0.user;
+                expect(getRevealState(before)).toBe('pending');
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoPending, drawMode: 'other' }));
+
+                expect(latest.c0.user).not.toBe(before);
+                expect(getRevealState(latest.c0.user)).toBe('invalid');
+            });
+
+            test('D3 a snapshot that differs only in revealAckAt, or only in an unrelated field, keeps the same user object', async () => {
+                routes.bootstrap = () => ok(autoAcked, SEASON_2026);
+                const { latest } = await signedIn();
+                const before = latest.c0.user;
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoAcked, revealAckAt: '2026-12-01T00:00:00.000Z' }));
+                expect(latest.c0.user).toBe(before);
+
+                await deliver(lastSnapshotFor('alpha-2026'), profileSnapshot({ ...autoAcked, image: 'new-image.jpg' }));
+                expect(latest.c0.user).toBe(before);
+            });
         });
     });
 });

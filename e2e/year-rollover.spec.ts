@@ -3,16 +3,21 @@ import { PARTICIPANTS, getRoster } from '../src/lib/participants';
 import { ADMIN_EMAILS } from '../src/lib/config';
 
 /**
- * Year rollover (emulators only): Close 2025, browse the read-only archive, Start 2026.
+ * Year rollover (emulators only): Close 2025, browse the read-only archive, Start 2026
+ * with the automatic recipient draw and the one-time recipient reveal.
  *
  * - Seed and assign 2025; exchange a message and a reaction.
  * - The admin closes 2025: another open browser shows the closed banner and the 2025
  *   archive with pairings and no composer, without a reload; sends get 409.
- * - The admin starts 2026: the other browser reaches the Welcome screen with a new
- *   profile id, without a reload; "Browse past years" shows 2025 and "Back to current
- *   year" returns to Welcome.
- * - The participant excluded from 2026 sees Access Denied; a 2026 message sends; the
- *   retired /api/admin/reset returns 410.
+ * - The admin starts 2026: the other browser shows the recipient reveal with a new
+ *   profile id, without a reload, naming the 2026 profile drawn as its recipient;
+ *   "Browse past years" shows 2025 and "Back to current year" returns to the reveal.
+ *   Before Continue, a reload and a second browser for the same participant show it
+ *   again; the admin (when on the 2026 roster) sees it with "Close 2026".
+ * - The participant excluded from 2026 sees Access Denied.
+ * - Continue opens the chats and records the acknowledgment; the second browser leaves
+ *   the reveal without a reload; a reload and a fresh browser show no reveal.
+ * - A 2026 message sends from the Recipient tab; the retired /api/admin/reset returns 410.
  *
  * The emulator database is cleared before and after (this suite changes the lifecycle).
  * Participant names/emails are read from the source list; nothing personal is hardcoded.
@@ -93,6 +98,16 @@ async function messageIdFrom(request: APIRequestContext, fromId: string): Promis
     const rows = await response.json();
     const name = rows?.[0]?.document?.name;
     return name ? String(name).split('/').pop() ?? null : null;
+}
+
+/** Name of the profile years/{year}/users/{id}, read with emulator owner access. */
+async function profileName(request: APIRequestContext, year: number, id: string): Promise<string | null> {
+    const response = await request.get(`${DOCUMENTS}/years/${year}/users/${encodeURIComponent(id)}`, {
+        headers: { Authorization: 'Bearer owner' },
+    });
+    if (!response.ok()) return null;
+    const document = await response.json();
+    return document?.fields?.name?.stringValue ?? null;
 }
 
 /** ID token for an emulator account created by dev login (for direct API calls). */
@@ -184,30 +199,73 @@ test.describe('Year rollover', () => {
         await adminPage.getByRole('button', { name: 'Start 2026' }).click();
         await expect(adminPage.getByText('2026 has started.')).toBeVisible({ timeout: 30000 });
 
-        // The other browser reaches Welcome with a new profile id, without a reload.
-        await expect(otherPage.getByText(`Welcome, ${otherParticipant!.name}!`)).toBeVisible({ timeout: 30000 });
+        // 1. The other browser shows the reveal with a new profile id, without a reload.
+        await expect(otherPage.getByTestId('recipient-reveal')).toBeVisible({ timeout: 30000 });
         await expect.poll(async () => {
             const data = await currentUserData(otherPage);
-            return Boolean(data?.id && data.id !== before.id);
+            return Boolean(data?.id && data.id !== before.id && data.recipientId);
         }, { timeout: 15000 }).toBeTruthy();
+        const drawn = await currentUserData(otherPage);
 
-        // Browse past years before choosing a recipient, then back to Welcome.
+        // 2. The name shown is that of the 2026 profile drawn as this user's recipient.
+        const recipientName = await profileName(request, 2026, drawn.recipientId);
+        expect(recipientName, 'the drawn recipient must have a 2026 profile').toBeTruthy();
+        await expect(otherPage.getByTestId('recipient-reveal-name')).toHaveText(recipientName!, { timeout: 20000 });
+
+        // 3. Browse past years before confirming, then back to the reveal.
         await otherPage.getByRole('button', { name: 'Browse past years' }).click();
         await expect(otherPage.getByRole('heading', { name: '📚 2025 Archive' })).toBeVisible({ timeout: 20000 });
         await expect(otherPage.getByTestId('archive-pairing')).toHaveCount(roster2025.length, { timeout: 20000 });
         await otherPage.getByRole('button', { name: 'Back to current year' }).click();
-        await expect(otherPage.getByText(`Welcome, ${otherParticipant!.name}!`)).toBeVisible();
+        await expect(otherPage.getByTestId('recipient-reveal')).toBeVisible();
+        await expect(otherPage.getByTestId('recipient-reveal-name')).toHaveText(recipientName!, { timeout: 20000 });
 
-        // The excluded participant sees Access Denied.
+        // 4. Reloading before Continue shows the reveal again.
+        await otherPage.reload();
+        await otherPage.waitForLoadState('domcontentloaded');
+        await expect(otherPage.getByTestId('recipient-reveal')).toBeVisible({ timeout: 30000 });
+        await expect(otherPage.getByTestId('recipient-reveal-name')).toHaveText(recipientName!, { timeout: 20000 });
+
+        // 5. A second browser for the same participant also shows it.
+        const secondPage = await newLoggedInPage(browser, otherParticipant!.name);
+        await expect(secondPage.getByTestId('recipient-reveal')).toBeVisible({ timeout: 30000 });
+        await expect(secondPage.getByTestId('recipient-reveal-name')).toHaveText(recipientName!, { timeout: 20000 });
+
+        // 6. An admin on the 2026 roster sees their own reveal with the Close control.
+        if (onRoster2026(adminParticipant!)) {
+            const adminReveal = adminPage.getByTestId('recipient-reveal');
+            await expect(adminReveal).toBeVisible({ timeout: 30000 });
+            await expect(adminReveal.getByRole('button', { name: 'Close 2026' })).toBeVisible();
+        }
+
+        // 7. The excluded participant sees Access Denied.
         const excludedPage = await newLoggedInPage(browser, excludedParticipant!.name);
         await expect(excludedPage.getByRole('heading', { name: 'Access Denied' })).toBeVisible({ timeout: 30000 });
 
-        // A 2026 message sends after a manual recipient choice.
-        const select = otherPage.getByRole('combobox');
-        const firstOption = await select.locator('option').nth(1).getAttribute('value');
-        expect(firstOption, 'a 2026 recipient must be available').toBeTruthy();
-        await select.selectOption(firstOption!);
+        // 8. Continue opens the chats and records the acknowledgment; the second browser
+        //    leaves the reveal without a reload.
         await otherPage.getByRole('button', { name: 'Continue' }).click();
+        await expect(otherPage.getByTestId('recipient-reveal')).toHaveCount(0, { timeout: 30000 });
+        await expect(otherPage.locator('.desktop-only').getByRole('button', { name: /recipient/i })).toBeVisible({ timeout: 20000 });
+        await expect.poll(async () => {
+            const data = await currentUserData(otherPage);
+            return Boolean(data?.recipientId && data.revealAckRecipientId === data.recipientId);
+        }, { timeout: 15000 }).toBeTruthy();
+        await expect(secondPage.getByTestId('recipient-reveal')).toHaveCount(0, { timeout: 30000 });
+        await expect(secondPage.locator('.desktop-only').getByRole('button', { name: /recipient/i })).toBeVisible({ timeout: 20000 });
+
+        // 9. A reload shows no reveal.
+        await otherPage.reload();
+        await otherPage.waitForLoadState('domcontentloaded');
+        await expect(otherPage.locator('.desktop-only').getByRole('button', { name: /recipient/i })).toBeVisible({ timeout: 30000 });
+        await expect(otherPage.getByTestId('recipient-reveal')).toHaveCount(0);
+
+        // 10. A fresh browser for the same participant shows no reveal; the chats are shown.
+        const thirdPage = await newLoggedInPage(browser, otherParticipant!.name);
+        await expect(thirdPage.locator('.desktop-only').getByRole('button', { name: /recipient/i })).toBeVisible({ timeout: 30000 });
+        await expect(thirdPage.getByTestId('recipient-reveal')).toHaveCount(0);
+
+        // 11. A 2026 message sends from the Recipient tab.
         await otherPage.locator('.desktop-only').getByRole('button', { name: /recipient/i }).click();
         await otherPage.getByPlaceholder('Type a message...').fill('Synthetic 2026 message');
         await otherPage.getByRole('button', { name: 'Send' }).click();
@@ -218,6 +276,8 @@ test.describe('Year rollover', () => {
         expect(reset.status()).toBe(410);
         expect((await reset.json()).code).toBe('RESET_RETIRED');
 
+        await thirdPage.context().close();
+        await secondPage.context().close();
         await excludedPage.context().close();
         await adminPage.context().close();
         await otherPage.context().close();

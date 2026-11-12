@@ -7,8 +7,9 @@ import { useAdminYearActions } from '@/hooks/useAdminYearActions';
  * AdminPanel - Compact admin season control.
  *
  * Active year -> "Close {year}". Closed year -> "Start {next}" when a roster for a later
- * year is configured, otherwise a muted "No next-year roster". Pair assignment is user
- * self-selection (RecipientSelector); nothing is assigned automatically.
+ * year is configured, otherwise a muted "No next-year roster". Start draws every
+ * participant's recipient on the server; years started before the automatic draw keep
+ * self-selection (RecipientSelector).
  *
  * @param {Object} props
  * @param {string} props.userEmail - Current user's email

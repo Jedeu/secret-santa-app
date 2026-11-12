@@ -58,7 +58,7 @@ describe('useAdminYearActions', () => {
         });
 
         expect(window.prompt).toHaveBeenCalledWith(
-            'Start the 2026 exchange?\n\n3 participants: Ann, Ben, Cal.\nAnyone not on this list loses access to the app. Everyone picks a new recipient. 2025 stays in Archives.\n\nType 2026 to confirm.'
+            'Start the 2026 exchange?\n\n3 participants: Ann, Ben, Cal.\nAnyone not on this list loses access to the app. Recipients are drawn automatically, and each participant sees theirs once when they next open the app. 2025 stays in Archives.\n\nType 2026 to confirm.'
         );
         expect(global.fetch).toHaveBeenCalledWith('/api/admin/year/start', {
             method: 'POST',
