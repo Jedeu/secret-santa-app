@@ -1,97 +1,139 @@
-# Research: remove the year-transition environment gate
+# Research: iPhone notification setup stuck on “Saving…”
 
-## Request and authorization
+## Request, workflow and boundaries
 
-The owner requests removing the `YEAR_TRANSITIONS_ENABLED` switch because it is unnecessary for their desired admin workflow. This is a follow-up to merged PR #63 (`687b9b8`, feature commit `4b65590`). The request is for a code change, not permission to deploy, access production Firebase, change credentials, or execute Close/Start. Implementation still requires approval of this change's reviewed `PLAN.md` under `AGENTS.md`.
+**PR integration update (2026-11-12):** #64 was squash-merged as `c2c3530`, and #65 now targets `main`. Merging `origin/main` produced conflicts only in the root `PLAN.md` and `RESEARCH.md`; the current notification versions were retained. Before adding this execution note, the entire staged tree was identical to the previously verified notification HEAD (`62f668b`), so no runtime/test changes or new application verification claims result. Owner-file hashes were unchanged. Earlier notes about waiting for #64 or retargeting #65 are historical; the normal conflict-resolution push triggers CI on the current `main` target.
 
-The owner subsequently specified that, for bug fixes and small changes, Opus should own both planning and implementation, with the primary doing adversarial review. Fable is not used for this follow-up. The existing plan-approval requirement remains in place.
+The owner reports that after adding the app to the iPhone Home Screen, tapping Enable notifications leaves the control stuck on “Saving…”. The owner requested investigating this after completing the year-transition flag-removal PR.
 
-The owner also requested opening a PR when the change is complete. This authorizes a follow-up branch, explicit-path commits/push, and PR creation after implementation/review/checks; it does not authorize direct pushes to `main` or production operations.
+That separate change is complete: PR **#64**, https://github.com/Jedeu/secret-santa-app/pull/64, commit `7080d5b`. Its primary checks passed (725 unit/API, 48 lifecycle integration, lint/build). At the latest GitHub check, **all checks passed**, including Vercel preview, lint, unit, integration and E2E. It is not part of this notification change.
 
-The notification report is a separate, unresolved investigation and is outside this change.
+This branch is `fix/iphone-push-saving`, based on `origin/main` at `687b9b8` when created. At research start, notification source was identical to that in PR #64; the fixes have no application-code dependency. Prior archives research/plan remain in Git at `4b65590`; the gate-removal research/plan at `7080d5b`.
 
-## Baseline and owner files
+The owner explicitly changed the small-fix workflow: **Opus plans and implements; primary performs adversarial review and all checks/Git**. Do not use Fable. A reviewed plan still needs owner approval before implementation. The owner approved reviewed revision 2 and a separate notification PR on 2026-11-12 by answering “Yes” to the primary's explicit approval request. No production Firebase access, deploy, configuration/credentials change or real push test is authorized.
 
-- Current branch: `feat/annual-exchange-archives`. After fetching `origin/main`, its tracked HEAD tree is identical to merged `origin/main` at `687b9b8`.
-- Pre-existing modified `.claude/settings.local.json` and untracked `public/sw.js`, `public/workbox-f1770938.js`, `public/worker-2a484529a5551160.js` belong to the owner. Do not edit, stage, overwrite, or remove them.
-- Use a new follow-up branch based on `origin/main`; do not push directly to `main`.
-- The prior archive feature's full research and approved plan remain available in Git at `4b65590:RESEARCH.md` and `4b65590:PLAN.md`. Their reported checks are historical, not verification of this follow-up.
+Protect the owner's pre-existing `.claude/settings.local.json` and untracked `public/sw.js`, `public/workbox-f1770938.js`, `public/worker-2a484529a5551160.js`. They remain unchanged and must not be edited or staged. The separate screenshot demo is still running on owned default ports and must not be stopped or wiped.
 
-## Code ground truth
+## What is known and what is not
 
-### Runtime gate
+- The owner confirmed iPhone plus Home Screen installation, and now sees the actionable toggle rather than “Notifications unavailable”.
+- Primary asked: did iOS show an Allow Notifications prompt, and did the owner tap Allow before the stall? An answer is pending. Do not infer permission state, iOS version or the precise stalled stage.
+- No Safari remote inspector trace or real-device reproduction is available. The code defects below are independently reproducible pending-promise paths, not proof of which path is happening on this phone.
+- Static-only HTTPS checks executed no app scripts and touched no Firebase/API endpoints. The immutable Production deployment URL from GitHub redirects its `/sw.js` and manifest requests to Vercel (protection/login), so those responses do not reveal the app's worker state. The repository homepage URL returns 404 for both assets and may be stale. The actual URL installed on the phone is unconfirmed; do not treat either result as evidence that the phone's worker is missing. Results are recorded in the notification artifact directory.
+- Home Screen push support is a platform requirement, not a guarantee of successful registration or delivery.
 
-`src/lib/participant-admission.js` uses the Admin SDK via `@/lib/firebase` and contains:
+## Baseline code ground truth (before this fix)
 
-- `ERROR_DEFINITIONS.TRANSITIONS_DISABLED`: HTTP 409, `Year transitions are not enabled on this deployment.`
-- Exported synchronous `assertYearTransitionsEnabled()`: allows the operation only when the flag equals the string `'true'` or `NODE_ENV === 'development'`.
-- The independent `verifyAdminRequest(request)` guard verifies the bearer ID token, enforces verified email outside development, then checks the configured admin list. It does not depend on the transition flag.
+### UI: `src/components/PushNotificationsControl.js`
 
-The only runtime callers of the flag guard are:
+- `togglePush` sets `loading=true` before awaiting `enablePushForCurrentUser` or `disablePushForCurrentUser`. Only its `finally` sets `loading=false`.
+- Consequently, any never-settling operation leaves the disabled button labelled “Saving…” forever.
+- Support checks run after mount to avoid hydration mismatch. They require browser APIs and three public Firebase push settings via `isPushSupported`.
+- The existing iOS install hint is behind the unsupported early return; this is a distinct UX issue and not necessary to solve the reported post-install stall.
+- The label reflects **desired preference + permission**, not server-registration success. A failed enable with permission granted currently leaves “Disable notifications” plus an explicit not-registered note. Preserve that distinction or explicitly plan a narrow, tested change; never claim delivery is active merely because permission was granted.
+- The current generic enable error note says it will retry when the app opens. There is no explicit retry action in this component.
 
-- `src/app/api/admin/year/close/route.js`: `verifyAdminRequest` -> flag guard -> parse and validate `{ year }` -> `closeYear({ year })`.
-- `src/app/api/admin/year/start/route.js`: `verifyAdminRequest` -> flag guard -> parse and validate `{ fromYear, targetYear }` -> `startNewYear({ fromYear, targetYear })`.
+### Client pipeline: `src/lib/push-client.js` (Client SDK only)
 
-Both routes import server-side admission functions, not the Client SDK. Both include a comment claiming the flag is required outside development. No other application code consumes the flag or disabled error.
+Imports `firebase/app`, `firebase/messaging` and `clientAuth` from `@/lib/firebase-client`. No Admin SDK belongs here.
 
-### Safeguards that must remain
+Enable order:
+1. Validate support and authUid.
+2. Synchronously persist that account's desired enabled preference, write the device-intent id, create the operation and notify subscribers.
+3. Call `Notification.requestPermission()` if needed.
+4. `reconcile(op)` -> `obtainFcmToken(op)` -> `navigator.serviceWorker.ready` -> Firebase `getToken(messaging, { vapidKey, serviceWorkerRegistration })`.
+5. Up to three rounds of authenticated `/api/push/status` then `/api/push/register`, using fresh epoch/revision and the latest stored preference every round.
 
-Remove only the environment opt-in; do not replace it with another configuration gate or a no-op helper. Keep the existing authentication, verified-email check, admin authorization, request schemas, response shapes, error mapping for other errors, and typed-year UI confirmations.
+Unbounded waits:
+- `Notification.requestPermission()`.
+- `navigator.serviceWorker.ready` (specifically never rejects and may wait forever).
+- Firebase `getToken()`.
+- `op.user.getIdToken()` before each API call.
+- HTTP response-body `response.json()`: the existing 15-second AbortController timer is cleared immediately after `fetch` returns headers, before JSON is read.
 
-`closeYear({ year })` and `startNewYear({ fromYear, targetYear })` already implement lifecycle validation and transactions independently of the gate. Their bodies must remain unchanged. These preserve idempotency, Close-before-Start, roster validation, target-year emptiness, fresh annual UUIDs, epoch fencing, year-scoped storage and archive preservation. Retired Reset remains HTTP 410. No automatic transition occurs on deployment, login, page load or any background task.
+The only request timeout currently covers the `fetch` await, not the entire operation. `enablePushForCurrentUser`, `disablePushForCurrentUser` and `syncPushTokenIfGranted` have no overall settlement bound. `releasePushRegistration` already has its own bounded timeout, marks its op cancelled and aborts its fetch controllers; it returns false and never changes the preference.
 
-### Test references
+### Existing concurrency and authorization contracts (must survive)
 
-- `__tests__/api/admin_year_api.test.js`: saves/sets/restores the flag around every case and expects each route to return `TRANSITIONS_DISABLED` when unset. It already covers missing/invalid tokens, non-admin, unverified admin, malformed input, mapped lifecycle errors and successful response shapes. Replace the gate failure cases with explicit production-mode successes for unset, `'false'` and `'true'`; retain all negative authorization/input cases and restore any environment changes reliably.
-- `__tests__/lib/participant_admission.test.js`: imports the helper; saves/restores the flag; tests the gate; asserts the disabled error's status and message. Delete these now-obsolete references, retaining `NODE_ENV` restoration and all admission/transaction/authorization tests.
-- `__tests__/integration/year-lifecycle.test.js`: saves/restores the flag; its production gate test expects both routes to reject without writes. Replace that obsolete case with real emulator-backed production-route coverage with the flag unset and explicitly `'false'`/`'true'`. Use existing synthetic fixtures and mocked token verification; prove Close/Start succeed, lifecycle and epoch advance correctly, new roster profiles are created, and the full root-history snapshot remains unchanged. Retain flag cleanup for these legacy-value regression cases. Existing lifecycle/race/retired-reset tests must remain.
-- `__tests__/unit/useAdminYearActions.test.js`: the generic server-error toast test uses the retired disabled error fixture. Replace it with an existing error such as `YEAR_MISMATCH`, preserving that test's behavior and exact production error text.
+- Desired preference is per account (`secret-santa-push-pref:{authUid}`), written only by an explicit enable/disable click before its first await. Never roll it back or write it after an await; sync, release and retries never write preference.
+- Device intent, realm generation, captured auth user and epoch/revision are independent fences. `ensureCurrent(op)` runs after awaits and immediately before network work. An obsolete operation returns `aborted` and starts no further app API requests.
+- A bare UI Promise.race that merely clears the spinner is insufficient: abandoned work could later resume and mutate registration or overwrite a retry's UI. Any timeout/cancellation must preserve those fences. Browser prompts/SDK promises themselves may not be cancellable; do not claim otherwise.
+- The server registration protocol must remain unchanged: status then register on every reconcile round, even if already matching; three conflict rounds maximum; revisions rotate; unregister is owner checked.
+- `cancelPushOperations` is used by `UserContext` session/lifecycle cleanup, `PushNotificationsRuntime` effect cleanup and sign-out. `src/lib/sign-out.js` limits cleanup to three seconds; do not make sign-out wait longer.
+- Background sync is opt-in/per-account and must never prompt for permission. iOS permission invocation must still occur directly from the explicit user gesture, before introducing any await ahead of it.
+- JS timers may be suspended while iOS backgrounds an app; no precise wall-clock guarantee can be made while execution is suspended.
 
-## Documentation and references
+### Worker/install configuration
 
-`CLAUDE.md` Important Notes says both routes require the flag outside development. Update that sentence to describe admin-only explicit actions without the environment opt-in. Keep the remaining lifecycle/no-deletion guarantees.
+- `next.config.js`: next-pwa, `register: true`, `skipWaiting: true`, custom source `worker`, disabled only in development.
+- `worker/index.js`: Firebase messaging SW initialization when public messaging config is present; notificationclick behavior. No missing registration logic was proven here.
+- `public/manifest.json`: `display: standalone`, start URL `/`; layout links the manifest and Apple web-app metadata.
+- No evidence currently justifies changing the manifest, worker, next-pwa setup, dependencies, push server, API contracts, Firestore rules or Firebase configuration.
 
-The old `PLAN.md` and `RESEARCH.md` described the original default-off rollout. They are being replaced with the focused follow-up artifacts; do not leave their old flag requirement as current instructions. The new plan must state the changed deployment consequence and retain the production prerequisites below without prescribing enabling the removed flag.
+## Executed research probe (not a real-device or real-FCM test)
 
-## Deployment consequence and retained rollout risk
+Primary ran the **actual unmodified** `push-client.js` in isolated Node 22.15.0 VM modules. All Firebase imports, browser APIs, auth and fetch were synthetic; no network, credentials or database were used. The existing HTTP timer was accelerated to 20ms; observation was 100ms. A normal synthetic flow registered successfully. Each isolated pending stage left enable unsettled:
 
-Once this code is deployed, an authenticated, verified admin can explicitly Close/Start without an environment variable, including deployments where the legacy variable is unset, `'false'`, or `'true'`. Deployment itself still performs no rollover.
+| Scenario | Result at observation | App API fetches |
+|---|---|---|
+| Normal synthetic success | `registered` | 2 |
+| Service-worker ready pending | unsettled | 0 |
+| FCM token pending | unsettled | 0 |
+| Permission pending | unsettled | 0 |
+| Auth token pending | unsettled | 0 |
+| Response JSON pending | unsettled, its fetch timer already cleared | 1 |
 
-Removing the gate does not fix old deployments or deploy Firestore security rules. Before any live Close/Start, updated rules and retirement of old privileged writers remain necessary to protect archives. Production data/topology have not been inspected or verified. The original managed export/PITR recommendation and owner-controlled irreversible actions still apply. Do not broaden this code task into a production rollout, credentials change, rules deployment, or data operation.
+The source has no other bound on these waits, and the UI awaits that result before its finally. This confirms a code path that can produce the reported indefinite “Saving…” behavior; it does not establish the phone's precise cause or prove actual push delivery.
 
-Risk flags: this changes admin-route availability/security configuration, so the plan needs adversarial review. No change to message routing, Firebase SDK boundaries, listener counts, rules contents, roster membership or the anonymity model is needed.
+Artifacts: `/tmp/secret-santa-iphone-push-saving.JwbbBh/probe.mjs`, `probe-results.jsonl`, `probe.stderr`. Probe exit code 0 means its expected success/pending observations matched, not that the bug was fixed.
 
-## Verification tooling and limits
+## Existing tests and verification considerations
 
-- `package.json` and `CLAUDE.md` require Node >=22.13.0 <23; `.nvmrc` is 22.15.0. Default shell Node was previously unsupported. Use the supported version and verify it before checks.
-- CI checks lint, unit, full integration and E2E. Primary runs all executed checks, not delegates. A proportionate follow-up gate is diff/reference checks, lint, the full unit/API suite, the complete `year-lifecycle` emulator integration file and a production build; list any broader suites not run honestly.
-- Integration setup hardcodes local ports 8080/9099, and tests clear the whole emulator database. Opus additionally found, and the primary confirmed, that `src/lib/firebase.js` unconditionally overwrites both emulator-host variables in development; `__tests__/integration/helpers/emulator-admin.js` also has an 8080 fallback. Any disposable verification remap must account for all four files (Firebase config, test setup, server initialization and helper fallback), not just environment variables. The screenshot demo was intentionally left running on owned default ports; do not wipe or stop it for this follow-up. Check listeners on 8080, 9099, 4000 and 3000 before any emulator work. If occupied, use disposable verification files with remapped ports outside the repository, or stop and ask; do not modify repository test infrastructure for this task.
-- Isolate credentials/config and explicitly target owned loopback emulators. No `.env*` or user-owned settings should be copied into verification environments. Use `METADATA_SERVER_DETECTION=none` only in the isolated verification runner if needed, as in the prior task; it is not an app fix.
-- Build in a disposable workspace to avoid touching the owner's generated service workers.
-- The primary confirmed Node 22.15.0 is available and inventoried the default-port listeners read-only: Auth PID 67225 (9099), Firestore PID 67279 (8080), Next PID 67324 (3000); no listener on 4000. No application checks for this follow-up have run yet; no production access has occurred.
+- `__tests__/unit/push_client.test.js`: two synthetic realms, shared storage, mocked messaging and a stateful revision-fenced fake server. Covers ordering races, account switch, delayed permission, preference-write audit, conflicts, release timeout, listener/storage behavior and sync. Worker readiness, token acquisition and most calls are currently immediately-resolved mocks; there is no never-ready/token/body bound test.
+- `__tests__/unit/PushNotificationsControl.test.js`: success, generic failure and aborted states, account preference updates, install hint; no stuck-operation/retry test.
+- Related untouched regressions: `PushNotificationsRuntime.test.js`, `worker_push_display.test.js`, `pwa_manifest_assets.test.js`, `next_config_pwa.test.js`, UserContext and sign-out tests.
+- Keep real device limitations explicit. Unit/fake-timer coverage can prove deterministic settlement, actionable feedback and stale-completion fencing, but not iPhone push delivery. Any real-device verification must be performed separately with the owner.
+- Node >=22.13.0 <23 required; supported 22.15.0 binary is available. Primary runs lint, relevant focused regressions, full unit/API suite and production build in a disposable copy, excluding `.env*`, credentials, owner settings and generated files. Use an allowlisted environment and isolated HOME/config; no production keys or real FCM dispatch.
+- Emulator suites wipe entire databases and default ports are occupied by the screenshot demo. No new emulator check is obviously necessary for a client-only fix that leaves the server protocol unchanged; the planner should scale checks accordingly and explicitly list suites not run.
 
-## Planning handoff and adversarial review
+## Risk areas
 
-Opus (`claude-opus-5-5`, xhigh) returned an initial plan and a complete revision addressing the primary's review. Both CLI init records confirmed only `Read`, `Grep` and `Glob`, plan permission mode, and no MCP servers or skills. The primary audited tool calls: no shell, edits, writes, excluded/sensitive reads or reads outside the repository.
+Client SDK separation, operation/identity/lifecycle cancellation, permission user-gesture timing, misleading success UI, timer cleanup, retry races and late non-cancellable SDK completions. Message routing, Firestore listeners, security rules, the anonymity model, rosters and year transitions need no changes.
 
-The reviewed revision names exactly eight implementation paths, plus primary-owned `PLAN.md` and `RESEARCH.md`. Review corrections resolved the initial file-count error, explicitly isolated inherited credentials, accounted for server emulator-host overwrites, removed inaccurate confirmation/rollback claims, corrected HTTP-route documentation, and included the owner's PR request. No blocking objection remained. The owner then approved revision 2 on 2026-11-11 with “Yes I approve of the plan” and reiterated that the iPhone notification stall should be addressed after this PR.
+## External sources checked by primary
 
-## Implementation and verification (2026-11-11)
+- MDN `ServiceWorkerContainer.ready`: promise never rejects and waits indefinitely for an active worker. https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerContainer/ready
+- Firebase messaging API: `getToken` returns a promise, accepts the service-worker registration; don't migrate messaging APIs/SDK versions as part of this fix. https://firebase.google.com/docs/reference/js/messaging
+- WebKit iOS push: Home Screen web apps, iOS/iPadOS 16.4+, permission request from direct user interaction. https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/
 
-Opus implemented exactly the eight approved files with read/search/edit/write tools only. The CLI confirmed `claude-opus-5-5`, xhigh launch, `acceptEdits`, no MCP servers or skills. Primary audited the tool calls and reviewed the diff: no forbidden tools/reads or scope deviation; no blockers. The admission module exactly matches the baseline with only the retired error and gate helper removed; authorization, lifecycle transactions and notification code are unchanged.
+## Opus handoff and adversarial review
 
-Primary verification used Node **22.15.0**, an allowlisted environment (no inherited credentials/config), disposable copies, and owned loopback emulators. Actual results:
+Opus (`claude-opus-5-5`, xhigh) drafted a four-file plan and returned a complete revision after primary adversarial review. Both CLI init records confirmed read/search tools only (`Read`, `Grep`, `Glob`), plan permission mode, no MCP servers or skills. The delegate did not implement or execute checks.
 
-| Check | Result |
+The primary challenged cleanup that depended on abort-cooperative promises, stale account/attempt UI updates, held in-flight request and late-rejection coverage, permission-timeout classification, and overstated device/timing guarantees. Revision 2 specifies immediate request/timer cleanup, scoped UI-attempt guards, preference-aware retry feedback and deterministic regressions, while preserving server fencing and the three-second sign-out bound. No blocking objection remains. The owner subsequently approved revision 2 and publication of a separate notification PR on 2026-11-12. Root `PLAN.md` now records APPROVED; Opus is implementing the four listed files.
+
+## Implementation and initial verification (2026-11-12 UTC)
+
+Opus implemented exactly the four approved files using only read/search/edit/write tools. CLI init confirmed `claude-opus-5-5`, xhigh launch, `acceptEdits`, no MCP servers or skills. The primary audited every tool/read/edit path and reviewed both runtime files and new test blocks. No blocking defect or scope deviation remained; both pre-existing test blocks were preserved verbatim.
+
+Primary checks ran under Node **22.15.0**, an allowlisted credential-free environment, isolated HOME/config, synthetic test mocks and a disposable copy without `.env*` or owner settings:
+
+| Check | Actual result |
 |---|---|
-| Unmodified `origin/main` full unit/API baseline | **699 passed**, 57 suites |
+| Unmodified branch baseline | **699 unit/API passed**, 57 suites |
+| Updated full unit/API suite | **741 passed**, 57 suites (+42) |
+| Focused push client/control suites | **73 passed**, 2 suites, three consecutive runs |
+| Related runtime/worker/manifest/config/UserContext/recipient/app-flow regressions | **60 passed**, 7 suites |
 | Lint | Passed |
-| Updated full unit/API suite | **725 passed**, 57 suites; expected +26 |
-| Focused verbose unit/API rerun | **175 passed**, 3 suites; all 30 production matrix cases |
-| Production build | Passed without production credentials/client config; expected Firebase initialization-skipped warnings |
-| Complete year-lifecycle emulator integration file | **48 passed** |
-| Scope, references, SDK boundary and whitespace | Passed |
+| Production build | Passed without real credentials/client config |
+| Scope/SDK/whitespace and existing-test preservation | Passed |
 
-The integration run changed ports only in four disposable files. Firestore/Auth/websocket/hub/logging used **18080/19099/19150/14400/14500**; the emulator confirmed Firestore endpoint `127.0.0.1:18080`. The running screenshot demo's listeners and PIDs remained exactly unchanged. All four owner-file hashes remained identical. Owned verification emulators shut down, their ports were free, and the disposable workspace was deleted. Redacted logs and delegate reports remain under `/tmp/secret-santa-remove-year-gate.H2rG4S`.
+No unhandled-rejection or PromiseRejectionHandledWarning diagnostics appeared. Jest itself also detects unhandled rejections; the additional process listener follows the existing test pattern but is not treated as the sole oracle. All four owner-file hashes and the default-port demo listener/PID records remained unchanged.
 
-Not run locally: the full integration suite, dedicated rules suites, Playwright E2E, production sign-in or real FCM. No production Firebase access, configuration/credential changes, deploy command or live Close/Start occurred. GitHub CI will run separately on the requested PR.
+The draft notification PR is stacked on PR #64 so the two PRs do not conflict over their root planning artifacts. The fixes are independent in application behavior; only Git publication is sequenced (**merge #64 first**). The primary merged the reviewed #64 base without rewriting history; only the two primary-owned planning artifacts conflicted, and this notification plan/research was retained. All four notification implementation files stayed byte-identical to the initially verified copy.
+
+The combined tree was reverified in the isolated workspace: **767 unit/API tests passed**, 57 suites (725 in #64 + 42 new notification tests); **73 focused tests passed** again; lint and production build passed again. No unhandled-rejection diagnostics appeared. No notification source correction was needed. Final owner-file hashes, demo listener/PID records and verified source-copy comparisons were unchanged; the disposable workspace was then deleted, retaining redacted logs under `/tmp/secret-santa-iphone-push-saving.JwbbBh`.
+
+CI sequencing: `.github/workflows/ci.yml` filters pull requests to `main`, so a draft stacked against `fix/remove-year-transition-gate` does not trigger that workflow yet. After #64 merges, retarget this PR to `main` and synchronize the branch (a normal merge/update, not a history rewrite); run the full GitHub CI gate before merging the notification PR. Vercel preview status is separate from that gate.
+
+Not run locally: integration, rules, Playwright E2E, real iPhone token acquisition or push delivery. No production Firebase access, real push send, credentials/configuration change, deployment command or live rollover occurred.

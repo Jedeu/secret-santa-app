@@ -139,11 +139,15 @@ function createServer() {
         const holdIndex = server.holds.findIndex((predicate) => predicate(entry));
         if (holdIndex >= 0) {
             server.holds.splice(holdIndex, 1);
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 entry.release = () => {
                     entry.result = server.apply(entry);
                     resolve(respond(entry.result.status, entry.result.body));
                     return entry.result;
+                };
+                // Rejects the fetch without applying it on the server.
+                entry.fail = (error) => {
+                    reject(error);
                 };
                 server.held.push(entry);
             });
@@ -164,6 +168,21 @@ async function until(predicate, label = 'condition') {
         await new Promise((resolve) => setTimeout(resolve, 0));
     }
     throw new Error(`Timed out waiting for ${label}`);
+}
+
+function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
+}
+
+// Attach handlers at once so that no rejection is ever unhandled across clock advances.
+function settle(p) {
+    return p.then((value) => ({ value }), (error) => ({ error }));
 }
 
 function requestsFrom(server, realm, path) {
@@ -565,5 +584,426 @@ describe('push-client', () => {
             data: { type: 'incoming_message' },
         }));
         expect(typeof unsubscribe).toBe('function');
+    });
+
+    describe('bounded setup', () => {
+        const REQUEST_TIMEOUT_MS = 15000;
+        const PERMISSION_TIMEOUT_MS = 30000;
+        const SETUP_TIMEOUT_MS = 45000;
+        let unhandled;
+
+        beforeEach(() => {
+            jest.useFakeTimers();
+            unhandled = jest.fn();
+            process.on('unhandledRejection', unhandled);
+        });
+
+        afterEach(() => {
+            process.off('unhandledRejection', unhandled);
+            jest.useRealTimers();
+        });
+
+        // Advances the clock by 0 ms: drains pending promise work without firing a timer.
+        function flush() {
+            return jest.advanceTimersByTimeAsync(0);
+        }
+
+        async function expectClean() {
+            await flush();
+            expect(jest.getTimerCount()).toBe(0);
+            expect(unhandled).not.toHaveBeenCalled();
+        }
+
+        function track(promise) {
+            const run = { done: false, outcome: undefined };
+            run.settled = settle(promise).then((outcome) => {
+                run.done = true;
+                run.outcome = outcome;
+                return outcome;
+            });
+            return run;
+        }
+
+        function setReady(ready) {
+            Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { ready } });
+        }
+
+        function pendingReady() {
+            const ready = deferred();
+            setReady(ready.promise);
+            return ready;
+        }
+
+        // The first response whose path matches gets a body that stays pending. It rejects on
+        // abort only when honoursAbort is set.
+        function pendingBody(predicate, { honoursAbort }) {
+            const hold = { body: deferred(), signal: null };
+            const serverFetch = server.fetch;
+            global.fetch = jest.fn(async (path, init) => {
+                const response = await serverFetch(path, init);
+                if (hold.signal || !predicate(path)) return response;
+                hold.signal = init.signal;
+                if (honoursAbort) {
+                    init.signal.addEventListener('abort', () => {
+                        hold.body.reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }));
+                    });
+                }
+                return { ...response, json: () => hold.body.promise };
+            });
+            return hold;
+        }
+
+        test.each(['granted', 'rejection'])('B1. permission pending: rejects at 30 s with stage permission; a late %s starts nothing', async (late) => {
+            const prompt = deferred();
+            const notification = setPermission('default', jest.fn(() => prompt.promise));
+            const r1 = openRealm('r1', 'uid-A');
+            const setItemSpy = jest.spyOn(Storage.prototype, 'setItem');
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            // Invoked synchronously inside the click, before any await.
+            expect(notification.requestPermission).toHaveBeenCalledTimes(1);
+            expect(setItemSpy.mock.calls.filter(([key]) => key === PREF_A)).toHaveLength(1);
+
+            await jest.advanceTimersByTimeAsync(PERMISSION_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'permission' });
+            expect(mockGetToken).not.toHaveBeenCalled();
+            expect(server.fetch).not.toHaveBeenCalled();
+
+            setItemSpy.mockClear();
+            if (late === 'granted') {
+                notification.permission = 'granted';
+                prompt.resolve('granted');
+            } else {
+                prompt.reject(new Error('prompt failed'));
+            }
+            await flush();
+
+            expect(setItemSpy).not.toHaveBeenCalled();
+            expect(mockGetToken).not.toHaveBeenCalled();
+            expect(server.fetch).not.toHaveBeenCalled();
+            expect(window.localStorage.getItem(PREF_A)).toBe('enabled');
+            await expectClean();
+        });
+
+        test.each([
+            ['service-worker', 'resolve'],
+            ['service-worker', 'reject'],
+            ['token', 'resolve'],
+            ['token', 'reject'],
+            ['auth', 'resolve'],
+            ['auth', 'reject'],
+        ])('B2–B4. %s pending: enable rejects at 45 s with that stage; a late %s starts nothing', async (stage, late) => {
+            const pending = deferred();
+            if (stage === 'service-worker') {
+                setReady(pending.promise);
+            } else if (stage === 'token') {
+                mockGetToken.mockImplementation(() => pending.promise);
+            }
+            const r1 = openRealm('r1', 'uid-A');
+            if (stage === 'auth') {
+                mockRealmUsers.r1.getIdToken.mockImplementation(() => pending.promise);
+            }
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage });
+            expect(window.localStorage.getItem(PREF_A)).toBe('enabled');
+            expect(server.fetch).not.toHaveBeenCalled();
+            const tokenCalls = mockGetToken.mock.calls.length;
+            expect(tokenCalls).toBe(stage === 'service-worker' ? 0 : 1);
+
+            if (late === 'resolve') {
+                pending.resolve({ 'service-worker': { scope: '/' }, token: DEVICE_TOKEN, auth: 'idtoken:uid-A:r1' }[stage]);
+            } else {
+                pending.reject(new Error('late failure'));
+            }
+            await flush();
+
+            expect(mockGetToken).toHaveBeenCalledTimes(tokenCalls);
+            expect(server.fetch).not.toHaveBeenCalled();
+            expect(window.localStorage.getItem(PREF_A)).toBe('enabled');
+            await expectClean();
+        });
+
+        test('B5a. a body that honours abort: rejects at 15 s with stage request after one fetch', async () => {
+            const r1 = openRealm('r1', 'uid-A');
+            const hold = pendingBody((path) => path === '/api/push/status', { honoursAbort: true });
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+            expect(hold.signal.aborted).toBe(false);
+
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'request' });
+            expect(hold.signal.aborted).toBe(true);
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+            await expectClean();
+        });
+
+        test('B5b. a body that ignores abort: aborted at 15 s, rejects at 45 s; a late body starts nothing', async () => {
+            const r1 = openRealm('r1', 'uid-A');
+            const hold = pendingBody((path) => path === '/api/push/status', { honoursAbort: false });
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+            expect(hold.signal.aborted).toBe(true);
+            expect(run.done).toBe(false);
+
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS - REQUEST_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'request' });
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+
+            hold.body.resolve({ success: true, epoch: 1, revision: null, mine: false, enabled: false });
+            await flush();
+
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+            await expectClean();
+        });
+
+        test.each([
+            ['/api/push/status', 'release'],
+            ['/api/push/status', 'fail'],
+            ['/api/push/register', 'release'],
+            ['/api/push/register', 'fail'],
+        ])('B6. held %s times out, a retry registers, then a late %s changes nothing', async (path, late) => {
+            const setItemSpy = jest.spyOn(Storage.prototype, 'setItem');
+            const r1 = openRealm('r1', 'uid-A');
+            server.holds.push((entry) => entry.path === path);
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            expect(server.held).toHaveLength(1);
+            // The request timer aborted at 15 s; the held fetch ignored it.
+            expect(server.fetch.mock.calls.at(-1)[1].signal.aborted).toBe(true);
+
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'request' });
+
+            const beforeRetry = server.log.length;
+            expect(await r1.retryPushRegistration({ authUid: 'uid-A' })).toBe('registered');
+            expect(server.log.slice(beforeRetry).map((entry) => entry.path))
+                .toEqual(['/api/push/status', '/api/push/register']);
+            const rowAfterRetry = { ...server.row };
+            expect(rowAfterRetry).toMatchObject({ userId: 'user-A', enabled: true });
+            const afterRetry = server.log.length;
+
+            const [old] = server.held;
+            if (late === 'release') {
+                expect(old.release().status).toBe(path === '/api/push/status' ? 200 : 409);
+            } else {
+                old.fail(new TypeError('Failed to fetch'));
+            }
+            await flush();
+
+            expect(server.log).toHaveLength(afterRetry);
+            expect(server.row).toEqual(rowAfterRetry);
+            expect(setItemSpy.mock.calls.filter(([key]) => key === PREF_A)).toHaveLength(1);
+            await expectClean();
+        });
+
+        test('B6b. a late ready after a timeout and a successful retry starts nothing', async () => {
+            const ready = pendingReady();
+            const r1 = openRealm('r1', 'uid-A');
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'service-worker' });
+
+            setReady(Promise.resolve({ scope: '/' }));
+            expect(await r1.retryPushRegistration({ authUid: 'uid-A' })).toBe('registered');
+            const tokenCalls = mockGetToken.mock.calls.length;
+            const fetches = server.fetch.mock.calls.length;
+
+            ready.resolve({ scope: '/' });
+            await flush();
+
+            expect(mockGetToken).toHaveBeenCalledTimes(tokenCalls);
+            expect(server.fetch).toHaveBeenCalledTimes(fetches);
+            await expectClean();
+        });
+
+        test.each([
+            ['the preference is disabled'],
+            ['no account is given'],
+            ['no user is signed in'],
+            ['another user is signed in'],
+            ['permission is default'],
+        ])('B7. retry is skipped when %s: no request, no prompt, no storage write', async (variant) => {
+            window.localStorage.setItem(PREF_A, variant === 'the preference is disabled' ? 'disabled' : 'enabled');
+            const notification = setPermission(variant === 'permission is default' ? 'default' : 'granted');
+            const signedIn = {
+                'no user is signed in': null,
+                'another user is signed in': 'uid-B',
+            }[variant];
+            const r1 = openRealm('r1', signedIn === undefined ? 'uid-A' : signedIn);
+            const setItemSpy = jest.spyOn(Storage.prototype, 'setItem');
+
+            const result = variant === 'no account is given'
+                ? await r1.retryPushRegistration()
+                : await r1.retryPushRegistration({ authUid: 'uid-A' });
+
+            expect(result).toBe('skipped');
+            expect(server.fetch).not.toHaveBeenCalled();
+            expect(mockGetToken).not.toHaveBeenCalled();
+            expect(notification.requestPermission).not.toHaveBeenCalled();
+            expect(setItemSpy).not.toHaveBeenCalled();
+            await expectClean();
+        });
+
+        test('B8. superseded while ready is pending: resolves aborted at the deadline and does not reject', async () => {
+            pendingReady();
+            const r1 = openRealm('r1', 'uid-A');
+
+            const run = track(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await flush();
+            // Another tab's newer intent; this tab notices it at its deadline.
+            window.localStorage.setItem(INTENT_KEY, JSON.stringify({ id: 'other-tab-intent', authUid: 'uid-A' }));
+
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome).toEqual({ value: 'aborted' });
+            expect(server.fetch).not.toHaveBeenCalled();
+            await expectClean();
+        });
+
+        test('B9. cancel during ready resolves aborted with no clock advance and releases the deadline', async () => {
+            pendingReady();
+            const r1 = openRealm('r1', 'uid-A');
+
+            const run = settle(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            expect(jest.getTimerCount()).toBe(1);
+
+            r1.cancelPushOperations();
+            expect(jest.getTimerCount()).toBe(0);
+            expect(await run).toEqual({ value: 'aborted' });
+            expect(server.fetch).not.toHaveBeenCalled();
+            await expectClean();
+        });
+
+        test.each([
+            ['held headers', 'resolve'],
+            ['held headers', 'reject'],
+            ['a pending body', 'resolve'],
+            ['a pending body', 'reject'],
+        ])('B10. cancel while %s ignore abort: timers released and signal aborted synchronously; a late %s starts nothing', async (kind, late) => {
+            const r1 = openRealm('r1', 'uid-A');
+            let hold = null;
+            if (kind === 'held headers') {
+                server.holds.push((entry) => entry.path === '/api/push/status');
+            } else {
+                hold = pendingBody((path) => path === '/api/push/status', { honoursAbort: false });
+            }
+
+            const run = settle(r1.enablePushForCurrentUser({ authUid: 'uid-A' }));
+            await flush();
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+            const { signal } = server.fetch.mock.calls[0][1];
+            // The setup deadline and the request timer.
+            expect(jest.getTimerCount()).toBe(2);
+
+            r1.cancelPushOperations();
+            expect(jest.getTimerCount()).toBe(0);
+            expect(signal.aborted).toBe(true);
+            expect(await run).toEqual({ value: 'aborted' });
+
+            if (kind === 'held headers') {
+                const [entry] = server.held;
+                if (late === 'resolve') {
+                    entry.release();
+                } else {
+                    entry.fail(new TypeError('Failed to fetch'));
+                }
+            } else if (late === 'resolve') {
+                hold.body.resolve({ success: true, epoch: 1, revision: null, mine: false, enabled: false });
+            } else {
+                hold.body.reject(new Error('body failed'));
+            }
+            await flush();
+
+            expect(server.fetch).toHaveBeenCalledTimes(1);
+            await expectClean();
+        });
+
+        test('B11a. disable with getToken pending rejects at 45 s with stage token; the preference stays disabled', async () => {
+            window.localStorage.setItem(PREF_A, 'enabled');
+            const token = deferred();
+            mockGetToken.mockImplementation(() => token.promise);
+            const r1 = openRealm('r1', 'uid-A');
+
+            const run = track(r1.disablePushForCurrentUser({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'token' });
+            expect(window.localStorage.getItem(PREF_A)).toBe('disabled');
+
+            token.resolve(DEVICE_TOKEN);
+            await flush();
+
+            expect(server.fetch).not.toHaveBeenCalled();
+            expect(window.localStorage.getItem(PREF_A)).toBe('disabled');
+            await expectClean();
+        });
+
+        test('B11b. sync with ready pending rejects at 45 s with stage service-worker and never prompts', async () => {
+            window.localStorage.setItem(PREF_A, 'enabled');
+            const notification = setPermission('granted');
+            pendingReady();
+            const r1 = openRealm('r1', 'uid-A');
+
+            const run = track(r1.syncPushTokenIfGranted({ authUid: 'uid-A' }));
+            await jest.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS - 1);
+            expect(run.done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome.error).toMatchObject({ code: 'PUSH_TIMEOUT', stage: 'service-worker' });
+
+            expect(notification.requestPermission).not.toHaveBeenCalled();
+            expect(mockGetToken).not.toHaveBeenCalled();
+            expect(server.fetch).not.toHaveBeenCalled();
+            await expectClean();
+        });
+
+        test('B12. release with a held unregister that ignores abort returns false at 3 s and releases its timers', async () => {
+            server.row = { userId: 'user-A', enabled: true, revision: 'R' };
+            window.localStorage.setItem(PREF_A, 'enabled');
+            const r1 = openRealm('r1', 'uid-A');
+            const r2 = openRealm('r2', 'uid-A');
+            server.holds.push((entry) => entry.realm === 'r1' && entry.path === '/api/push/unregister');
+
+            const run = track(r1.releasePushRegistration({ timeoutMs: 3000 }));
+            await jest.advanceTimersByTimeAsync(2999);
+            expect(run.done).toBe(false);
+            expect(server.held).toHaveLength(1);
+            // The release limit and the 15 s request timer.
+            expect(jest.getTimerCount()).toBe(2);
+
+            await jest.advanceTimersByTimeAsync(1);
+            expect(run.outcome).toEqual({ value: false });
+            expect(jest.getTimerCount()).toBe(0);
+            expect(server.fetch.mock.calls.at(-1)[1].signal.aborted).toBe(true);
+            expect(window.localStorage.getItem(PREF_A)).toBe('enabled');
+
+            // A newer action rotates the revision; the late unregister is then decided by the server.
+            expect(await r2.enablePushForCurrentUser({ authUid: 'uid-A' })).toBe('registered');
+            const rowAfterEnable = { ...server.row };
+            const r1Requests = requestsFrom(server, 'r1').length;
+
+            expect(server.held[0].release().status).toBe(409);
+            await flush();
+
+            expect(server.row).toEqual(rowAfterEnable);
+            expect(requestsFrom(server, 'r1')).toHaveLength(r1Requests);
+            await expectClean();
+        });
     });
 });
