@@ -6,7 +6,7 @@ The owner reports that after adding the app to the iPhone Home Screen, tapping E
 
 That separate change is complete: PR **#64**, https://github.com/Jedeu/secret-santa-app/pull/64, commit `7080d5b`. Its primary checks passed (725 unit/API, 48 lifecycle integration, lint/build). At the latest GitHub check, **all checks passed**, including Vercel preview, lint, unit, integration and E2E. It is not part of this notification change.
 
-This branch is `fix/iphone-push-saving`, based on `origin/main` at `687b9b8` when created. Notification source is identical to that in PR #64; the flag-removal PR is not a dependency. Prior archives research/plan remain in Git at `4b65590`; the gate-removal research/plan at `7080d5b`.
+This branch is `fix/iphone-push-saving`, based on `origin/main` at `687b9b8` when created. At research start, notification source was identical to that in PR #64; the fixes have no application-code dependency. Prior archives research/plan remain in Git at `4b65590`; the gate-removal research/plan at `7080d5b`.
 
 The owner explicitly changed the small-fix workflow: **Opus plans and implements; primary performs adversarial review and all checks/Git**. Do not use Fable. A reviewed plan still needs owner approval before implementation. The owner approved reviewed revision 2 and a separate notification PR on 2026-11-12 by answering “Yes” to the primary's explicit approval request. No production Firebase access, deploy, configuration/credentials change or real push test is authorized.
 
@@ -128,6 +128,10 @@ Primary checks ran under Node **22.15.0**, an allowlisted credential-free enviro
 
 No unhandled-rejection or PromiseRejectionHandledWarning diagnostics appeared. Jest itself also detects unhandled rejections; the additional process listener follows the existing test pattern but is not treated as the sole oracle. All four owner-file hashes and the default-port demo listener/PID records remained unchanged.
 
-The draft notification PR will be stacked on PR #64 so the two PRs do not conflict over their root planning artifacts. The fixes are independent in application behavior; only Git publication is sequenced (#64 first). After adding that reviewed base, the primary will rerun checks on the combined tree and record the actual result.
+The draft notification PR is stacked on PR #64 so the two PRs do not conflict over their root planning artifacts. The fixes are independent in application behavior; only Git publication is sequenced (**merge #64 first**). The primary merged the reviewed #64 base without rewriting history; only the two primary-owned planning artifacts conflicted, and this notification plan/research was retained. All four notification implementation files stayed byte-identical to the initially verified copy.
+
+The combined tree was reverified in the isolated workspace: **767 unit/API tests passed**, 57 suites (725 in #64 + 42 new notification tests); **73 focused tests passed** again; lint and production build passed again. No unhandled-rejection diagnostics appeared. No notification source correction was needed. Final owner-file hashes, demo listener/PID records and verified source-copy comparisons were unchanged; the disposable workspace was then deleted, retaining redacted logs under `/tmp/secret-santa-iphone-push-saving.JwbbBh`.
+
+CI sequencing: `.github/workflows/ci.yml` filters pull requests to `main`, so a draft stacked against `fix/remove-year-transition-gate` does not trigger that workflow yet. After #64 merges, retarget this PR to `main` and synchronize the branch (a normal merge/update, not a history rewrite); run the full GitHub CI gate before merging the notification PR. Vercel preview status is separate from that gate.
 
 Not run locally: integration, rules, Playwright E2E, real iPhone token acquisition or push delivery. No production Firebase access, real push send, credentials/configuration change, deployment command or live rollover occurred.

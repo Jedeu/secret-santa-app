@@ -28,29 +28,50 @@ function createRequest({ token = 'admin-token', body = {}, invalidJson = false }
 }
 
 const ROUTES = [
-    ['close', closePOST, { year: 2025 }, () => closeYear],
-    ['start', startPOST, { fromYear: 2025, targetYear: 2026 }, () => startNewYear],
+    [
+        'close',
+        closePOST,
+        { year: 2025 },
+        () => closeYear,
+        { year: 2025, state: 'closed', epoch: 1, closedYears: [2025], changed: true },
+    ],
+    [
+        'start',
+        startPOST,
+        { fromYear: 2025, targetYear: 2026 },
+        () => startNewYear,
+        { year: 2026, state: 'active', epoch: 2, closedYears: [2025], changed: true, participants: 7 },
+    ],
 ];
 
+const LEGACY_FLAG_VALUES = [['unset', undefined], ['"false"', 'false'], ['"true"', 'true']];
+
+function setEnv(name, value) {
+    if (value === undefined) {
+        delete process.env[name];
+    } else {
+        process.env[name] = value;
+    }
+}
+
 describe('admin year routes', () => {
+    let savedNodeEnv;
     let savedFlag;
 
     beforeEach(() => {
         jest.clearAllMocks();
+        savedNodeEnv = process.env.NODE_ENV;
         savedFlag = process.env.YEAR_TRANSITIONS_ENABLED;
-        process.env.YEAR_TRANSITIONS_ENABLED = 'true';
+        setEnv('YEAR_TRANSITIONS_ENABLED', undefined);
         adminAuth.verifyIdToken.mockResolvedValue(ADMIN);
     });
 
     afterEach(() => {
-        if (savedFlag === undefined) {
-            delete process.env.YEAR_TRANSITIONS_ENABLED;
-        } else {
-            process.env.YEAR_TRANSITIONS_ENABLED = savedFlag;
-        }
+        setEnv('NODE_ENV', savedNodeEnv);
+        setEnv('YEAR_TRANSITIONS_ENABLED', savedFlag);
     });
 
-    describe.each(ROUTES)('%s', (_name, POST, validBody, lib) => {
+    describe.each(ROUTES)('%s', (_name, POST, validBody, lib, okResult) => {
         test('401 without a token', async () => {
             const res = await POST(createRequest({ token: null, body: validBody }));
 
@@ -88,18 +109,6 @@ describe('admin year routes', () => {
             expect(lib()).not.toHaveBeenCalled();
         });
 
-        test('409 TRANSITIONS_DISABLED without the flag outside development', async () => {
-            delete process.env.YEAR_TRANSITIONS_ENABLED;
-
-            const res = await POST(createRequest({ body: validBody }));
-            const data = await res.json();
-
-            expect(res.status).toBe(409);
-            expect(data.code).toBe('TRANSITIONS_DISABLED');
-            expect(data.error).toBe('Year transitions are not enabled on this deployment.');
-            expect(lib()).not.toHaveBeenCalled();
-        });
-
         test('400 INVALID_YEAR for a body that is not JSON', async () => {
             const res = await POST(createRequest({ invalidJson: true }));
 
@@ -119,6 +128,60 @@ describe('admin year routes', () => {
             expect(data).toEqual({ error: 'The action did not complete. Check the current state and try again.', code: 'INTERNAL' });
             expect(spy).toHaveBeenCalledWith(expect.any(String), 'boom');
             spy.mockRestore();
+        });
+
+        describe.each(LEGACY_FLAG_VALUES)('in production with YEAR_TRANSITIONS_ENABLED %s', (_label, value) => {
+            beforeEach(() => {
+                process.env.NODE_ENV = 'production';
+                setEnv('YEAR_TRANSITIONS_ENABLED', value);
+            });
+
+            test('verified admin → 200', async () => {
+                lib().mockResolvedValue(okResult);
+
+                const res = await POST(createRequest({ body: validBody }));
+
+                expect(res.status).toBe(200);
+                expect(await res.json()).toEqual({ success: true, ...okResult });
+                expect(lib()).toHaveBeenCalledTimes(1);
+                expect(lib()).toHaveBeenCalledWith(validBody);
+            });
+
+            test('401 missing token', async () => {
+                const res = await POST(createRequest({ token: null, body: validBody }));
+
+                expect(res.status).toBe(401);
+                expect((await res.json()).code).toBe('UNAUTHENTICATED');
+                expect(lib()).not.toHaveBeenCalled();
+            });
+
+            test('403 verified non-admin', async () => {
+                adminAuth.verifyIdToken.mockResolvedValue({ uid: 'member-uid', email: 'member@example.test', email_verified: true });
+
+                const res = await POST(createRequest({ body: validBody }));
+
+                expect(res.status).toBe(403);
+                expect((await res.json()).code).toBe('ADMIN_REQUIRED');
+                expect(lib()).not.toHaveBeenCalled();
+            });
+
+            test('403 unverified admin', async () => {
+                adminAuth.verifyIdToken.mockResolvedValue({ ...ADMIN, email_verified: false });
+
+                const res = await POST(createRequest({ body: validBody }));
+
+                expect(res.status).toBe(403);
+                expect((await res.json()).code).toBe('EMAIL_NOT_VERIFIED');
+                expect(lib()).not.toHaveBeenCalled();
+            });
+
+            test('400 bad JSON', async () => {
+                const res = await POST(createRequest({ invalidJson: true }));
+
+                expect(res.status).toBe(400);
+                expect((await res.json()).code).toBe('INVALID_YEAR');
+                expect(lib()).not.toHaveBeenCalled();
+            });
         });
     });
 
