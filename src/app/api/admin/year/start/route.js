@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import {
     AdmissionError,
     admissionErrorResponse,
-    assertYearTransitionsEnabled,
     startNewYear,
     verifyAdminRequest,
 } from '@/lib/participant-admission';
@@ -11,14 +10,13 @@ import { isValidYear } from '@/lib/year-paths';
 /**
  * Start a new year: requires fromYear closed and a roster for targetYear; creates the new
  * year's profiles and bumps the epoch in one transaction. Idempotent.
- * Admin only; requires YEAR_TRANSITIONS_ENABLED=true outside development.
+ * Admin only: a valid ID token for an admin email, verified outside development.
  *
  * Body: { fromYear, targetYear }
  */
 export async function POST(request) {
     try {
         await verifyAdminRequest(request);
-        assertYearTransitionsEnabled();
 
         let body;
         try {

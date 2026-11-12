@@ -93,7 +93,7 @@ describe('useAdminYearActions', () => {
         global.fetch.mockResolvedValue({
             ok: false,
             status: 409,
-            json: async () => ({ error: 'Year transitions are not enabled on this deployment.', code: 'TRANSITIONS_DISABLED' }),
+            json: async () => ({ error: 'The exchange year does not match. Check the current state and try again.', code: 'YEAR_MISMATCH' }),
         });
         const onComplete = jest.fn();
         const { result } = renderHook(() => useAdminYearActions({ onComplete }));
@@ -102,7 +102,7 @@ describe('useAdminYearActions', () => {
             await result.current.closeYear(2025);
         });
 
-        expect(mockShowToast).toHaveBeenCalledWith('Failed to close 2025: Year transitions are not enabled on this deployment.');
+        expect(mockShowToast).toHaveBeenCalledWith('Failed to close 2025: The exchange year does not match. Check the current state and try again.');
         expect(onComplete).not.toHaveBeenCalled();
     });
 

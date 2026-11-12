@@ -49,7 +49,6 @@ const ERROR_DEFINITIONS = {
         status: 409,
         message: 'A new version of the app is available. Reload the page (or close and reopen the app) to continue.',
     },
-    TRANSITIONS_DISABLED: { status: 409, message: 'Year transitions are not enabled on this deployment.' },
     YEAR_NOT_CLOSED: { status: 409, message: 'The current year must be closed before the next one can start.' },
     YEAR_MISMATCH: { status: 409, message: 'The exchange year does not match. Check the current state and try again.' },
     STALE_REQUEST: { status: 409, message: 'A later year has already started.' },
@@ -162,16 +161,6 @@ export async function verifyAdminRequest(request) {
         throw new AdmissionError('ADMIN_REQUIRED');
     }
     return decoded;
-}
-
-/**
- * Default-off production gate for Close and Start.
- */
-export function assertYearTransitionsEnabled() {
-    if (process.env.YEAR_TRANSITIONS_ENABLED === 'true' || process.env.NODE_ENV === 'development') {
-        return;
-    }
-    throw new AdmissionError('TRANSITIONS_DISABLED');
 }
 
 // --- References ---
