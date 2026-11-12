@@ -221,3 +221,38 @@ button {
   margin-bottom: 32px;
   text-align: center;
 }
+
+/* Mobile recipient reveal fills the viewport; other login cards and desktop stay unchanged. */
+@media (width < 800px) {
+  .recipient-reveal-screen {
+    max-width: none;
+    padding: 0;
+  }
+
+  .recipient-reveal-screen .recipient-reveal-card {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    min-height: 0;
+    margin-bottom: 0;
+    border: 0;
+    border-radius: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: calc(40px + env(safe-area-inset-top, 0px))
+      calc(32px + env(safe-area-inset-right, 0px))
+      calc(40px + env(safe-area-inset-bottom, 0px))
+      calc(32px + env(safe-area-inset-left, 0px));
+  }
+
+  .recipient-reveal-screen .recipient-reveal-card::before,
+  .recipient-reveal-screen .recipient-reveal-card::after {
+    content: "";
+    flex: 1 0 0;
+  }
+
+  .recipient-reveal-screen .recipient-reveal-card > * {
+    flex-shrink: 0;
+  }
+}

@@ -247,4 +247,20 @@ describe('RecipientReveal', () => {
 
         expect(errorSpy).not.toHaveBeenCalled();
     });
+
+    test.each([
+        ['ready', 'Bravo'],
+        ['loading', null],
+        ['error', null],
+        ['invalid', null],
+    ])('%s: the card and its main keep their shared classes and add the reveal-only classes', (status, recipientName) => {
+        renderReveal({ status, recipientName });
+
+        const card = screen.getByTestId('recipient-reveal');
+        expect(card).toHaveClass('card', 'login-card', 'recipient-reveal-card');
+
+        const main = card.closest('main');
+        expect(main).not.toBeNull();
+        expect(main).toHaveClass('container', 'recipient-reveal-screen');
+    });
 });

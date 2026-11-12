@@ -141,8 +141,8 @@ export default function RecipientReveal({
     }
 
     return (
-        <main className="container" style={{ justifyContent: 'center', alignItems: 'center' }}>
-            <div className="card login-card" data-testid="recipient-reveal">
+        <main className="container recipient-reveal-screen" style={{ justifyContent: 'center', alignItems: 'center' }}>
+            <div className="card login-card recipient-reveal-card" data-testid="recipient-reveal">
                 <h1 className="title">Welcome, {currentUser.name}!</h1>
 
                 {content}
