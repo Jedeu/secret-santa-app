@@ -15,6 +15,16 @@ import { clientAuth } from '@/lib/firebase-client';
  * - Every reconcile round reads /api/push/status and then ALWAYS registers the
  *   currently stored preference with that epoch/revision, so the newest acknowledged
  *   action rotates the revision and every older in-flight request gets 409.
+ * - Bounded waits: the permission prompt has a 30 s deadline; service-worker readiness,
+ *   the FCM token, ID tokens and requests run under a 45 s setup deadline, and each
+ *   request (headers and body) also has its own 15 s timer. A deadline that fires while
+ *   the operation is still current rejects with PushTimeoutError (code 'PUSH_TIMEOUT',
+ *   stage = the pending wait); a superseded or cancelled operation resolves 'aborted'.
+ * - Timed-out, cancelled or superseded work is abandoned synchronously: its timers are
+ *   cleared and its requests aborted without waiting for any browser, SDK or HTTP
+ *   promise. A late result throws at its next fence, so it starts no request and writes
+ *   no storage. Requests already sent are still decided by the server's epoch/revision.
+ * - retryPushRegistration never writes the preference and never prompts.
  *
  * PushResult: 'registered' | 'disabled' | 'skipped' | 'aborted'
  */
@@ -23,6 +33,9 @@ export const PUSH_INTENT_KEY = 'secret-santa-push-intent';
 const PUSH_PREFERENCE_PREFIX = 'secret-santa-push-pref:';
 const LEGACY_PUSH_TOKEN_KEY = 'secret-santa-push-token';
 const REQUEST_TIMEOUT_MS = 15 * 1000;
+const PERMISSION_TIMEOUT_MS = 30 * 1000;
+const SETUP_TIMEOUT_MS = 45 * 1000;
+const PUSH_TIMEOUT_CODE = 'PUSH_TIMEOUT';
 const MAX_RECONCILE_ROUNDS = 3;
 
 // Realm-local state
@@ -30,6 +43,8 @@ let pushGeneration = 0;
 let lastKnown = null; // { authUid, token, epoch, revision }
 const subscribers = new Set();
 let storageListener = null;
+// Cancel function of each pending withDeadline in this realm.
+const activeDeadlines = new Set();
 
 class PushAbortedError extends Error {
     constructor() {
@@ -37,6 +52,26 @@ class PushAbortedError extends Error {
         this.name = 'PushAbortedError';
         this.isPushAborted = true;
     }
+}
+
+class PushTimeoutError extends Error {
+    /**
+     * @param {'permission'|'service-worker'|'token'|'auth'|'request'|null} stage
+     */
+    constructor(stage) {
+        super('Push setup timed out.');
+        this.name = 'PushTimeoutError';
+        this.code = PUSH_TIMEOUT_CODE;
+        this.stage = stage ?? null;
+    }
+}
+
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isPushTimeoutError(error) {
+    return error?.code === PUSH_TIMEOUT_CODE;
 }
 
 function getStorage() {
@@ -134,7 +169,9 @@ function makeOperation(authUid, intentId) {
         intentId,
         user: clientAuth?.currentUser ?? null,
         cancelled: false,
-        controllers: new Set(),
+        stage: null,
+        // Each entry: { controller, timer, timedOut }
+        requests: new Set(),
     };
 }
 
@@ -155,6 +192,54 @@ function isAbort(error) {
     return error?.isPushAborted === true;
 }
 
+/**
+ * Fence the operation off and release its request timers and controllers at once.
+ * Synchronous and idempotent; never waits for any fetch, body or SDK promise.
+ */
+function abandonOperation(op) {
+    op.cancelled = true;
+    op.requests.forEach((req) => {
+        clearTimeout(req.timer);
+        try { req.controller?.abort(); } catch { /* ignore */ }
+    });
+    op.requests.clear();
+}
+
+/**
+ * Settle with `work`, or abandon the operation when the deadline fires or this realm's
+ * operations are cancelled. When `work` wins the operation is NOT abandoned.
+ * A late result or rejection of abandoned work is observed here and dropped.
+ */
+function withDeadline(op, work, timeoutMs) {
+    work = Promise.resolve(work);
+    work.catch(() => { /* observed; a late rejection after the deadline is dropped */ });
+
+    let timer = null;
+    let cancel = null;
+    const deadline = new Promise((_resolve, reject) => {
+        let settled = false;
+        const settle = (error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            activeDeadlines.delete(cancel);
+            abandonOperation(op);
+            reject(error);
+        };
+        cancel = () => settle(new PushAbortedError());
+        timer = setTimeout(() => {
+            // Chosen before the operation is abandoned.
+            settle(isCurrent(op) ? new PushTimeoutError(op.stage) : new PushAbortedError());
+        }, timeoutMs);
+    });
+    activeDeadlines.add(cancel);
+
+    return Promise.race([work, deadline]).finally(() => {
+        clearTimeout(timer);
+        activeDeadlines.delete(cancel);
+    });
+}
+
 function requestError(result, fallback) {
     const error = new Error(result?.data?.error || fallback || `Push request failed with status ${result?.status}`);
     error.status = result?.status;
@@ -167,44 +252,60 @@ async function postJson(op, pathname, body) {
     if (!op.user || typeof op.user.getIdToken !== 'function') {
         throw new Error('Not authenticated. Please sign in again.');
     }
+    op.stage = 'auth';
     const idToken = await op.user.getIdToken();
     ensureCurrent(op);
     if (!idToken) {
         throw new Error('Not authenticated. Please sign in again.');
     }
 
+    // One timer and controller cover both the headers and the body.
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
-    if (controller) op.controllers.add(controller);
+    const req = { controller, timer: null, timedOut: false };
+    req.timer = setTimeout(() => {
+        req.timedOut = true;
+        try { controller?.abort(); } catch { /* ignore */ }
+    }, REQUEST_TIMEOUT_MS);
+    op.requests.add(req);
 
-    let response;
     try {
+        op.stage = 'request';
         // Immediately before the request.
         ensureCurrent(op);
-        response = await fetch(pathname, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify(body),
-            ...(controller ? { signal: controller.signal } : {}),
-        });
+        let response;
+        try {
+            response = await fetch(pathname, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify(body),
+                ...(controller ? { signal: controller.signal } : {}),
+            });
+        } catch (error) {
+            ensureCurrent(op);
+            if (req.timedOut) throw new PushTimeoutError('request');
+            throw error;
+        }
+        ensureCurrent(op);
+
+        let data = null;
+        try {
+            data = await response.json();
+        } catch {
+            data = null;
+        }
+        ensureCurrent(op);
+        // A timed-out body is never treated as success.
+        if (req.timedOut) throw new PushTimeoutError('request');
+
+        return { ok: !!response.ok, status: response.status, data };
     } finally {
-        if (timer) clearTimeout(timer);
-        if (controller) op.controllers.delete(controller);
+        // Normal-path cleanup only; abandonOperation never waits for this.
+        clearTimeout(req.timer);
+        op.requests.delete(req);
     }
-    ensureCurrent(op);
-
-    let data = null;
-    try {
-        data = await response.json();
-    } catch {
-        data = null;
-    }
-    ensureCurrent(op);
-
-    return { ok: !!response.ok, status: response.status, data };
 }
 
 async function obtainFcmToken(op) {
@@ -213,9 +314,11 @@ async function obtainFcmToken(op) {
         throw new Error('Firebase messaging is not initialized.');
     }
 
+    op.stage = 'service-worker';
     const serviceWorkerRegistration = await getServiceWorkerRegistration();
     ensureCurrent(op);
 
+    op.stage = 'token';
     const token = await getToken(messaging, {
         vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
         serviceWorkerRegistration,
@@ -335,7 +438,9 @@ export async function enablePushForCurrentUser({ authUid } = {}) {
 
     try {
         if (Notification.permission !== 'granted') {
-            const permission = await Notification.requestPermission();
+            op.stage = 'permission';
+            // requestPermission() is evaluated synchronously inside the click, before any await.
+            const permission = await withDeadline(op, Notification.requestPermission(), PERMISSION_TIMEOUT_MS);
             // No storage write after this point.
             if (!isCurrent(op)) {
                 return 'aborted';
@@ -347,7 +452,7 @@ export async function enablePushForCurrentUser({ authUid } = {}) {
             }
         }
 
-        return await reconcile(op);
+        return await withDeadline(op, reconcile(op), SETUP_TIMEOUT_MS);
     } catch (error) {
         if (isAbort(error)) return 'aborted';
         throw error;
@@ -371,7 +476,7 @@ export async function disablePushForCurrentUser({ authUid } = {}) {
     }
 
     try {
-        return await reconcile(op);
+        return await withDeadline(op, reconcile(op), SETUP_TIMEOUT_MS);
     } catch (error) {
         if (isAbort(error)) return 'aborted';
         throw error;
@@ -403,7 +508,36 @@ export async function syncPushTokenIfGranted({ authUid } = {}) {
     const op = makeOperation(authUid, intentId);
 
     try {
-        return await reconcile(op);
+        return await withDeadline(op, reconcile(op), SETUP_TIMEOUT_MS);
+    } catch (error) {
+        if (isAbort(error)) return 'aborted';
+        throw error;
+    }
+}
+
+/**
+ * Explicit retry after a failed or timed-out enable. Never writes the preference and
+ * never prompts; skips (with no request and no storage write) unless this account is
+ * signed in here, push is supported, permission is granted and its preference is 'enabled'.
+ * @param {{ authUid?: string|null }} [options]
+ * @returns {Promise<'registered'|'disabled'|'skipped'|'aborted'>}
+ */
+export async function retryPushRegistration({ authUid } = {}) {
+    if (
+        !authUid
+        || clientAuth?.currentUser?.uid !== authUid
+        || !isPushSupported()
+        || Notification.permission !== 'granted'
+        || getPushPreference(authUid) !== 'enabled'
+    ) {
+        return 'skipped';
+    }
+
+    // A fresh intent supersedes older work on this device, as a click does.
+    const op = makeOperation(authUid, writeIntent(authUid));
+
+    try {
+        return await withDeadline(op, reconcile(op), SETUP_TIMEOUT_MS);
     } catch (error) {
         if (isAbort(error)) return 'aborted';
         throw error;
@@ -423,14 +557,7 @@ export async function releasePushRegistration({ timeoutMs = 3000 } = {}) {
         return false;
     }
 
-    const op = {
-        generation: pushGeneration,
-        authUid: user.uid,
-        intentId,
-        user,
-        cancelled: false,
-        controllers: new Set(),
-    };
+    const op = makeOperation(user.uid, intentId);
     const known = lastKnown && lastKnown.authUid === user.uid ? lastKnown : null;
 
     const work = (async () => {
@@ -467,10 +594,8 @@ export async function releasePushRegistration({ timeoutMs = 3000 } = {}) {
     let timer = null;
     const timeout = new Promise((resolve) => {
         timer = setTimeout(() => {
-            op.cancelled = true;
-            op.controllers.forEach((controller) => {
-                try { controller.abort(); } catch { /* ignore */ }
-            });
+            // Releases the request timer and controller even if the fetch never settles.
+            abandonOperation(op);
             resolve(false);
         }, timeoutMs);
     });
@@ -485,6 +610,8 @@ export async function releasePushRegistration({ timeoutMs = 3000 } = {}) {
 
 export function cancelPushOperations() {
     pushGeneration += 1;
+    // Settle and abandon this realm's pending enable/disable/sync/retry at once.
+    [...activeDeadlines].forEach((cancel) => cancel());
 }
 
 export function attachForegroundListener(onIncomingMessage) {
