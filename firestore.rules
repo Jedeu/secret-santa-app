@@ -56,15 +56,17 @@ service cloud.firestore {
     function onlyChanges(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
+    // Profiles created by the automatic draw are never client-writable.
+    function isManualProfile() { return resource.data.get('drawMode', null) == null; }
     function isAllowedSelfRecipientSelection(ys, userId) {
-      return authMatchesUser(ys, userId) && onlyChanges(['recipientId'])
+      return authMatchesUser(ys, userId) && onlyChanges(['recipientId']) && isManualProfile()
         && resource.data.recipientId == null
         && request.resource.data.recipientId is string
         && request.resource.data.recipientId != userId
         && userAfterHasGifter(ys, request.resource.data.recipientId, userId);
     }
     function isAllowedRecipientClaimUpdate(ys, recipientUserId) {
-      return onlyChanges(['gifterId'])
+      return onlyChanges(['gifterId']) && isManualProfile()
         && resource.data.gifterId == null
         && request.resource.data.gifterId is string
         && request.resource.data.gifterId != recipientUserId

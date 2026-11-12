@@ -15,6 +15,13 @@ import {
 } from '@/lib/participant-admission';
 import { auth as adminAuth, firestore } from '@/lib/firebase';
 import { ADMIN_EMAILS } from '@/lib/config';
+import { drawRecipientCycle, isCompletePairing } from '@/lib/recipient-draw';
+
+// The draw stays real but observable (and overridable once per test).
+jest.mock('@/lib/recipient-draw', () => {
+    const actual = jest.requireActual('@/lib/recipient-draw');
+    return { ...actual, drawRecipientCycle: jest.fn(actual.drawRecipientCycle) };
+});
 
 jest.mock('@/lib/firebase', () => ({
     firestore: {},
@@ -601,6 +608,20 @@ describe('participant-admission', () => {
 
             expect(ctx).toMatchObject({ year: 2026, epoch: 2, user: { id: 'u1' } });
         });
+
+        test('the work context carries profileId equal to the identity userId', async () => {
+            installFakeDb(firestore, {
+                ...ACTIVE_2026,
+                'years/2026/users/u26': { id: 'u26', email: 'member@example.test' },
+                'authIdentities/auth-uid-1': { uid: 'auth-uid-1', email: 'member@example.test', userId: 'u26', epoch: 2 },
+            });
+
+            const ctx = await runFencedTransaction(MEMBER, async (tx, context) => context);
+
+            expect(ctx.profileId).toBe('u26');
+            expect(ctx.user.id).toBe('u26');
+            expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('ensureParticipantProfiles', () => {
@@ -800,7 +821,20 @@ describe('participant-admission', () => {
             const profiles = paths(data, 'years/2026/users/').map((path) => data[path]);
             expect(profiles.map((p) => p.email).sort()).toEqual(['member@example.test', 'second@example.test']);
             profiles.forEach((profile) => {
-                expect(profile).toMatchObject({ oauthId: null, image: null, recipientId: null, gifterId: null });
+                // Two-person roster: each draws the other, who is also their Santa.
+                const other = profiles.find((candidate) => candidate !== profile);
+                expect(profile).toEqual({
+                    id: expect.any(String),
+                    name: expect.any(String),
+                    email: profile.email,
+                    oauthId: null,
+                    image: null,
+                    recipientId: other.id,
+                    gifterId: other.id,
+                    drawMode: 'auto',
+                    revealAckRecipientId: null,
+                    revealAckAt: null,
+                });
                 expect(data[`participantIndex/${profile.email}`]).toMatchObject({ userId: profile.id, epoch: 2 });
             });
             expect(profiles.map((p) => p.name).sort()).toEqual(['Member', 'Second']);
@@ -882,5 +916,174 @@ describe('participant-admission', () => {
                 expect(state.writes).toBe(0);
             }
         );
+
+        test('a five-person roster started from a closed 2026 gets one complete ring of five', async () => {
+            mockRosters[2027] = ['alpha', 'bravo', 'charlie', 'delta', 'echo']
+                .map((name) => ({ name, email: `${name}@example.test` }));
+            const { data } = installFakeDb(firestore, {
+                'system/lifecycle': { epoch: 2, state: 'closed', year: 2026, closedYears: [2025, 2026] },
+            });
+
+            const result = await startNewYear({ fromYear: 2026, targetYear: 2027 });
+
+            expect(result).toMatchObject({ year: 2027, epoch: 3, changed: true, participants: 5 });
+            const profiles = paths(data, 'years/2027/users/').map((path) => data[path]);
+            expect(profiles).toHaveLength(5);
+            expect(isCompletePairing(profiles)).toBe(true);
+            const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+            const visited = new Set([profiles[0].id]);
+            let current = profiles[0].recipientId;
+            while (current !== profiles[0].id && visited.size <= profiles.length) {
+                visited.add(current);
+                current = byId.get(current).recipientId;
+            }
+            expect(visited.size).toBe(5);
+            profiles.forEach((profile) => {
+                expect(profile).toMatchObject({ drawMode: 'auto', revealAckRecipientId: null, revealAckAt: null });
+            });
+        });
+
+        test('a retried transaction callback persists the same ids and pairs as its first run; the draw runs once', async () => {
+            const { data, state } = installFakeDb(firestore, CLOSED_2025);
+            const realRun = firestore.runTransaction.getMockImplementation();
+            const firstRunCreates = [];
+            firestore.runTransaction.mockImplementationOnce(async (fn) => {
+                // First run: its writes are dropped and its create payloads captured.
+                state.dropWrites = true;
+                await realRun((tx) => fn({
+                    ...tx,
+                    create: (ref, value) => {
+                        firstRunCreates.push({ path: ref.path, value: clone(value) });
+                        tx.create(ref, value);
+                    },
+                }));
+                state.dropWrites = false;
+                // The retry runs the same callback again and commits.
+                return realRun(fn);
+            });
+
+            const result = await startNewYear({ fromYear: 2025, targetYear: 2026 });
+
+            expect(result).toMatchObject({ changed: true, participants: 2 });
+            expect(drawRecipientCycle).toHaveBeenCalledTimes(1);
+            const firstRunUsers = firstRunCreates.filter(({ path }) => path.startsWith('years/2026/users/'));
+            expect(firstRunUsers).toHaveLength(2);
+            expect(paths(data, 'years/2026/users/').sort()).toEqual(firstRunUsers.map(({ path }) => path).sort());
+            firstRunUsers.forEach(({ path, value }) => {
+                expect(data[path]).toEqual(value);
+            });
+            expect(isCompletePairing(firstRunUsers.map(({ value }) => value))).toBe(true);
+        });
+
+        test('a repeated Start leaves the users documents deep-equal', async () => {
+            const { data } = installFakeDb(firestore, CLOSED_2025);
+            await startNewYear({ fromYear: 2025, targetYear: 2026 });
+            const before = clone(paths(data, 'years/2026/users/').map((path) => [path, data[path]]));
+
+            const again = await startNewYear({ fromYear: 2025, targetYear: 2026 });
+
+            expect(again).toMatchObject({ changed: false, participants: null });
+            expect(paths(data, 'years/2026/users/').map((path) => [path, data[path]])).toEqual(before);
+        });
+
+        test('a draw that fails validation rejects before any transaction and writes nothing', async () => {
+            drawRecipientCycle.mockImplementationOnce((ids) => new Map(ids.map((id) => [id, { recipientId: id, gifterId: id }])));
+            const { data, state } = installFakeDb(firestore, CLOSED_2025);
+            const before = clone(data);
+
+            await expect(startNewYear({ fromYear: 2025, targetYear: 2026 })).rejects.toThrow('Recipient draw failed validation');
+
+            expect(firestore.runTransaction).not.toHaveBeenCalled();
+            expect(state.writes).toBe(0);
+            expect(data).toEqual(before);
+        });
+    });
+
+    describe('years with automatic profiles', () => {
+        // Synthetic automatic (drawn at Start) profiles in active 2026.
+        function autoProfile(id, name, email, recipientId) {
+            return {
+                id,
+                name,
+                email,
+                oauthId: null,
+                image: null,
+                recipientId,
+                gifterId: recipientId,
+                drawMode: 'auto',
+                revealAckRecipientId: null,
+                revealAckAt: null,
+            };
+        }
+
+        const SECOND_AND_THIRD = {
+            'years/2026/users/s26': autoProfile('s26', 'Second', 'second@example.test', 't26'),
+            'years/2026/users/t26': autoProfile('t26', 'Third', 'third@example.test', 's26'),
+        };
+
+        function usersOf(data) {
+            return clone(paths(data, 'years/2026/users/').sort().map((path) => [path, data[path]]));
+        }
+
+        beforeEach(() => {
+            mockRosters[2026] = [MEMBER_P, SECOND_P, THIRD_P];
+        });
+
+        test('admission: a roster member with no profile and no index row -> PROFILE_CONFLICT with zero writes', async () => {
+            const { data, state } = installFakeDb(firestore, { ...ACTIVE_2026, ...SECOND_AND_THIRD });
+            const before = clone(data);
+
+            await expect(admitParticipant(MEMBER)).rejects.toMatchObject({ code: 'PROFILE_CONFLICT', status: 409 });
+
+            expect(state.writes).toBe(0);
+            expect(data).toEqual(before);
+        });
+
+        test('admission: an existing automatic profile without an index row is linked with no users write', async () => {
+            const { data } = installFakeDb(firestore, { ...ACTIVE_2026, ...SECOND_AND_THIRD });
+            const usersBefore = usersOf(data);
+
+            const { user, created } = await admitParticipant(THIRD);
+
+            expect(created).toBe(false);
+            expect(user.id).toBe('t26');
+            expect(usersOf(data)).toEqual(usersBefore);
+            expect(data['participantIndex/third@example.test']).toMatchObject({ userId: 't26', epoch: 2 });
+            expect(data['authIdentities/auth-uid-3']).toMatchObject({ userId: 't26', epoch: 2 });
+        });
+
+        test('seeding: with every profile present and indexed, all are reported existing', async () => {
+            const { data } = installFakeDb(firestore, {
+                ...ACTIVE_2026,
+                'years/2026/users/m26': { ...autoProfile('m26', 'Member', 'member@example.test', 's26'), gifterId: 't26' },
+                'years/2026/users/s26': { ...autoProfile('s26', 'Second', 'second@example.test', 't26'), gifterId: 'm26' },
+                'years/2026/users/t26': { ...autoProfile('t26', 'Third', 'third@example.test', 'm26'), gifterId: 's26' },
+                'participantIndex/member@example.test': { email: 'member@example.test', userId: 'm26', epoch: 2 },
+                'participantIndex/second@example.test': { email: 'second@example.test', userId: 's26', epoch: 2 },
+                'participantIndex/third@example.test': { email: 'third@example.test', userId: 't26', epoch: 2 },
+            });
+            const usersBefore = usersOf(data);
+
+            const result = await ensureParticipantProfiles();
+
+            expect(result).toEqual({ year: 2026, created: 0, linked: 0, existing: 3 });
+            expect(usersOf(data)).toEqual(usersBefore);
+        });
+
+        test('seeding with repair: a missing index row is written, the member without a profile conflicts, users are unchanged', async () => {
+            const { data } = installFakeDb(firestore, {
+                ...ACTIVE_2026,
+                ...SECOND_AND_THIRD,
+                // Third is indexed; Second's index row is missing; Member has no profile.
+                'participantIndex/third@example.test': { email: 'third@example.test', userId: 't26', epoch: 2 },
+            });
+            const usersBefore = usersOf(data);
+
+            await expect(ensureParticipantProfiles()).rejects.toMatchObject({ code: 'PROFILE_CONFLICT', conflicts: 1 });
+
+            expect(data['participantIndex/second@example.test']).toMatchObject({ userId: 's26', epoch: 2 });
+            expect(data['participantIndex/member@example.test']).toBeUndefined();
+            expect(usersOf(data)).toEqual(usersBefore);
+        });
     });
 });

@@ -189,6 +189,18 @@ describe('firestore rules: admission, lifecycle and reciprocal claims', () => {
             await assertFails(batch.commit());
         });
 
+        test('two automatic-draw profiles with null pairings cannot be claimed by a reciprocal batch', async () => {
+            const automatic = { drawMode: 'auto', revealAckRecipientId: null, revealAckAt: null };
+            await seedDoc(testEnv, 'users', 'user-a', { ...userDoc('user-a', 'user-a@example.test'), name: 'User A', ...automatic });
+            await seedDoc(testEnv, 'users', 'user-b', { ...userDoc('user-b', 'user-b@example.test'), name: 'User B', ...automatic });
+
+            const db = authedDb(testEnv, 'user-a', 'user-a@example.test');
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'users', 'user-a'), { recipientId: 'user-b' });
+            batch.update(doc(db, 'users', 'user-b'), { gifterId: 'user-a' });
+            await assertFails(batch.commit());
+        });
+
         test('a second claim and a claim on an already-claimed user fail', async () => {
             const dbA = authedDb(testEnv, 'user-a', 'user-a@example.test');
             const first = writeBatch(dbA);

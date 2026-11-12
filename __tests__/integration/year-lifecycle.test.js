@@ -23,6 +23,7 @@ import {
     startNewYear,
 } from '@/lib/participant-admission';
 import { getPushRegistrationStatus, registerPushToken, unregisterPushToken } from '@/lib/push-server';
+import { isCompletePairing } from '@/lib/recipient-draw';
 import { POST as sendRoute } from '@/app/api/messages/send/route';
 import { POST as bootstrapRoute } from '@/app/api/auth/bootstrap/route';
 import { POST as closeRoute } from '@/app/api/admin/year/close/route';
@@ -351,7 +352,7 @@ describe('year lifecycle (emulator)', () => {
         });
     });
 
-    test('Start creates exactly the 2026 roster with null pairings, points the index at it and leaves H untouched', async () => {
+    test('Start creates exactly the 2026 roster with a complete automatic draw, points the index at it and leaves H untouched', async () => {
         await seedHistory();
         const H = await history();
         const closed = await closeYear({ year: 2025 });
@@ -379,9 +380,16 @@ describe('year lifecycle (emulator)', () => {
         const users2026 = await docs('years/2026/users');
         expect(users2026.map((user) => user.email).sort()).toEqual(ROSTER_2026.map((p) => p.email).sort());
         users2026.forEach((user) => {
-            expect(user).toMatchObject({ recipientId: null, gifterId: null, oauthId: null, image: null });
+            expect(user).toMatchObject({
+                oauthId: null,
+                image: null,
+                drawMode: 'auto',
+                revealAckRecipientId: null,
+                revealAckAt: null,
+            });
             expect(typeof user.id).toBe('string');
         });
+        expect(isCompletePairing(users2026)).toBe(true);
         await expectIndexResolvesFor(ROSTER_2026, 2026, epoch);
         expect(await history()).toEqual(H);
 

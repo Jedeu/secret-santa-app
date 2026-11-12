@@ -11,6 +11,7 @@ import { resetTypingState } from '@/lib/typing-client';
 import { clearYearArchiveCache } from '@/hooks/useYearArchive';
 import { interpretLifecycle, lifecycleKey } from '@/lib/year-paths';
 import { setWritableScope, yearDocRef } from '@/lib/year-client';
+import { getRevealState } from '@/lib/recipient-reveal';
 
 /**
  * Single owner of auth + profile + season state.
@@ -30,6 +31,15 @@ import { setWritableScope, yearDocRef } from '@/lib/year-client';
  * publication also publishes the writable scope (src/lib/year-client.js), which is set
  * only while ready in an active year.
  *
+ * Reveal acknowledgment: acknowledgeReveal() asks POST /api/reveal/acknowledge to record
+ * the one-time recipient reveal for the published (account, profile, year, epoch,
+ * recipient). One operation at a time, one 15 s deadline (including one 401 retry), and
+ * a synchronous, idempotent settlement that fences every later token request, fetch,
+ * bootstrap and publication. Every publication reconciles the operation in flight
+ * (applyState). For one tuple the acknowledgment is monotonic within a page session:
+ * bootstrap responses and profile snapshots never turn it back to pending
+ * (keepAcknowledgment). The existing profile listener synchronizes it across tabs.
+ *
  * The server (/api/auth/bootstrap) resolves or creates the UUID profile; the client
  * never queries or writes `users` to establish identity.
  */
@@ -43,6 +53,8 @@ const MAX_TRANSIENT_ATTEMPTS = 5;
 const MAX_LIFECYCLE_MISMATCHES = 3;
 const CLIENT_VERSION_HEADER = 'X-Secret-Santa-Client';
 const CLIENT_VERSION = '2';
+const REVEAL_ACK_URL = '/api/reveal/acknowledge';
+const REVEAL_ACK_TIMEOUT_MS = 15000;
 
 const SIGNED_OUT_STATE = {
     status: 'signed-out',
@@ -104,6 +116,78 @@ function cancelSessionWork() {
     clearYearArchiveCache();
 }
 
+/**
+ * Scope of a pending reveal for a published state, or null:
+ * { authUid, userId, year, epoch, recipientId } when the state is ready, the season is
+ * active and the user's reveal is pending.
+ */
+function revealScopeOf(state) {
+    if (state?.status !== 'ready' || !state.user || !state.season || state.season.state !== 'active') {
+        return null;
+    }
+    if (getRevealState(state.user) !== 'pending') {
+        return null;
+    }
+    return {
+        authUid: state.authUid,
+        userId: state.user.id,
+        year: state.season.year,
+        epoch: state.season.epoch,
+        recipientId: state.user.recipientId,
+    };
+}
+
+/**
+ * True when the state is ready in an active season with the same authUid, user.id,
+ * season.year, season.epoch and user.recipientId as scope (pending or already
+ * acknowledged).
+ */
+function matchesRevealScope(state, scope) {
+    return !!scope
+        && state?.status === 'ready'
+        && !!state.user
+        && !!state.season
+        && state.season.state === 'active'
+        && state.authUid === scope.authUid
+        && state.user.id === scope.userId
+        && state.season.year === scope.year
+        && state.season.epoch === scope.epoch
+        && state.user.recipientId === scope.recipientId;
+}
+
+/**
+ * Acknowledgment is monotonic for one profile and recipient: an incoming pending user
+ * keeps the held acknowledgment when the held user is the same profile with the same
+ * recipient and already acknowledged. Anything else (including an incoming 'invalid' or
+ * 'manual' profile) returns incomingUser unchanged.
+ */
+function keepAcknowledgment(heldUser, incomingUser) {
+    if (!heldUser || !incomingUser) return incomingUser;
+    if (heldUser.id !== incomingUser.id || heldUser.recipientId !== incomingUser.recipientId) {
+        return incomingUser;
+    }
+    if (getRevealState(heldUser) !== 'acknowledged' || getRevealState(incomingUser) !== 'pending') {
+        return incomingUser;
+    }
+    return {
+        ...incomingUser,
+        revealAckRecipientId: heldUser.revealAckRecipientId,
+        revealAckAt: heldUser.revealAckAt ?? null,
+    };
+}
+
+/**
+ * Ends an acknowledgment operation. Synchronous and idempotent; awaits nothing.
+ */
+function settleRevealAck(holder, op, result) {
+    if (op.settled) return;
+    op.settled = true; // the abandonment fence
+    clearTimeout(op.timer);
+    try { op.controller?.abort(); } catch { /* ignore */ }
+    if (holder.current === op) holder.current = null;
+    op.resolve(result);
+}
+
 export function UserProvider({ children }) {
     const [state, setState] = useState({ ...SIGNED_OUT_STATE, status: 'loading' });
 
@@ -122,8 +206,13 @@ export function UserProvider({ children }) {
     const mismatchCountRef = useRef(0);
     const handleProfileLossRef = useRef(null);
 
+    // The reveal acknowledgment operation in flight (see acknowledgeReveal), or null.
+    const revealAckRef = useRef(null);
+
     /**
      * Synchronous publication; the updater is pure and called exactly once.
+     * Also reconciles the acknowledgment operation in flight: a publication that leaves
+     * its scope abandons it ('stale'); one that shows it acknowledged settles it.
      */
     const applyState = useCallback((updater) => {
         const prev = stateRef.current;
@@ -131,6 +220,14 @@ export function UserProvider({ children }) {
         if (next === prev) return;
         stateRef.current = next;
         setWritableScope(scopeFor(next));
+        const op = revealAckRef.current;
+        if (op) {
+            if (!matchesRevealScope(next, op.scope)) {
+                settleRevealAck(revealAckRef, op, { status: 'stale' });
+            } else if (getRevealState(next.user) === 'acknowledged') {
+                settleRevealAck(revealAckRef, op, { status: 'acknowledged' });
+            }
+        }
         if (mountedRef.current) setState(next);
     }, []);
 
@@ -315,14 +412,22 @@ export function UserProvider({ children }) {
                 }
 
                 mismatchCountRef.current = 0;
-                applyState((prev) => ({
-                    ...prev,
-                    status: 'ready',
-                    user: data.user,
-                    authUid: firebaseUser.uid,
-                    season,
-                    error: null,
-                }));
+                applyState((prev) => {
+                    // Same account, year and epoch: a pending response for the same profile
+                    // and recipient never undoes an acknowledgment already published.
+                    const held = prev.status === 'ready' && prev.authUid === firebaseUser.uid
+                        && prev.season?.year === season.year && prev.season?.epoch === season.epoch
+                        ? prev.user
+                        : null;
+                    return {
+                        ...prev,
+                        status: 'ready',
+                        user: keepAcknowledgment(held, data.user),
+                        authUid: firebaseUser.uid,
+                        season,
+                        error: null,
+                    };
+                });
                 return;
             }
 
@@ -458,6 +563,9 @@ export function UserProvider({ children }) {
             mountedRef.current = false;
             authGenerationRef.current += 1;
             clearRetryTimer();
+            if (revealAckRef.current) {
+                settleRevealAck(revealAckRef, revealAckRef.current, { status: 'stale' });
+            }
             setWritableScope(null);
             unsubscribeLifecycle();
             if (typeof unsubscribe === 'function') {
@@ -489,11 +597,16 @@ export function UserProvider({ children }) {
                     const updatedUser = docSnapshot.data() || {};
                     applyState((prev) => {
                         if (!active || !prev.user || prev.user.id !== userId) return prev;
-                        if (prev.user.recipientId !== updatedUser.recipientId
-                            || prev.user.gifterId !== updatedUser.gifterId) {
-                            return { ...prev, user: { ...updatedUser, id: updatedUser.id ?? userId } };
-                        }
-                        return prev; // No change, avoid unnecessary re-renders
+                        // Cached or server-flagged alike: a pending snapshot for the same
+                        // profile and recipient never undoes a published acknowledgment.
+                        const next = keepAcknowledgment(prev.user, { ...updatedUser, id: updatedUser.id ?? userId });
+                        const pairingChanged = prev.user.recipientId !== next.recipientId
+                            || prev.user.gifterId !== next.gifterId;
+                        const modeChanged = (prev.user.drawMode ?? null) !== (next.drawMode ?? null);
+                        const ackChanged = (prev.user.revealAckRecipientId ?? null) !== (next.revealAckRecipientId ?? null);
+                        // A revealAckAt-only difference is deliberately ignored.
+                        if (!pairingChanged && !modeChanged && !ackChanged) return prev; // No change, avoid unnecessary re-renders
+                        return { ...prev, user: next };
                     });
                     return;
                 }
@@ -560,6 +673,172 @@ export function UserProvider({ children }) {
         startBootstrapNow(current.status === 'ready' ? 'refresh' : 'initial');
     }, [applyState, startBootstrapNow]);
 
+    /**
+     * Confirm the one-time recipient reveal on the server for the published scope.
+     *
+     * Not async on purpose: a second call for the same scope while one is in flight
+     * returns the exact same promise. The returned promise is the operation's own and
+     * settles only through settleRevealAck (result, 15 s deadline, scope change or
+     * unmount), never later. It never rejects.
+     *
+     * @returns {Promise<{ status: 'acknowledged'|'stale'|'failed', code?: string }>}
+     */
+    const acknowledgeReveal = useCallback(() => {
+        const scope = revealScopeOf(stateRef.current);
+        const firebaseUser = firebaseUserRef.current;
+        if (!scope || !firebaseUser || firebaseUser.uid !== scope.authUid) {
+            return Promise.resolve({ status: 'stale' });
+        }
+
+        const key = [scope.authUid, scope.userId, scope.year, scope.epoch, scope.recipientId].join('|');
+        const held = revealAckRef.current;
+        if (held && held.key === key) {
+            return held.promise;
+        }
+        if (held) {
+            settleRevealAck(revealAckRef, held, { status: 'stale' });
+        }
+
+        let resolve;
+        const promise = new Promise((r) => { resolve = r; });
+        const op = {
+            key,
+            scope,
+            generation: authGenerationRef.current,
+            settled: false,
+            retried: false,
+            controller: typeof AbortController === 'function' ? new AbortController() : null,
+            timer: null,
+            resolve,
+            promise,
+        };
+        op.timer = setTimeout(
+            () => settleRevealAck(revealAckRef, op, { status: 'failed', code: 'TIMEOUT' }),
+            REVEAL_ACK_TIMEOUT_MS
+        );
+        revealAckRef.current = op;
+
+        const settle = (result) => settleRevealAck(revealAckRef, op, result);
+        const isLive = () => !op.settled
+            && mountedRef.current
+            && op.generation === authGenerationRef.current
+            && matchesRevealScope(stateRef.current, op.scope);
+        // Checkpoint: false (and settled 'stale' if needed) when the operation has ended.
+        const passes = () => {
+            if (op.settled) return false;
+            if (!isLive()) {
+                settle({ status: 'stale' });
+                return false;
+            }
+            return true;
+        };
+
+        // Every getIdToken, fetch and startBootstrapNow below runs in the same synchronous
+        // block as a passed checkpoint, so none can start after the operation is settled.
+        const work = async () => {
+            let forceRefresh = false;
+            for (;;) {
+                let token;
+                try {
+                    token = await firebaseUser.getIdToken(forceRefresh);
+                } catch {
+                    if (op.settled) return;
+                    settle({ status: 'failed', code: 'NETWORK' });
+                    return;
+                }
+
+                // Checkpoint A: after the token, immediately before fetch.
+                if (!passes()) return;
+                if (typeof token !== 'string' || !token) {
+                    settle({ status: 'failed', code: 'AUTH' });
+                    return;
+                }
+
+                let response;
+                try {
+                    response = await fetch(REVEAL_ACK_URL, {
+                        method: 'POST',
+                        headers: {
+                            Authorization: 'Bearer ' + token,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            year: scope.year,
+                            epoch: scope.epoch,
+                            userId: scope.userId,
+                            recipientId: scope.recipientId,
+                        }),
+                        signal: op.controller ? op.controller.signal : undefined,
+                    });
+                } catch {
+                    if (op.settled) return;
+                    settle({ status: 'failed', code: 'NETWORK' });
+                    return;
+                }
+
+                // Checkpoint B: after the headers.
+                if (!passes()) return;
+
+                let data = null;
+                try {
+                    data = await response.json();
+                } catch {
+                    data = null;
+                }
+
+                // Checkpoint C: after the body. Classification below is synchronous.
+                if (!passes()) return;
+
+                if (response.status === 401) {
+                    if (op.retried) {
+                        settle({ status: 'failed', code: 'UNAUTHENTICATED' });
+                        return;
+                    }
+                    // One retry with a forced token, under the same deadline.
+                    op.retried = true;
+                    forceRefresh = true;
+                    continue;
+                }
+
+                if (response.ok
+                    && data?.success === true
+                    && data.year === scope.year
+                    && data.epoch === scope.epoch
+                    && data.userId === scope.userId
+                    && data.recipientId === scope.recipientId) {
+                    const acknowledgedAt = typeof data.acknowledgedAt === 'string' ? data.acknowledgedAt : null;
+                    applyState((prev) => (
+                        matchesRevealScope(prev, op.scope) && getRevealState(prev.user) === 'pending'
+                            ? {
+                                ...prev,
+                                user: {
+                                    ...prev.user,
+                                    revealAckRecipientId: op.scope.recipientId,
+                                    revealAckAt: acknowledgedAt,
+                                },
+                            }
+                            : prev
+                    ));
+                    settle({ status: 'acknowledged' });
+                    return;
+                }
+
+                if (response.status === 403 || response.status === 409) {
+                    startBootstrapNow('refresh');
+                    settle({ status: 'failed', code: data?.code ?? 'CONFLICT' });
+                    return;
+                }
+
+                // 400, 5xx, or a malformed or mismatched 2xx.
+                settle({ status: 'failed', code: data?.code ?? 'REQUEST_FAILED' });
+                return;
+            }
+        };
+
+        work().catch(() => settle({ status: 'failed', code: 'NETWORK' }));
+        return op.promise;
+    }, [applyState, startBootstrapNow]);
+
     const value = useMemo(() => ({
         user: state.user,
         authUid: state.authUid,
@@ -568,7 +847,8 @@ export function UserProvider({ children }) {
         loading: state.status === 'loading',
         error: state.error,
         refreshUser,
-    }), [state, refreshUser]);
+        acknowledgeReveal,
+    }), [state, refreshUser, acknowledgeReveal]);
 
     return (
         <UserContext.Provider value={value}>

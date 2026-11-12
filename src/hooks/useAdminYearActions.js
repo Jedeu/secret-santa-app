@@ -77,7 +77,7 @@ export function useAdminYearActions({ onComplete } = {}) {
     const startYear = useCallback((fromYear, targetYear, rosterNames) => {
         const names = Array.isArray(rosterNames) ? rosterNames : [];
         return run({
-            promptText: `Start the ${targetYear} exchange?\n\n${names.length} participants: ${names.join(', ')}.\nAnyone not on this list loses access to the app. Everyone picks a new recipient. ${fromYear} stays in Archives.\n\nType ${targetYear} to confirm.`,
+            promptText: `Start the ${targetYear} exchange?\n\n${names.length} participants: ${names.join(', ')}.\nAnyone not on this list loses access to the app. Recipients are drawn automatically, and each participant sees theirs once when they next open the app. ${fromYear} stays in Archives.\n\nType ${targetYear} to confirm.`,
             expected: String(targetYear),
             url: '/api/admin/year/start',
             body: { fromYear, targetYear },

@@ -12,10 +12,12 @@ import {
 import { getConversationId, filterMessages, buildViewerAssignmentMap } from '@/lib/message-utils';
 import { getRosterNames } from '@/lib/participants';
 import { yearCollectionRef } from '@/lib/year-client';
+import { getRevealState } from '@/lib/recipient-reveal';
 
 // Component imports
 import AuthGuard from '@/components/AuthGuard';
 import RecipientSelector from '@/components/RecipientSelector';
+import RecipientReveal from '@/components/RecipientReveal';
 import AdminPanel from '@/components/AdminPanel';
 import TabNavigation from '@/components/TabNavigation';
 import ChatTabs from '@/components/ChatTabs';
@@ -27,6 +29,7 @@ import MessageOutboxRuntime from '@/components/MessageOutboxRuntime';
 import NotificationSoundRuntime from '@/components/NotificationSoundRuntime';
 
 const EMPTY_USERS = [];
+const USERS_FETCH_TIMEOUT_MS = 10000;
 
 function handleSignOut() {
     signOutCurrentUser().catch((error) => {
@@ -43,7 +46,8 @@ export default function Home() {
         season,
         loading: isLoading,
         error: authError,
-        refreshUser
+        refreshUser,
+        acknowledgeReveal
     } = useUser();
 
     // Season (year) state
@@ -53,7 +57,9 @@ export default function Home() {
     const archiveYears = [...closedYears].sort((a, b) => b - a);
 
     // UI state
-    const [showArchive, setShowArchive] = useState(false);
+    // "Browse past years" before choosing or confirming a recipient applies only to the
+    // users scope (account, profile, year, epoch) in which it was pressed.
+    const [archiveScopeKey, setArchiveScopeKey] = useState(null);
     const [activeTab, setActiveTab] = useState('recipient');
     const [soundEnabled, setSoundEnabled] = useState(() => {
         if (typeof window === 'undefined') {
@@ -118,27 +124,60 @@ export default function Home() {
 
     // Users fetch: scoped to (account, profile, year, epoch), guarded per effect run, and
     // stored tagged with its scope key. Only a result for the current key is ever used.
+    // A rejection or a 10 s timeout marks the scope failed, but never discards a list that
+    // already loaded for this scope; a later success still replaces a failed result.
     const usersScopeKey = currentUser && yearOpen
         ? `${authUid}|${currentUser.id}|${seasonYear}|${season.epoch}`
         : null;
-    const [usersResult, setUsersResult] = useState({ key: null, users: EMPTY_USERS });
+    const [usersResult, setUsersResult] = useState({ key: null, users: EMPTY_USERS, failed: false });
+    const [usersReload, setUsersReload] = useState(0);
+    const showArchive = usersScopeKey !== null && archiveScopeKey === usersScopeKey;
 
     useEffect(() => {
         if (!usersScopeKey) return undefined;
         let active = true;
+        const markFailed = () => {
+            setUsersResult((prev) => (prev.key === usersScopeKey && !prev.failed
+                ? prev
+                : { key: usersScopeKey, users: EMPTY_USERS, failed: true }));
+        };
+        let timer = setTimeout(() => {
+            timer = null;
+            if (active) markFailed();
+        }, USERS_FETCH_TIMEOUT_MS);
+        const clearTimer = () => {
+            if (timer !== null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        };
         getDocs(yearCollectionRef(seasonYear, 'users'))
             .then((snapshot) => {
+                clearTimer();
                 if (!active) return;
-                setUsersResult({ key: usersScopeKey, users: snapshot.docs.map((d) => d.data()) });
+                setUsersResult({ key: usersScopeKey, users: snapshot.docs.map((d) => d.data()), failed: false });
             })
             .catch((error) => {
-                if (active) console.error('Failed to fetch users:', error);
+                clearTimer();
+                if (!active) return;
+                console.error('Failed to fetch users:', error);
+                markFailed();
             });
-        return () => { active = false; };
-    }, [currentUser, usersScopeKey, seasonYear]);
+        return () => {
+            active = false;
+            clearTimer();
+        };
+    }, [currentUser, usersScopeKey, seasonYear, usersReload]);
 
-    const usersLoaded = usersScopeKey !== null && usersResult.key === usersScopeKey;
+    const usersSettled = usersScopeKey !== null && usersResult.key === usersScopeKey;
+    const usersLoaded = usersSettled && !usersResult.failed;
+    const usersFailed = usersSettled && usersResult.failed;
     const allUsers = usersLoaded ? usersResult.users : EMPTY_USERS;
+
+    const retryUsers = useCallback(() => {
+        setUsersResult((prev) => (prev.failed ? { key: null, users: EMPTY_USERS, failed: false } : prev));
+        setUsersReload((n) => n + 1);
+    }, []);
     const currentUserName = currentUser?.name ?? '';
     const availableRecipients = useMemo(() => {
         if (!usersLoaded) return [];
@@ -150,8 +189,22 @@ export default function Home() {
         });
     }, [usersLoaded, allUsers, currentUserName, seasonYear]);
 
-    // Check if user needs to set recipient
-    const needsRecipient = currentUser && !currentUser.recipientId;
+    // Automatic draw: a pending or unusable automatic profile is gated by the reveal.
+    // Manual profiles (no drawMode) choose a recipient as before.
+    const revealState = getRevealState(currentUser);
+    const revealGate = !!currentUser && (revealState === 'pending' || revealState === 'invalid');
+    const needsRecipient = currentUser && revealState === 'manual' && !currentUser.recipientId;
+
+    // The recipient's name comes only from the row whose id is the caller's recipientId in
+    // the users result for the current scope.
+    const revealRow = revealState === 'pending' && usersLoaded
+        ? allUsers.find((u) => u?.id === currentUser.recipientId)
+        : null;
+    const revealRecipientName = typeof revealRow?.name === 'string' && revealRow.name.trim() ? revealRow.name : null;
+    const revealStatus = revealState === 'invalid' ? 'invalid'
+        : usersFailed ? 'error'
+        : !usersLoaded ? 'loading'
+        : revealRecipientName ? 'ready' : 'error';
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -191,8 +244,8 @@ export default function Home() {
                 />
             </main>
         );
-    } else if (needsRecipient && showArchive && archiveYears.length > 0) {
-        // 2. Browsing past years before choosing a recipient.
+    } else if ((needsRecipient || revealGate) && showArchive && archiveYears.length > 0) {
+        // 2. Browsing past years before choosing or confirming a recipient.
         body = (
             <main className="container" style={{ flexDirection: 'column' }}>
                 {standaloneHeader}
@@ -201,12 +254,27 @@ export default function Home() {
                     years={archiveYears}
                     initialYear={archiveYears[0]}
                     closedYears={closedYears}
-                    onBack={() => setShowArchive(false)}
+                    onBack={() => setArchiveScopeKey(null)}
                 />
             </main>
         );
+    } else if (revealGate) {
+        // 3. One-time reveal of the recipient drawn at Start (or the unavailable card).
+        body = (
+            <RecipientReveal
+                key={`${usersScopeKey}|${currentUser.recipientId ?? ''}`}
+                currentUser={currentUser}
+                year={seasonYear}
+                status={revealStatus}
+                recipientName={revealRecipientName}
+                onAcknowledge={acknowledgeReveal}
+                onRetry={revealState === 'invalid' ? refreshUser : retryUsers}
+                adminControl={adminControl}
+                onBrowseArchive={archiveYears.length > 0 ? () => setArchiveScopeKey(usersScopeKey) : null}
+            />
+        );
     } else if (needsRecipient) {
-        // 3. Choose a recipient in the open year.
+        // 4. Choose a recipient in the open year (manual years).
         body = (
             <RecipientSelector
                 currentUser={currentUser}
@@ -214,11 +282,11 @@ export default function Home() {
                 year={seasonYear}
                 onComplete={refreshUser}
                 adminControl={adminControl}
-                onBrowseArchive={archiveYears.length > 0 ? () => setShowArchive(true) : null}
+                onBrowseArchive={archiveYears.length > 0 ? () => setArchiveScopeKey(usersScopeKey) : null}
             />
         );
     } else {
-        // 4. Chats in the open year.
+        // 5. Chats in the open year.
         body = (
             <main className="container">
                 {/* Desktop Sidebar */}
