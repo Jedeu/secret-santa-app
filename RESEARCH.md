@@ -2,6 +2,8 @@
 
 ## Request, workflow and boundaries
 
+**PR integration update (2026-11-12):** #64 was squash-merged as `c2c3530`, and #65 now targets `main`. Merging `origin/main` produced conflicts only in the root `PLAN.md` and `RESEARCH.md`; the current notification versions were retained. Before adding this execution note, the entire staged tree was identical to the previously verified notification HEAD (`62f668b`), so no runtime/test changes or new application verification claims result. Owner-file hashes were unchanged. Earlier notes about waiting for #64 or retargeting #65 are historical; the normal conflict-resolution push triggers CI on the current `main` target.
+
 The owner reports that after adding the app to the iPhone Home Screen, tapping Enable notifications leaves the control stuck on “Saving…”. The owner requested investigating this after completing the year-transition flag-removal PR.
 
 That separate change is complete: PR **#64**, https://github.com/Jedeu/secret-santa-app/pull/64, commit `7080d5b`. Its primary checks passed (725 unit/API, 48 lifecycle integration, lint/build). At the latest GitHub check, **all checks passed**, including Vercel preview, lint, unit, integration and E2E. It is not part of this notification change.
