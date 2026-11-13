@@ -25,6 +25,7 @@ const APP_COLLECTIONS = [
     'typing',
     'reactions',
     'pushTokens',
+    'mediaUploads',
 ];
 
 function isLoopbackHost(host) {

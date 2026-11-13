@@ -187,6 +187,46 @@ describe('ArchiveViewer', () => {
         expect(reload).toHaveBeenCalledTimes(1);
     });
 
+    test('a message with an attachment renders the image and the preview label', () => {
+        const attachment = {
+            id: '3f2b8c1d-5e6a-4b7c-9d8e-1f2a3b4c5d6e',
+            kind: 'image',
+            provider: 'cloudinary',
+            cloudName: 'unit-cloud',
+            publicId: 'ss-2025-3f2b8c1d-5e6a-4b7c-9d8e-1f2a3b4c5d6e',
+            version: 1700000000,
+            format: 'gif',
+            width: 64,
+            height: 64,
+            bytes: 2048,
+        };
+        const messages = [
+            MESSAGES[0],
+            {
+                id: 'm3',
+                fromId: 'ben',
+                toId: 'ann',
+                content: '',
+                attachment,
+                timestamp: '2025-12-02T10:00:00.000Z',
+                conversationId: 'santa_ann_recipient_ben',
+            },
+        ];
+        useYearArchive.mockReturnValue({ status: 'ready', data: { users: USERS, messages, reactions: REACTIONS }, reload });
+        renderViewer();
+
+        const threads = screen.getAllByTestId('archive-thread');
+        expect(within(threads[0]).getByText('📷 GIF')).toBeInTheDocument();
+
+        fireEvent.click(threads[0]);
+        const rows = screen.getAllByTestId('archive-message');
+        const imageRow = rows.find((row) => within(row).queryByTestId('message-attachment'));
+        const img = within(imageRow).getByTestId('message-attachment');
+        expect(img).toHaveAttribute('src', 'https://res.cloudinary.com/unit-cloud/image/upload/v1700000000/ss-2025-3f2b8c1d-5e6a-4b7c-9d8e-1f2a3b4c5d6e.gif');
+        expect(img).toHaveAttribute('alt', 'GIF');
+        expect(rows.filter((row) => within(row).queryByTestId('message-attachment'))).toHaveLength(1);
+    });
+
     test('the year select switches the requested year', () => {
         renderViewer({ years: [2026, 2025], initialYear: 2026, closedYears: [2025, 2026] });
         expect(useYearArchive).toHaveBeenLastCalledWith({ authUid: 'uid-a', year: 2026, immutable: true });

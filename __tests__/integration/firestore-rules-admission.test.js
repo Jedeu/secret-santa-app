@@ -108,6 +108,8 @@ describe('firestore rules: admission, lifecycle and reciprocal claims', () => {
         const db = authedDb(testEnv, 'user-a', 'user-a@example.test');
         await assertFails(getDoc(doc(db, 'authIdentities', 'user-a')));
         await assertFails(getDoc(doc(db, 'participantIndex', 'user-a@example.test')));
+        await assertFails(getDoc(doc(db, 'mediaUploads', 'x')));
+        await assertFails(setDoc(doc(db, 'mediaUploads', 'x'), { id: 'x', status: 'uploaded' }));
     });
 
     test('an admitted participant can get system/lifecycle but never write it', async () => {

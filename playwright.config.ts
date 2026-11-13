@@ -36,5 +36,11 @@ export default defineConfig({
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout: 120000, // 2 minutes to start server
+        env: {
+            CLOUDINARY_CLOUD_NAME: 'e2e-sandbox',
+            CLOUDINARY_API_KEY: 'e2e-key',
+            CLOUDINARY_API_SECRET: 'e2e-secret',
+            MEDIA_UPLOAD_API_BASE: 'http://127.0.0.1:8791',
+        },
     },
 });

@@ -2,6 +2,7 @@
 import {
     MESSAGE_OUTBOX_STORAGE_KEY,
     OUTBOX_ITEM_PREFIX,
+    OUTBOX_MEDIA_ITEM_PREFIX,
     OUTBOX_STATE_PREFIX,
     OUTBOX_DONE_PREFIX,
     enqueueMessage,
@@ -9,6 +10,8 @@ import {
     drainOutboxForUser,
     clearDeliveredOrExpired,
     cancelOutboxDrains,
+    createClientMessageId,
+    subscribeOutbox,
 } from '@/lib/message-outbox';
 
 const mockAuthState = { currentUser: null };
@@ -381,6 +384,207 @@ describe('message-outbox', () => {
 
             expect(window.localStorage.getItem(OUTBOX_DONE_PREFIX + 'old-done')).toBeNull();
             expect(window.localStorage.getItem(OUTBOX_DONE_PREFIX + 'new-done')).toBeTruthy();
+        });
+    });
+
+    describe('media items', () => {
+        const MEDIA_ID = '4fa2bcc4-35df-4cd2-ac69-7632f6fd2472';
+        const ATTACHMENT = {
+            id: '3f2b8c1d-5e6a-4b7c-9d8e-1f2a3b4c5d6e',
+            kind: 'image',
+            provider: 'cloudinary',
+            cloudName: 'unit-cloud',
+            publicId: 'ss-2026-3f2b8c1d-5e6a-4b7c-9d8e-1f2a3b4c5d6e',
+            version: 1700000000,
+            format: 'gif',
+            width: 64,
+            height: 64,
+            bytes: 2048,
+        };
+
+        function enqueueMedia(overrides = {}) {
+            return enqueueMessage({
+                ownerUid: OWNER,
+                fromUserId: FROM,
+                toId: TO,
+                conversationId: CONV,
+                content: 'A caption',
+                attachment: ATTACHMENT,
+                clientMessageId: MEDIA_ID,
+                ...overrides,
+            });
+        }
+
+        function outboxKeys() {
+            const keys = [];
+            for (let i = 0; i < window.localStorage.length; i += 1) {
+                keys.push(window.localStorage.key(i));
+            }
+            return keys.sort();
+        }
+
+        test('createClientMessageId returns a UUID v4', () => {
+            expect(createClientMessageId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+        });
+
+        test('writes only the media-item key, with the 10-key attachment and nothing else', () => {
+            const queued = enqueueMedia({
+                attachment: { ...ATTACHMENT, previewUrl: 'blob:http://localhost/x', blob: { size: 1 }, sha256: 'f'.repeat(64) },
+            });
+
+            expect(outboxKeys()).toEqual([OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID]);
+            expect(window.localStorage.getItem(OUTBOX_ITEM_PREFIX + MEDIA_ID)).toBeNull();
+            const raw = window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID);
+            expect(JSON.parse(raw)).toEqual({
+                clientMessageId: MEDIA_ID,
+                ownerUid: OWNER,
+                fromUserId: FROM,
+                toId: TO,
+                conversationId: CONV,
+                content: 'A caption',
+                createdAt: '2026-02-12T20:00:00.000Z',
+                attachment: ATTACHMENT,
+            });
+            expect(raw.length).toBeLessThan(1024);
+            expect(raw).not.toContain('data:');
+            expect(raw).not.toContain('blob:');
+            expect(raw).not.toContain('sha256');
+            expect(queued).toMatchObject({ clientMessageId: MEDIA_ID, status: 'pending', attachment: ATTACHMENT });
+            expect(pendingItems()).toEqual([expect.objectContaining({ clientMessageId: MEDIA_ID, attachment: ATTACHMENT })]);
+        });
+
+        test('requires a UUID id and a valid attachment', () => {
+            expect(() => enqueueMedia({ clientMessageId: null })).toThrow('Invalid outbox enqueue payload');
+            expect(() => enqueueMedia({ clientMessageId: 'legacy-id' })).toThrow('Invalid outbox enqueue payload');
+            expect(() => enqueueMedia({ attachment: { ...ATTACHMENT, cloudName: 'bad/name' } })).toThrow('Invalid outbox enqueue payload');
+            expect(() => enqueueMedia({ attachment: { id: ATTACHMENT.id } })).toThrow('Invalid outbox enqueue payload');
+            expect(() => enqueueMedia({ ownerUid: null })).toThrow('Invalid outbox enqueue payload');
+            expect(outboxKeys()).toEqual([]);
+        });
+
+        test('an empty caption is allowed with an attachment; text-only empty content still throws', () => {
+            enqueueMedia({ content: '   ' });
+            expect(JSON.parse(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID)).content).toBe('');
+
+            expect(() => enqueue('   ')).toThrow('Invalid outbox enqueue payload');
+            expect(() => enqueue('', { clientMessageId: MEDIA_ID })).toThrow('Invalid outbox enqueue payload');
+        });
+
+        test('a text enqueue ignores clientMessageId and keeps today\'s stored JSON', () => {
+            const queued = enqueue('Plain', { clientMessageId: MEDIA_ID });
+
+            expect(queued.clientMessageId).not.toBe(MEDIA_ID);
+            expect(Object.keys(JSON.parse(window.localStorage.getItem(OUTBOX_ITEM_PREFIX + queued.clientMessageId))).sort())
+                .toEqual(['clientMessageId', 'content', 'conversationId', 'createdAt', 'fromUserId', 'ownerUid', 'toId']);
+        });
+
+        test('a repeat enqueue writes nothing and returns the live item', () => {
+            enqueueMedia();
+            const before = window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID);
+            jest.setSystemTime(new Date('2026-02-12T20:00:05.000Z'));
+            const setItem = jest.spyOn(Storage.prototype, 'setItem');
+
+            const again = enqueueMedia({ content: 'Different caption' });
+
+            expect(setItem).not.toHaveBeenCalled();
+            expect(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID)).toBe(before);
+            expect(again).toMatchObject({ clientMessageId: MEDIA_ID, content: 'A caption' });
+            setItem.mockRestore();
+        });
+
+        test('a tombstoned id writes nothing', () => {
+            window.localStorage.setItem(OUTBOX_DONE_PREFIX + MEDIA_ID, '2026-02-12T19:59:00.000Z');
+
+            const result = enqueueMedia();
+
+            expect(result).toBeNull();
+            expect(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID)).toBeNull();
+        });
+
+        test('a setItem that throws propagates and leaves no key', () => {
+            const setItem = jest.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+                throw new Error('QuotaExceededError');
+            });
+
+            expect(() => enqueueMedia()).toThrow('QuotaExceededError');
+            setItem.mockRestore();
+            expect(outboxKeys()).toEqual([]);
+        });
+
+        test('drain sends attachment: { id } and delivery removes the media key and writes the tombstone', async () => {
+            enqueueMedia();
+            const fetchImpl = jest.fn().mockResolvedValue(makeResponse({ ok: true, status: 200 }));
+
+            const result = await drainOutboxForUser({ ownerUid: OWNER, fromUserId: FROM, fetchImpl });
+
+            expect(result.delivered).toBe(1);
+            expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({
+                toId: TO,
+                content: 'A caption',
+                conversationId: CONV,
+                clientMessageId: MEDIA_ID,
+                clientCreatedAt: '2026-02-12T20:00:00.000Z',
+                senderUserId: FROM,
+                attachment: { id: ATTACHMENT.id },
+            });
+            expect(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID)).toBeNull();
+            expect(window.localStorage.getItem(OUTBOX_DONE_PREFIX + MEDIA_ID)).toBeTruthy();
+            expect(pendingItems()).toHaveLength(0);
+        });
+
+        test('a permanent failure keeps the media item visible as failed', async () => {
+            enqueueMedia();
+            const fetchImpl = jest.fn().mockResolvedValue(makeResponse({ ok: false, status: 400, error: 'Attachment is not available for this message' }));
+
+            await drainOutboxForUser({ ownerUid: OWNER, fromUserId: FROM, fetchImpl });
+
+            const [failed] = pendingItems();
+            expect(failed).toMatchObject({ clientMessageId: MEDIA_ID, status: 'failed', attachment: ATTACHMENT });
+        });
+
+        test('GC removes expired and malformed media items and keeps the state of a live one', () => {
+            const expiredId = '11111111-1111-4111-8111-111111111111';
+            const malformedId = '22222222-2222-4222-8222-222222222222';
+            const base = {
+                ownerUid: OWNER, fromUserId: FROM, toId: TO, conversationId: CONV, content: '', attachment: ATTACHMENT,
+            };
+            window.localStorage.setItem(OUTBOX_MEDIA_ITEM_PREFIX + expiredId, JSON.stringify({
+                ...base, clientMessageId: expiredId, createdAt: '2026-02-01T00:00:00.000Z',
+            }));
+            window.localStorage.setItem(OUTBOX_STATE_PREFIX + expiredId, JSON.stringify({ attemptCount: 1, status: 'pending' }));
+            window.localStorage.setItem(OUTBOX_MEDIA_ITEM_PREFIX + malformedId, JSON.stringify({
+                ...base, clientMessageId: malformedId, createdAt: '2026-02-12T19:00:00.000Z', attachment: { id: 'x' },
+            }));
+            enqueueMedia();
+            window.localStorage.setItem(OUTBOX_STATE_PREFIX + MEDIA_ID, JSON.stringify({ attemptCount: 2, status: 'pending', nextAttemptAt: null }));
+
+            const removed = clearDeliveredOrExpired();
+
+            expect(removed).toBe(2);
+            expect(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + expiredId)).toBeNull();
+            expect(window.localStorage.getItem(OUTBOX_STATE_PREFIX + expiredId)).toBeNull();
+            expect(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + malformedId)).toBeNull();
+            expect(window.localStorage.getItem(OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID)).toBeTruthy();
+            expect(JSON.parse(window.localStorage.getItem(OUTBOX_STATE_PREFIX + MEDIA_ID))).toMatchObject({ attemptCount: 2 });
+        });
+
+        test('a storage event on a media key notifies subscribers', () => {
+            const callback = jest.fn();
+            const unsubscribe = subscribeOutbox(callback);
+
+            window.dispatchEvent(new StorageEvent('storage', { key: OUTBOX_MEDIA_ITEM_PREFIX + MEDIA_ID }));
+            expect(callback).toHaveBeenCalledTimes(1);
+
+            window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated-key' }));
+            expect(callback).toHaveBeenCalledTimes(1);
+            unsubscribe();
+        });
+
+        test('no key under the text item prefix exists for a media item', () => {
+            enqueueMedia();
+            const textKeys = outboxKeys().filter((key) => key.startsWith(OUTBOX_ITEM_PREFIX));
+            expect(textKeys).toEqual([]);
+            expect(OUTBOX_MEDIA_ITEM_PREFIX.startsWith(OUTBOX_ITEM_PREFIX)).toBe(false);
         });
     });
 });

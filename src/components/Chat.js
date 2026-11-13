@@ -8,16 +8,40 @@ import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { useToast } from '@/components/ClientProviders';
 import ReactionPicker from '@/components/ReactionPicker';
 import ReactionChips from '@/components/ReactionChips';
+import MessageAttachment from '@/components/MessageAttachment';
 import {
     enqueueMessage,
     getConversationOutboxMessages,
     subscribeOutbox,
     drainOutboxForUser,
-    retryOutboxMessage
+    retryOutboxMessage,
+    createClientMessageId
 } from '@/lib/message-outbox';
 import { setTyping, clearTyping } from '@/lib/typing-client';
 import { toggleReaction } from '@/lib/reactions-client';
 import { getLatestMessageTimestamp } from '@/lib/message-utils';
+import {
+    getMediaStatus,
+    captureMediaSession,
+    isMediaSessionCurrent,
+    prepareImageForUpload,
+    uploadMessageMedia,
+    describeMediaError
+} from '@/lib/media-client';
+
+const MEDIA_QUEUE_FAILURE_TEXT = "Couldn't queue the message on this device. Press Send to try again.";
+const MEDIA_UPLOAD_FAILURE_TEXT = 'Upload failed. Press Send to try again.';
+const MEDIA_PRIVACY_NOTICE = 'Images are stored at an unlisted link. Anyone who has the link can open it.';
+
+function hasAttachmentObject(message) {
+    return !!message?.attachment && typeof message.attachment === 'object';
+}
+
+function revokePreviewUrl(draft) {
+    if (draft?.previewUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(draft.previewUrl);
+    }
+}
 
 // Dynamically import emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(
@@ -74,6 +98,20 @@ export default function Chat({
         messageId: null,
     });
     const [outboxMessages, setOutboxMessages] = useState([]);
+    // Image attachments. A capability result applies only to the uid it was fetched for.
+    const [mediaStatus, setMediaStatus] = useState({ uid: null, enabled: false });
+    const mediaEnabled = !!authUid && mediaStatus.uid === authUid && mediaStatus.enabled;
+    // null | { phase: 'preparing', clientMessageId }
+    //      | { phase: 'ready'|'uploading'|'error', clientMessageId, blob, mimeType, previewUrl, uploaded, errorText }
+    const [draftMedia, setDraftMedia] = useState(null);
+    const isMediaUploading = draftMedia?.phase === 'uploading';
+    const isMediaPreparing = draftMedia?.phase === 'preparing';
+    const draftMediaRef = useRef(null);
+    const uploadTokenRef = useRef(0);
+    const uploadAbortRef = useRef(null);
+    const sendingMediaRef = useRef(false);
+    const mountedRef = useRef(false);
+    const fileInputRef = useRef(null);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
     const emojiPickerRef = useRef(null);
@@ -191,8 +229,242 @@ export default function Chat({
         checkIfRead();
     };
 
+    // Mounted flag for late async results. Unmount revokes the preview URL; it neither
+    // aborts an in-flight upload nor changes the upload token.
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            revokePreviewUrl(draftMediaRef.current);
+        };
+    }, []);
+
+    // Capability probe for this account; a result for another uid is never applied.
+    useEffect(() => {
+        if (!authUid) return undefined;
+        let active = true;
+        Promise.resolve(getMediaStatus({ ownerUid: authUid }))
+            .then((enabled) => {
+                if (active && enabled === true) {
+                    setMediaStatus({ uid: authUid, enabled: true });
+                }
+            })
+            .catch(() => { });
+        return () => {
+            active = false;
+        };
+    }, [authUid]);
+
+    // Every draft change goes through here; state is set only while mounted.
+    const setDraft = (next) => {
+        draftMediaRef.current = next;
+        if (mountedRef.current) {
+            setDraftMedia(next);
+        }
+    };
+
+    const attachFile = async (file) => {
+        if (!file) return;
+        const current = draftMediaRef.current;
+        if (current?.phase === 'uploading') {
+            showToast('An image is uploading. Remove it before attaching another.');
+            return;
+        }
+
+        revokePreviewUrl(current);
+        const clientMessageId = createClientMessageId();
+        setDraft({ phase: 'preparing', clientMessageId });
+
+        let prepared = null;
+        let failure = null;
+        try {
+            prepared = await prepareImageForUpload(file);
+        } catch (error) {
+            failure = error;
+        }
+
+        // Apply only to this same draft, still preparing, in a mounted composer.
+        const latest = draftMediaRef.current;
+        if (!mountedRef.current || latest?.phase !== 'preparing' || latest.clientMessageId !== clientMessageId) {
+            return;
+        }
+        if (failure || !prepared?.blob) {
+            setDraft(null);
+            showToast(describeMediaError(failure));
+            return;
+        }
+        setDraft({
+            phase: 'ready',
+            clientMessageId,
+            blob: prepared.blob,
+            mimeType: prepared.mimeType,
+            previewUrl: URL.createObjectURL(prepared.blob),
+            uploaded: null,
+            errorText: null,
+        });
+    };
+
+    const handlePaste = (event) => {
+        if (!mediaEnabled) return;
+        const files = event.clipboardData?.files;
+        if (!files || !files.length) return;
+        let image = null;
+        for (let i = 0; i < files.length; i += 1) {
+            const file = files[i];
+            if (file && typeof file.type === 'string' && file.type.startsWith('image/')) {
+                image = file;
+                break;
+            }
+        }
+        if (!image) return;
+        event.preventDefault();
+        attachFile(image);
+    };
+
+    const handleFileChange = (event) => {
+        const input = event.target;
+        const file = input?.files?.[0] || null;
+        if (input) {
+            input.value = '';
+        }
+        if (file) {
+            attachFile(file);
+        }
+    };
+
+    const removeDraftMedia = () => {
+        // Invalidate first, then abort: a late result or error is ignored by the token.
+        uploadTokenRef.current += 1;
+        const controller = uploadAbortRef.current;
+        uploadAbortRef.current = null;
+        if (controller) {
+            controller.abort();
+        }
+        sendingMediaRef.current = false;
+        revokePreviewUrl(draftMediaRef.current);
+        setDraft(null);
+    };
+
+    const sendDraftMedia = async (draft) => {
+        if (sendingMediaRef.current || draft.phase === 'preparing') return;
+
+        const session = captureMediaSession({ ownerUid: authUid, fromUserId: currentUser.id });
+        if (!session || !otherUser?.id || !conversationId) {
+            showToast('Failed to queue message. Please try again.');
+            return;
+        }
+
+        if (!draft.uploaded && typeof navigator !== 'undefined' && navigator.onLine === false) {
+            showToast(describeMediaError({ code: 'OFFLINE' }));
+            return;
+        }
+
+        const captured = {
+            ownerUid: authUid,
+            fromUserId: currentUser.id,
+            toId: otherUser.id,
+            conversationId,
+            content: newMessage.trim(),
+            clientMessageId: draft.clientMessageId,
+        };
+        uploadTokenRef.current += 1;
+        const token = uploadTokenRef.current;
+        const isTokenCurrent = () => uploadTokenRef.current === token;
+        sendingMediaRef.current = true;
+        clearTyping(captured.fromUserId, captured.conversationId);
+
+        // Own-draft rule: after a stale-session result, clear only this composer's draft,
+        // only while mounted and only while this send is still the current one.
+        const clearOwnDraft = () => {
+            if (!mountedRef.current || !isTokenCurrent()) return;
+            revokePreviewUrl(draftMediaRef.current);
+            setDraft(null);
+        };
+
+        try {
+            let attachment = draft.uploaded;
+            if (!attachment) {
+                const controller = new AbortController();
+                uploadAbortRef.current = controller;
+                setDraft({ ...draft, phase: 'uploading', uploaded: null, errorText: null });
+                setShowEmojiPicker(false);
+                try {
+                    attachment = await uploadMessageMedia({
+                        session,
+                        fromUserId: captured.fromUserId,
+                        toId: captured.toId,
+                        conversationId: captured.conversationId,
+                        clientMessageId: captured.clientMessageId,
+                        blob: draft.blob,
+                        mimeType: draft.mimeType,
+                        signal: controller.signal,
+                    });
+                } catch (error) {
+                    if (!isTokenCurrent()) return;
+                    if (error?.code === 'SESSION_CHANGED' || !isMediaSessionCurrent(session)) {
+                        clearOwnDraft();
+                        return;
+                    }
+                    if (error?.code === 'MESSAGE_ALREADY_SENT') {
+                        if (mountedRef.current) {
+                            revokePreviewUrl(draftMediaRef.current);
+                            setDraft(null);
+                        }
+                        return;
+                    }
+                    if (mountedRef.current) {
+                        setDraft({ ...draft, phase: 'error', uploaded: null, errorText: MEDIA_UPLOAD_FAILURE_TEXT });
+                    }
+                    showToast(describeMediaError(error));
+                    return;
+                } finally {
+                    if (uploadAbortRef.current === controller) {
+                        uploadAbortRef.current = null;
+                    }
+                }
+            }
+
+            // Stale checks before any effect.
+            if (!isTokenCurrent()) return;
+            if (!isMediaSessionCurrent(session)) {
+                clearOwnDraft();
+                return;
+            }
+
+            try {
+                enqueueMessage({ ...captured, attachment });
+            } catch (error) {
+                console.error('Error enqueuing image message:', error);
+                if (mountedRef.current) {
+                    setDraft({ ...draft, phase: 'error', uploaded: attachment, errorText: MEDIA_QUEUE_FAILURE_TEXT });
+                }
+                showToast(MEDIA_QUEUE_FAILURE_TEXT);
+                return;
+            }
+
+            drainOutboxForUser({ ownerUid: captured.ownerUid, fromUserId: captured.fromUserId }).catch((error) => {
+                console.error('Outbox drain failed after enqueue:', error);
+            });
+            if (mountedRef.current) {
+                revokePreviewUrl(draftMediaRef.current);
+                setDraft(null);
+                setNewMessage('');
+                scrollToBottom('auto');
+            }
+        } finally {
+            if (isTokenCurrent()) {
+                sendingMediaRef.current = false;
+            }
+        }
+    };
+
     const sendMessage = async (e) => {
         e.preventDefault();
+        const draft = draftMediaRef.current;
+        if (draft) {
+            await sendDraftMedia(draft);
+            return;
+        }
         const content = newMessage.trim();
         if (!content) {
             clearTyping(currentUser.id, conversationId);
@@ -258,6 +530,12 @@ export default function Chat({
 
     // Handle emoji selection
     const onEmojiClick = (emojiObject) => {
+        // The caption is captured when an image send starts; a queued or still-open
+        // picker must not change it while that send is in flight.
+        if (sendingMediaRef.current) {
+            setShowEmojiPicker(false);
+            return;
+        }
         const emoji = emojiObject.emoji;
         const input = inputRef.current;
         if (input) {
@@ -422,26 +700,31 @@ export default function Chat({
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    <ReactMarkdown
-                                        remarkPlugins={[remarkGfm]}
-                                        components={{
-                                            // Customize link styling
-                                            a: ({ node, ...props }) => (
-                                                <a {...props} style={{
-                                                    color: isMe ? 'white' : 'var(--primary)',
-                                                    textDecoration: 'underline'
-                                                }} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} />
-                                            ),
-                                            // Prevent large headings in messages
-                                            h1: ({ node, ...props }) => <strong {...props} />,
-                                            h2: ({ node, ...props }) => <strong {...props} />,
-                                            h3: ({ node, ...props }) => <strong {...props} />,
-                                            // Break long words
-                                            p: ({ node, ...props }) => <p {...props} style={{ margin: 0, wordBreak: 'break-word' }} />
-                                        }}
-                                    >
-                                        {msg.content}
-                                    </ReactMarkdown>
+                                    {hasAttachmentObject(msg) && (
+                                        <MessageAttachment attachment={msg.attachment} />
+                                    )}
+                                    {msg.content ? (
+                                        <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                            components={{
+                                                // Customize link styling
+                                                a: ({ node, ...props }) => (
+                                                    <a {...props} style={{
+                                                        color: isMe ? 'white' : 'var(--primary)',
+                                                        textDecoration: 'underline'
+                                                    }} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} />
+                                                ),
+                                                // Prevent large headings in messages
+                                                h1: ({ node, ...props }) => <strong {...props} />,
+                                                h2: ({ node, ...props }) => <strong {...props} />,
+                                                h3: ({ node, ...props }) => <strong {...props} />,
+                                                // Break long words
+                                                p: ({ node, ...props }) => <p {...props} style={{ margin: 0, wordBreak: 'break-word' }} />
+                                            }}
+                                        >
+                                            {msg.content}
+                                        </ReactMarkdown>
+                                    ) : null}
                                     {reactionPickerMessageId === msg.id && (
                                         <ReactionPicker
                                             onClose={() => setReactionPickerState({ conversationId, messageId: null })}
@@ -506,6 +789,9 @@ export default function Chat({
                                     fontSize: '14px',
                                     border: isFailed ? '1px solid #dc2626' : '1px dashed rgba(255, 255, 255, 0.45)'
                                 }}>
+                                    {hasAttachmentObject(msg) && (
+                                        <MessageAttachment attachment={msg.attachment} />
+                                    )}
                                     {msg.content}
                                 </div>
                                 <span style={{
@@ -538,22 +824,127 @@ export default function Chat({
             </div>
 
             <form onSubmit={sendMessage} style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}>
+                {draftMedia && (
+                    <div
+                        data-testid="composer-attachment"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px',
+                            border: '1px solid var(--border)',
+                            borderRadius: '8px',
+                            minWidth: 0
+                        }}
+                    >
+                        {draftMedia.phase !== 'preparing' && draftMedia.previewUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                                src={draftMedia.previewUrl}
+                                alt="Attachment preview"
+                                style={{
+                                    maxWidth: '96px',
+                                    maxHeight: '96px',
+                                    objectFit: 'contain',
+                                    borderRadius: '6px',
+                                    display: 'block',
+                                    flexShrink: 0
+                                }}
+                            />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span
+                                data-testid="composer-attachment-status"
+                                aria-live="polite"
+                                style={{ fontSize: '12px', overflowWrap: 'anywhere' }}
+                            >
+                                {draftMedia.phase === 'preparing'
+                                    ? 'Preparing…'
+                                    : draftMedia.phase === 'uploading'
+                                        ? 'Uploading…'
+                                        : draftMedia.phase === 'error'
+                                            ? (draftMedia.errorText || '')
+                                            : ''}
+                            </span>
+                            <span style={{ fontSize: '10px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                                {MEDIA_PRIVACY_NOTICE}
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            aria-label="Remove image"
+                            title="Remove image"
+                            onClick={removeDraftMedia}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--text-muted)',
+                                fontSize: '18px',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                lineHeight: 1,
+                                flexShrink: 0
+                            }}
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <div style={{ position: 'relative', flex: 1 }}>
                         <input
                             ref={inputRef}
                             type="text"
                             className="input"
-                            style={{ marginBottom: 0, paddingRight: '45px' }}
+                            style={{ marginBottom: 0, paddingRight: mediaEnabled ? '80px' : '45px' }}
                             value={newMessage}
                             onChange={handleInputChange}
                             onBlur={() => clearTyping(currentUser.id, conversationId)}
+                            onPaste={handlePaste}
+                            disabled={isMediaUploading}
                             placeholder="Type a message..."
                         />
+                        {mediaEnabled && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    aria-label="Attach image"
+                                    title="Attach image"
+                                    disabled={isMediaUploading}
+                                    style={{
+                                        position: 'absolute',
+                                        right: '40px',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        fontSize: '20px',
+                                        cursor: isMediaUploading ? 'default' : 'pointer',
+                                        padding: '4px',
+                                        lineHeight: 1,
+                                        opacity: isMediaUploading ? 0.5 : 1
+                                    }}
+                                >
+                                    📎
+                                </button>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/gif"
+                                    data-testid="composer-file-input"
+                                    onChange={handleFileChange}
+                                    tabIndex={-1}
+                                    aria-hidden="true"
+                                    style={{ display: 'none' }}
+                                />
+                            </>
+                        )}
                         <button
                             type="button"
                             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                             aria-label="Add emoji"
+                            disabled={isMediaUploading}
                             style={{
                                 position: 'absolute',
                                 right: '8px',
@@ -562,16 +953,24 @@ export default function Chat({
                                 background: 'transparent',
                                 border: 'none',
                                 fontSize: '20px',
-                                cursor: 'pointer',
+                                cursor: isMediaUploading ? 'default' : 'pointer',
                                 padding: '4px',
-                                lineHeight: 1
+                                lineHeight: 1,
+                                opacity: isMediaUploading ? 0.5 : 1
                             }}
                             title="Add emoji"
                         >
                             😊
                         </button>
                     </div>
-                    <button type="submit" className="btn" style={{ width: 'auto' }}>Send</button>
+                    <button
+                        type="submit"
+                        className="btn"
+                        style={{ width: 'auto' }}
+                        disabled={isMediaUploading || isMediaPreparing}
+                    >
+                        Send
+                    </button>
                 </div>
 
                 {showEmojiPicker && (

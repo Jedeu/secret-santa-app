@@ -240,6 +240,34 @@ describe('matchesStoredMessage', () => {
     ])('rejects a differing %s', (_label, change) => {
         expect(matchesStoredMessage(existing, { ...request, ...change })).toBe(false);
     });
+
+    describe('attachment identity', () => {
+        const ATTACHMENT_ID = '0b6d2f4e-8a1c-4e3b-9d7f-5c2a1b0e9f8d';
+        const OTHER_ATTACHMENT_ID = '7e1c3a5b-2d4f-4a6c-8b9e-0f1d2c3b4a5e';
+        const withAttachment = { ...existing, content: '', attachment: { id: ATTACHMENT_ID, kind: 'image' } };
+
+        test('equal attachment ids match', () => {
+            expect(matchesStoredMessage(withAttachment, { ...request, content: '', attachmentId: ATTACHMENT_ID })).toBe(true);
+        });
+
+        test('a text message matches a request with a null or omitted attachment id', () => {
+            expect(matchesStoredMessage(existing, { ...request, attachmentId: null })).toBe(true);
+            expect(matchesStoredMessage(existing, request)).toBe(true);
+        });
+
+        test('a stored attachment with no requested attachment is rejected', () => {
+            expect(matchesStoredMessage(withAttachment, { ...request, content: '', attachmentId: null })).toBe(false);
+            expect(matchesStoredMessage(withAttachment, { ...request, content: '' })).toBe(false);
+        });
+
+        test('a requested attachment with none stored is rejected', () => {
+            expect(matchesStoredMessage(existing, { ...request, attachmentId: ATTACHMENT_ID })).toBe(false);
+        });
+
+        test('differing attachment ids are rejected', () => {
+            expect(matchesStoredMessage(withAttachment, { ...request, content: '', attachmentId: OTHER_ATTACHMENT_ID })).toBe(false);
+        });
+    });
 });
 
 describe('getLatestMessageTimestamp', () => {

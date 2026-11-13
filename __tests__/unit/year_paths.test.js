@@ -14,7 +14,7 @@ describe('year-paths', () => {
         test('legacy year and collection lists', () => {
             expect(LEGACY_YEAR).toBe(2025);
             expect(YEAR_COLLECTIONS).toEqual(['users', 'messages', 'lastRead', 'typing', 'reactions']);
-            expect(GLOBAL_COLLECTIONS).toEqual(['authIdentities', 'participantIndex', 'pushTokens']);
+            expect(GLOBAL_COLLECTIONS).toEqual(['authIdentities', 'participantIndex', 'pushTokens', 'mediaUploads']);
         });
 
         test.each([

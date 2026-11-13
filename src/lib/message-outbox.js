@@ -1,16 +1,22 @@
 'use client';
 import { clientAuth } from '@/lib/firebase-client';
+import { isRenderableAttachment, toPublicAttachment, isUuid } from '@/lib/message-media';
 
 /**
  * Durable client outbox for chat messages.
  *
  * Storage layout (every operation is a single-key setItem/removeItem, so tabs never
  * overwrite each other's queued messages):
- * - item:{id}  = { clientMessageId, ownerUid|null, fromUserId, toId, conversationId, content, createdAt }
- *                written once, never rewritten
- * - done:{id}  = ISO deliveredAt tombstone, written on any 2xx
- * - state:{id} = { attemptCount, nextAttemptAt, status: 'pending'|'failed', lastError }
- *                last writer wins; absent = pending with zero attempts
+ * - item:{id}       = { clientMessageId, ownerUid|null, fromUserId, toId, conversationId, content, createdAt }
+ *                     text messages; written once, never rewritten
+ * - media-item:{id} = { clientMessageId, ownerUid, fromUserId, toId, conversationId, content, createdAt,
+ *                       attachment } image messages (content may be empty); the attachment is the
+ *                     10-key server-built reference returned by the upload, never image bytes.
+ *                     A separate prefix, so a tab on an older build can neither delete these
+ *                     nor send their caption without the image. Written once, never rewritten.
+ * - done:{id}       = ISO deliveredAt tombstone, written on any 2xx
+ * - state:{id}      = { attemptCount, nextAttemptAt, status: 'pending'|'failed', lastError }
+ *                     last writer wins; absent = pending with zero attempts
  *
  * The v1 key (one shared JSON array) is read-only legacy input, imported on every
  * read/enqueue/drain and never written or removed.
@@ -18,6 +24,7 @@ import { clientAuth } from '@/lib/firebase-client';
 
 export const MESSAGE_OUTBOX_STORAGE_KEY = 'secret-santa-message-outbox-v1';
 export const OUTBOX_ITEM_PREFIX = 'secret-santa-message-outbox-v2:item:';
+export const OUTBOX_MEDIA_ITEM_PREFIX = 'secret-santa-message-outbox-v2:media-item:';
 export const OUTBOX_STATE_PREFIX = 'secret-santa-message-outbox-v2:state:';
 export const OUTBOX_DONE_PREFIX = 'secret-santa-message-outbox-v2:done:';
 
@@ -66,6 +73,7 @@ function notifySubscribers() {
 }
 
 function itemKey(id) { return OUTBOX_ITEM_PREFIX + id; }
+function mediaItemKey(id) { return OUTBOX_MEDIA_ITEM_PREFIX + id; }
 function stateKey(id) { return OUTBOX_STATE_PREFIX + id; }
 function doneKey(id) { return OUTBOX_DONE_PREFIX + id; }
 
@@ -80,6 +88,22 @@ function listIdsWithPrefix(prefix) {
         }
     }
     return ids;
+}
+
+/**
+ * Ids that have a text or a media item key.
+ */
+function listItemIds() {
+    return Array.from(new Set([
+        ...listIdsWithPrefix(OUTBOX_ITEM_PREFIX),
+        ...listIdsWithPrefix(OUTBOX_MEDIA_ITEM_PREFIX),
+    ]));
+}
+
+function hasItemKey(id) {
+    if (!hasWindow()) return false;
+    const storage = window.localStorage;
+    return storage.getItem(itemKey(id)) !== null || storage.getItem(mediaItemKey(id)) !== null;
 }
 
 function isValidIso(value) {
@@ -108,10 +132,22 @@ function isValidPayload(payload) {
         && isValidIso(payload.createdAt);
 }
 
+function isValidMediaPayload(payload) {
+    return !!payload
+        && typeof payload.clientMessageId === 'string' && !!payload.clientMessageId
+        && typeof payload.fromUserId === 'string' && !!payload.fromUserId
+        && typeof payload.toId === 'string' && !!payload.toId
+        && typeof payload.content === 'string'
+        && isValidIso(payload.createdAt)
+        && isRenderableAttachment(payload.attachment);
+}
+
 function readPayload(id) {
     if (!hasWindow()) return null;
     const payload = parseJson(window.localStorage.getItem(itemKey(id)));
-    return isValidPayload(payload) ? payload : null;
+    if (isValidPayload(payload)) return payload;
+    const mediaPayload = parseJson(window.localStorage.getItem(mediaItemKey(id)));
+    return isValidMediaPayload(mediaPayload) ? mediaPayload : null;
 }
 
 function hasTombstone(id) {
@@ -151,7 +187,7 @@ function readLiveItem(id, now = nowMs()) {
 }
 
 function readLiveItems(now = nowMs()) {
-    return listIdsWithPrefix(OUTBOX_ITEM_PREFIX)
+    return listItemIds()
         .map((id) => readLiveItem(id, now))
         .filter(Boolean);
 }
@@ -173,6 +209,7 @@ function markDelivered(id) {
     const storage = window.localStorage;
     storage.setItem(doneKey(id), asIso());
     storage.removeItem(itemKey(id));
+    storage.removeItem(mediaItemKey(id));
     storage.removeItem(stateKey(id));
     notifySubscribers();
 }
@@ -271,6 +308,10 @@ function toFailedState(item, reason) {
     };
 }
 
+export function createClientMessageId() {
+    return generateClientMessageId();
+}
+
 function generateClientMessageId() {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
         return crypto.randomUUID();
@@ -325,6 +366,7 @@ async function sendOutboxItem({ item, token, fetchImpl }) {
                 clientMessageId: item.clientMessageId,
                 clientCreatedAt: item.createdAt,
                 senderUserId: item.fromUserId,
+                ...(item.attachment ? { attachment: { id: item.attachment.id } } : {}),
             }),
             ...(controller ? { signal: controller.signal } : {}),
         });
@@ -347,6 +389,7 @@ function isOutboxStorageKey(key) {
         || key === MESSAGE_OUTBOX_STORAGE_KEY
         || (typeof key === 'string' && (
             key.startsWith(OUTBOX_ITEM_PREFIX)
+            || key.startsWith(OUTBOX_MEDIA_ITEM_PREFIX)
             || key.startsWith(OUTBOX_STATE_PREFIX)
             || key.startsWith(OUTBOX_DONE_PREFIX)
         ));
@@ -381,7 +424,56 @@ export function subscribeOutbox(callback) {
     };
 }
 
-export function enqueueMessage({ ownerUid, fromUserId, toId, conversationId = null, content }) {
+/**
+ * Image message: the server-built attachment and the clientMessageId it was uploaded
+ * for. Writes one media-item key, or nothing when the id already has a tombstone or an
+ * item key (then returns the live item, if any).
+ */
+function enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, content, attachment, clientMessageId }) {
+    const publicAttachment = toPublicAttachment(attachment);
+
+    if (!hasWindow() || !ownerUid || !fromUserId || !toId || !isUuid(clientMessageId) || !publicAttachment) {
+        throw new Error('Invalid outbox enqueue payload');
+    }
+
+    importLegacyQueue();
+
+    const id = clientMessageId;
+    if (hasTombstone(id) || hasItemKey(id)) {
+        return readLiveItem(id);
+    }
+
+    const payload = {
+        clientMessageId: id,
+        ownerUid,
+        fromUserId,
+        toId,
+        conversationId: conversationId || null,
+        content: normalizeContent(content),
+        createdAt: asIso(),
+        attachment: publicAttachment,
+    };
+
+    // Single-key write; throws on quota errors.
+    window.localStorage.setItem(mediaItemKey(id), JSON.stringify(payload));
+    notifySubscribers();
+
+    return toView(payload, readState(id));
+}
+
+export function enqueueMessage({
+    ownerUid,
+    fromUserId,
+    toId,
+    conversationId = null,
+    content,
+    attachment = null,
+    clientMessageId = null,
+}) {
+    if (attachment !== null && attachment !== undefined) {
+        return enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, content, attachment, clientMessageId });
+    }
+
     const normalizedContent = normalizeContent(content);
 
     if (!hasWindow() || !ownerUid || !fromUserId || !toId || !normalizedContent) {
@@ -449,22 +541,23 @@ export function clearDeliveredOrExpired({ fromUserId = null } = {}) {
     let removed = 0;
     let changed = false;
 
-    listIdsWithPrefix(OUTBOX_ITEM_PREFIX).forEach((id) => {
+    listItemIds().forEach((id) => {
         const payload = readPayload(id);
         if (payload && fromUserId && payload.fromUserId !== fromUserId) {
             return;
         }
         if (!payload || hasTombstone(id) || isExpired(payload.createdAt, now)) {
             storage.removeItem(itemKey(id));
+            storage.removeItem(mediaItemKey(id));
             storage.removeItem(stateKey(id));
             removed += 1;
             changed = true;
         }
     });
 
-    // Orphan state keys (no payload).
+    // Orphan state keys (no payload under either item key).
     listIdsWithPrefix(OUTBOX_STATE_PREFIX).forEach((id) => {
-        if (storage.getItem(itemKey(id)) === null) {
+        if (!hasItemKey(id)) {
             storage.removeItem(stateKey(id));
             changed = true;
         }
@@ -472,7 +565,7 @@ export function clearDeliveredOrExpired({ fromUserId = null } = {}) {
 
     // Old tombstones with no payload.
     listIdsWithPrefix(OUTBOX_DONE_PREFIX).forEach((id) => {
-        if (storage.getItem(itemKey(id)) !== null) return;
+        if (hasItemKey(id)) return;
         const deliveredAtMs = Date.parse(storage.getItem(doneKey(id)) || '');
         if (Number.isNaN(deliveredAtMs) || now - deliveredAtMs > TOMBSTONE_TTL_MS) {
             storage.removeItem(doneKey(id));

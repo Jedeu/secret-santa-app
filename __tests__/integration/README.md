@@ -27,6 +27,7 @@ npm run test:integration
 - **firestore-rules-years.test.js**: Year-scoped read/write rules, closed-year immutability, skipped- and future-year denial, and malformed lifecycle metadata
 - **firestore-rules-admission.test.js**: Rules admit only current-epoch participants, deny client user/message creates, and require reciprocal recipient claims
 - **push-registration.test.js**: Push status/register/unregister epoch+revision preconditions and fenced invalid-token cleanup (crafted FCM responses, no real FCM)
+- **message-media.test.js**: Image upload reservation and finalize fences, byte-digest idempotency, attachment binding on send, and Close/Start races during an upload (provider mocked; no network)
 
 ## Test Data Management
 
