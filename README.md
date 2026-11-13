@@ -88,6 +88,8 @@ Production requires these environment variables:
 
 `PUSH_DISPATCH_ENABLED` (server, optional): `false` always disables push dispatch, `true` always enables it. Leave it unset or `false` for local development.
 
+**Image attachments (server, optional):** `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` (secret; server only, never `NEXT_PUBLIC_*`). Set all three to enable JPEG, PNG and GIF attachments; leave any unset to keep them off — text chat is unaffected. Uploaded images are served from public, unlisted Cloudinary URLs: anyone with a link can view the image. Use a Cloudinary account with no payment method and decline upgrades; its free limits are soft, so check usage in the Cloudinary console and remove a variable to stop uploads. Uploads also pass through this app's hosting and Firestore, whose own quotas and billing are unchanged. `MEDIA_UPLOAD_API_BASE` is a test-only override, honored only outside production and only for a loopback URL.
+
 Push notifications run through Firebase Cloud Messaging using the server Admin
 credentials, so there is no separate web-push private key.
 

@@ -56,24 +56,37 @@ function yearPath(year, name) {
     return year === 2025 ? name : `years/${year}/${name}`;
 }
 
+// Every fake transaction's tx, newest last (for asserting the refs it read).
+const txLog = [];
+
 /**
  * In-memory store keyed by the joined collection path + fake fenced transaction for the
- * open `year`. `work` receives a tx with getAll/create and a ctx with year and state.
- * `extra` seeds other collections (for example root users while the year is 2026).
+ * open `year`. `work` receives a tx with getAll/create/update and a ctx with year and
+ * state. `extra` seeds other collections (for example root users while the year is
+ * 2026); `mediaUploads` optionally seeds the global mediaUploads collection.
  */
-function useStore({ users, messages = {}, sender, year = 2025, extra = {} }) {
+function useStore({ users, messages = {}, sender, year = 2025, extra = {}, mediaUploads = null }) {
     const usersPath = yearPath(year, 'users');
     const messagesPath = yearPath(year, 'messages');
-    const store = { ...extra, [usersPath]: { ...users }, [messagesPath]: { ...messages } };
+    const store = {
+        ...extra,
+        [usersPath]: { ...users },
+        [messagesPath]: { ...messages },
+        ...(mediaUploads ? { mediaUploads: { ...mediaUploads } } : {}),
+    };
+    txLog.length = 0;
     runFencedTransaction.mockImplementation(async (decoded, work) => {
         const creates = [];
+        const updates = [];
         const tx = {
             getAll: jest.fn(async (...refs) => refs.map((ref) => {
                 const data = store[ref.__collection]?.[ref.id];
                 return { id: ref.id, exists: !!data, data: () => data };
             })),
             create: jest.fn((ref, data) => creates.push({ ref, data })),
+            update: jest.fn((ref, data) => updates.push({ ref, data })),
         };
+        txLog.push(tx);
         const result = await work(tx, {
             uid: 'auth-uid',
             email: 'sender@example.test',
@@ -85,6 +98,10 @@ function useStore({ users, messages = {}, sender, year = 2025, extra = {} }) {
         creates.forEach(({ ref, data }) => {
             store[ref.__collection] = store[ref.__collection] || {};
             store[ref.__collection][ref.id] = data;
+        });
+        updates.forEach(({ ref, data }) => {
+            store[ref.__collection] = store[ref.__collection] || {};
+            store[ref.__collection][ref.id] = { ...store[ref.__collection][ref.id], ...data };
         });
         return result;
     });
@@ -507,5 +524,251 @@ describe('POST /api/messages/send', () => {
 
         expect(res.status).toBe(200);
         expect(data.success).toBe(true);
+    });
+});
+
+describe('POST /api/messages/send with an attachment', () => {
+    const MEDIA_ID = '0b6d2f4e-8a1c-4e3b-9d7f-5c2a1b0e9f8d';
+    const OTHER_MEDIA_ID = '7e1c3a5b-2d4f-4a6c-8b9e-0f1d2c3b4a5e';
+    const PUBLIC_ID = `ss-2025-${MEDIA_ID}`;
+    const SHA = 'a'.repeat(64);
+
+    // Synthetic server-owned record for CLIENT_MESSAGE_ID.
+    function mediaRecord(overrides = {}) {
+        return {
+            id: CLIENT_MESSAGE_ID,
+            mediaId: MEDIA_ID,
+            status: 'uploaded',
+            attempts: 1,
+            authUid: 'auth-uid',
+            fromId: SANTA_ID,
+            toId: RECIPIENT_ID,
+            conversationId: CONV_SANTA_TO_RECIPIENT,
+            year: 2025,
+            epoch: 1,
+            quotaKey: 'auth-uid|2026-02-12',
+            sha256: SHA,
+            provider: 'cloudinary',
+            cloudName: 'unit-cloud',
+            publicId: PUBLIC_ID,
+            staleProviderIds: [],
+            format: 'png',
+            width: 640,
+            height: 480,
+            bytes: 4321,
+            version: 1700000000,
+            createdAt: '2026-02-12T19:59:00.000Z',
+            updatedAt: '2026-02-12T19:59:01.000Z',
+            uploadedAt: '2026-02-12T19:59:01.000Z',
+            attachedAt: null,
+            ...overrides,
+        };
+    }
+
+    const EXPECTED_ATTACHMENT = {
+        id: MEDIA_ID,
+        kind: 'image',
+        provider: 'cloudinary',
+        cloudName: 'unit-cloud',
+        publicId: PUBLIC_ID,
+        version: 1700000000,
+        format: 'png',
+        width: 640,
+        height: 480,
+        bytes: 4321,
+    };
+
+    function body(overrides = {}) {
+        return {
+            toId: RECIPIENT_ID,
+            content: 'Look at this',
+            conversationId: CONV_SANTA_TO_RECIPIENT,
+            clientMessageId: CLIENT_MESSAGE_ID,
+            clientCreatedAt: CLIENT_CREATED_AT,
+            senderUserId: SANTA_ID,
+            attachment: { id: MEDIA_ID },
+            ...overrides,
+        };
+    }
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        verifyRequestToken.mockResolvedValue({ uid: 'auth-uid', email: 'sender@example.test' });
+        sendIncomingMessagePush.mockResolvedValue({
+            totalTokens: 0,
+            successCount: 0,
+            failureCount: 0,
+            cleanedTokenCount: 0
+        });
+    });
+
+    test('captioned: the server copies the attachment from the record and marks it attached', async () => {
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID, mediaUploads: { [CLIENT_MESSAGE_ID]: mediaRecord() } });
+
+        const res = await POST(createRequest({
+            body: body({ attachment: { id: MEDIA_ID, cloudName: 'evil', publicId: 'forged', url: 'https://evil.example/x.png' } }),
+        }));
+        const data = await res.json();
+
+        expect(res.status).toBe(200);
+        const stored = store.messages[CLIENT_MESSAGE_ID];
+        expect(stored).toMatchObject({ content: 'Look at this', fromId: SANTA_ID, toId: RECIPIENT_ID });
+        expect(stored.attachment).toEqual(EXPECTED_ATTACHMENT);
+        expect(stored.attachment).not.toHaveProperty('sha256');
+        expect(stored).not.toHaveProperty('sha256');
+        expect(JSON.stringify(stored)).not.toContain(SHA);
+        expect(data.message.attachment).toEqual(EXPECTED_ATTACHMENT);
+        expect(store.mediaUploads[CLIENT_MESSAGE_ID]).toMatchObject({
+            status: 'attached',
+            attachedAt: stored.timestamp,
+            updatedAt: stored.timestamp,
+        });
+        expect(txLog[0].getAll.mock.calls[0]).toHaveLength(3);
+        expect(txLog[0].getAll.mock.calls[0][2]).toEqual({ __collection: 'mediaUploads', id: CLIENT_MESSAGE_ID });
+        expect(sendIncomingMessagePush).toHaveBeenCalledTimes(1);
+    });
+
+    test('media-only: empty content is accepted with an attachment', async () => {
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID, mediaUploads: { [CLIENT_MESSAGE_ID]: mediaRecord() } });
+
+        const res = await POST(createRequest({ body: body({ content: '   ' }) }));
+
+        expect(res.status).toBe(200);
+        expect(store.messages[CLIENT_MESSAGE_ID]).toMatchObject({ content: '', attachment: EXPECTED_ATTACHMENT });
+    });
+
+    test('a text-only send still reads exactly two refs and writes no attachment key', async () => {
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID });
+
+        const res = await POST(createRequest({
+            body: { toId: RECIPIENT_ID, content: 'Just text', conversationId: CONV_SANTA_TO_RECIPIENT, clientMessageId: CLIENT_MESSAGE_ID },
+        }));
+
+        expect(res.status).toBe(200);
+        expect(txLog[0].getAll.mock.calls[0]).toHaveLength(2);
+        expect(txLog[0].update).not.toHaveBeenCalled();
+        expect(store.messages[CLIENT_MESSAGE_ID]).not.toHaveProperty('attachment');
+        expect(store.mediaUploads).toBeUndefined();
+    });
+
+    test('attachment: null is treated as absent', async () => {
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID });
+
+        const res = await POST(createRequest({ body: body({ attachment: null, content: 'Text' }) }));
+
+        expect(res.status).toBe(200);
+        expect(store.messages[CLIENT_MESSAGE_ID]).not.toHaveProperty('attachment');
+    });
+
+    test('an attachment without clientMessageId -> 400 ATTACHMENT_INVALID', async () => {
+        useStore({ users: oneWayUsers, sender: SANTA_ID, mediaUploads: { [CLIENT_MESSAGE_ID]: mediaRecord() } });
+
+        const res = await POST(createRequest({ body: body({ clientMessageId: undefined }) }));
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'Invalid attachment', code: 'ATTACHMENT_INVALID' });
+        expect(runFencedTransaction).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['a non-UUID id', { id: 'not-a-uuid' }],
+        ['no id', {}],
+        ['a numeric id', { id: 42 }],
+        ['a string', 'attachment'],
+        ['an array', [MEDIA_ID]],
+    ])('a malformed attachment (%s) -> 400 ATTACHMENT_INVALID', async (_label, attachment) => {
+        useStore({ users: oneWayUsers, sender: SANTA_ID });
+
+        const res = await POST(createRequest({ body: body({ attachment }) }));
+
+        expect(res.status).toBe(400);
+        expect((await res.json()).code).toBe('ATTACHMENT_INVALID');
+        expect(runFencedTransaction).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['no record', null, 'ATTACHMENT_NOT_FOUND', {}],
+        ['another attempt (mediaId)', mediaRecord({ mediaId: OTHER_MEDIA_ID }), 'ATTACHMENT_MISMATCH', {}],
+        ['another account', mediaRecord({ authUid: 'auth-other' }), 'ATTACHMENT_MISMATCH', {}],
+        ['another sender', mediaRecord({ fromId: OTHER_ID }), 'ATTACHMENT_MISMATCH', {}],
+        ['another recipient', mediaRecord({ toId: OTHER_ID }), 'ATTACHMENT_MISMATCH', {}],
+        ['another conversation', mediaRecord({ conversationId: CONV_RECIPIENT_TO_SANTA }), 'ATTACHMENT_MISMATCH', {}],
+        ['another year', mediaRecord({ year: 2026 }), 'ATTACHMENT_MISMATCH', {}],
+        ['another epoch', mediaRecord({ epoch: 2 }), 'ATTACHMENT_MISMATCH', {}],
+        ['a reserved record', mediaRecord({ status: 'reserved', version: null }), 'ATTACHMENT_NOT_READY', {}],
+        ['a failed record', mediaRecord({ status: 'failed', version: null }), 'ATTACHMENT_NOT_READY', {}],
+        ['an attached record', mediaRecord({ status: 'attached' }), 'ATTACHMENT_NOT_READY', {}],
+        ['an uploaded record without a renderable shape', mediaRecord({ cloudName: 'bad/name' }), 'ATTACHMENT_NOT_READY', {}],
+    ])('%s -> 400 %s with no write and no push', async (_label, record, code, overrides) => {
+        const seeded = record ? { [CLIENT_MESSAGE_ID]: record } : {};
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID, mediaUploads: seeded });
+        const before = JSON.stringify(store.mediaUploads);
+
+        const res = await POST(createRequest({ body: body(overrides) }));
+        const data = await res.json();
+
+        expect(res.status).toBe(400);
+        expect(data).toEqual({ error: 'Attachment is not available for this message', code });
+        expect(store.messages).toEqual({});
+        expect(JSON.stringify(store.mediaUploads)).toBe(before);
+        expect(sendIncomingMessagePush).not.toHaveBeenCalled();
+    });
+
+    test('replay with the same attachment -> replayed without push', async () => {
+        const existing = {
+            id: CLIENT_MESSAGE_ID,
+            fromId: SANTA_ID,
+            toId: RECIPIENT_ID,
+            content: 'Look at this',
+            timestamp: '2026-02-12T20:00:05.000Z',
+            conversationId: CONV_SANTA_TO_RECIPIENT,
+            clientMessageId: CLIENT_MESSAGE_ID,
+            clientCreatedAt: CLIENT_CREATED_AT,
+            attachment: EXPECTED_ATTACHMENT,
+        };
+        useStore({
+            users: oneWayUsers,
+            sender: SANTA_ID,
+            messages: { [CLIENT_MESSAGE_ID]: existing },
+            mediaUploads: { [CLIENT_MESSAGE_ID]: mediaRecord({ status: 'attached' }) },
+        });
+
+        const res = await POST(createRequest({ body: body() }));
+        const data = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(data.replayed).toBe(true);
+        expect(data.message).toEqual(existing);
+        expect(sendIncomingMessagePush).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['a missing attachment in the request', { attachment: undefined }, EXPECTED_ATTACHMENT],
+        ['a different attachment id', { attachment: { id: OTHER_MEDIA_ID } }, EXPECTED_ATTACHMENT],
+        ['an attachment where the stored message has none', {}, undefined],
+    ])('replay with %s -> 409', async (_label, overrides, storedAttachment) => {
+        const existing = {
+            id: CLIENT_MESSAGE_ID,
+            fromId: SANTA_ID,
+            toId: RECIPIENT_ID,
+            content: 'Look at this',
+            timestamp: '2026-02-12T20:00:05.000Z',
+            conversationId: CONV_SANTA_TO_RECIPIENT,
+            clientMessageId: CLIENT_MESSAGE_ID,
+            clientCreatedAt: CLIENT_CREATED_AT,
+            ...(storedAttachment ? { attachment: storedAttachment } : {}),
+        };
+        useStore({
+            users: oneWayUsers,
+            sender: SANTA_ID,
+            messages: { [CLIENT_MESSAGE_ID]: existing },
+            mediaUploads: { [CLIENT_MESSAGE_ID]: mediaRecord({ status: 'attached' }) },
+        });
+
+        const res = await POST(createRequest({ body: body(overrides) }));
+
+        expect(res.status).toBe(409);
+        expect((await res.json()).error).toBe('Message id conflict');
+        expect(sendIncomingMessagePush).not.toHaveBeenCalled();
     });
 });

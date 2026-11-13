@@ -209,7 +209,10 @@ function nullable(value) {
 
 /**
  * Single idempotency matcher for stored messages.
- * request = { id, fromId, toId, content, clientMessageId, clientCreatedAt, requestedConversationId }
+ * request = { id, fromId, toId, content, clientMessageId, clientCreatedAt, requestedConversationId,
+ *             attachmentId }
+ * `attachmentId` is compared with the stored `attachment.id` (both null-normalized), so a
+ * text replay (no attachment on either side) is unaffected.
  */
 export function matchesStoredMessage(existing, request) {
     if (!existing || !request) return false;
@@ -219,6 +222,7 @@ export function matchesStoredMessage(existing, request) {
     if (existing.content !== request.content) return false;
     if (nullable(existing.clientMessageId) !== nullable(request.clientMessageId)) return false;
     if (nullable(existing.clientCreatedAt) !== nullable(request.clientCreatedAt)) return false;
+    if (nullable(existing.attachment?.id) !== nullable(request.attachmentId)) return false;
     const requested = nullable(request.requestedConversationId);
     return requested === null || requested === existing.conversationId;
 }

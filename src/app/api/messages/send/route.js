@@ -12,6 +12,11 @@ import {
     matchesStoredMessage,
 } from '@/lib/message-utils';
 import { yearCollectionPath } from '@/lib/year-paths';
+import {
+    MEDIA_UPLOADS_COLLECTION,
+    getAttachmentBindingError,
+    recordToAttachment,
+} from '@/lib/media-server';
 
 const MAX_WRITE_ATTEMPTS = 3;
 const WRITE_RETRY_DELAY_MS = 120;
@@ -122,12 +127,20 @@ export async function POST(request) {
         const senderUserId = typeof body?.senderUserId === 'string' && body.senderUserId.trim()
             ? body.senderUserId.trim()
             : null;
+        const hasAttachment = body?.attachment !== undefined && body?.attachment !== null;
+        const attachmentId = hasAttachment && typeof body.attachment?.id === 'string'
+            ? body.attachment.id.trim()
+            : '';
 
         if (!toId) {
             return NextResponse.json({ error: 'Recipient is required' }, { status: 400 });
         }
 
-        if (!content) {
+        if (hasAttachment && !isUUIDLike(attachmentId)) {
+            return NextResponse.json({ error: 'Invalid attachment', code: 'ATTACHMENT_INVALID' }, { status: 400 });
+        }
+
+        if (!content && !attachmentId) {
             return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 });
         }
 
@@ -143,14 +156,24 @@ export async function POST(request) {
             return NextResponse.json({ error: 'clientCreatedAt must be an ISO timestamp' }, { status: 400 });
         }
 
+        if (attachmentId && !clientMessageId) {
+            return NextResponse.json({ error: 'Invalid attachment', code: 'ATTACHMENT_INVALID' }, { status: 400 });
+        }
+
         // Generated outside the transaction so retries keep the same id.
         const messageId = clientMessageId || uuidv4();
 
         // Fenced on the open year (YEAR_CLOSED otherwise); refs use that year's paths.
-        const work = async (tx, { user: sender, year }) => {
+        // An attachment is copied from the server-only mediaUploads record for this
+        // message id after its binding is checked in the same transaction.
+        const work = async (tx, { user: sender, year, uid, epoch }) => {
             const recipientRef = firestore.collection(yearCollectionPath(year, 'users').join('/')).doc(toId);
             const messageRef = firestore.collection(yearCollectionPath(year, 'messages').join('/')).doc(messageId);
-            const [recipientSnap, messageSnap] = await tx.getAll(recipientRef, messageRef);
+            const mediaRef = attachmentId
+                ? firestore.collection(MEDIA_UPLOADS_COLLECTION).doc(messageId)
+                : null;
+            const refs = mediaRef ? [recipientRef, messageRef, mediaRef] : [recipientRef, messageRef];
+            const [recipientSnap, messageSnap, mediaSnap] = await tx.getAll(...refs);
 
             if (senderUserId && senderUserId !== sender.id) {
                 throw new SendRouteError(403, {
@@ -169,6 +192,7 @@ export async function POST(request) {
                     clientMessageId: clientMessageId || null,
                     clientCreatedAt: clientCreatedAt || null,
                     requestedConversationId,
+                    attachmentId: attachmentId || null,
                 });
                 if (matches) {
                     return { kind: 'replayed', message: existing };
@@ -190,6 +214,27 @@ export async function POST(request) {
                 });
             }
 
+            let attachment = null;
+            if (attachmentId) {
+                const record = mediaSnap?.exists ? mediaSnap.data() : null;
+                const bindingError = getAttachmentBindingError(record, {
+                    mediaId: attachmentId,
+                    authUid: uid,
+                    fromId: sender.id,
+                    toId,
+                    conversationId: resolved.conversationId,
+                    year,
+                    epoch,
+                });
+                if (bindingError) {
+                    throw new SendRouteError(400, {
+                        error: 'Attachment is not available for this message',
+                        code: bindingError,
+                    });
+                }
+                attachment = recordToAttachment(record);
+            }
+
             const message = {
                 id: messageId,
                 fromId: sender.id,
@@ -199,8 +244,16 @@ export async function POST(request) {
                 conversationId: resolved.conversationId,
                 ...(clientMessageId ? { clientMessageId } : {}),
                 ...(clientCreatedAt ? { clientCreatedAt } : {}),
+                ...(attachment ? { attachment } : {}),
             };
             tx.create(messageRef, message);
+            if (attachment) {
+                tx.update(mediaRef, {
+                    status: 'attached',
+                    attachedAt: message.timestamp,
+                    updatedAt: message.timestamp,
+                });
+            }
             return { kind: 'created', message };
         };
 

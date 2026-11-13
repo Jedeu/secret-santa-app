@@ -3,6 +3,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
 import { buildAssignmentMap, resolveMessageConversation } from '@/lib/message-utils';
 import ReactionChips from '@/components/ReactionChips';
+import MessageAttachment from '@/components/MessageAttachment';
+import { getMessagePreviewText } from '@/lib/message-media';
 
 // Legacy per-browser key; no longer read (it was shared across accounts).
 const LEGACY_LAST_VIEWED_KEY = 'publicFeedLastViewed';
@@ -262,7 +264,7 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{thread.name}</div>
                                     <div className="text-muted" style={{ fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {thread.lastMessage.content}
+                                        {getMessagePreviewText(thread.lastMessage)}
                                     </div>
                                 </div>
                                 {thread.unreadCount > 0 && (
@@ -345,7 +347,10 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                                     marginBottom: '2px',
                                                     boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                                                 }}>
-                                                    {msg.content}
+                                                    {msg.attachment && typeof msg.attachment === 'object' && (
+                                                        <MessageAttachment attachment={msg.attachment} />
+                                                    )}
+                                                    {msg.content ? msg.content : null}
                                                 </div>
                                                 <ReactionChips
                                                     messageId={msg.id}

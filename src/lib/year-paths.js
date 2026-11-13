@@ -15,7 +15,7 @@ export const LEGACY_YEAR = 2025;
 const MAX_YEAR = 9999;
 
 export const YEAR_COLLECTIONS = ['users', 'messages', 'lastRead', 'typing', 'reactions'];
-export const GLOBAL_COLLECTIONS = ['authIdentities', 'participantIndex', 'pushTokens'];
+export const GLOBAL_COLLECTIONS = ['authIdentities', 'participantIndex', 'pushTokens', 'mediaUploads'];
 
 const LIFECYCLE_STATES = ['active', 'closed'];
 

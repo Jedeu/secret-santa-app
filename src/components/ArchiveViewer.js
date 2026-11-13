@@ -3,6 +3,8 @@ import { useMemo, useState } from 'react';
 import { useYearArchive } from '@/hooks/useYearArchive';
 import { buildArchiveView } from '@/lib/archive-threads';
 import ReactionChips from '@/components/ReactionChips';
+import MessageAttachment from '@/components/MessageAttachment';
+import { getMessagePreviewText } from '@/lib/message-media';
 
 /**
  * ArchiveViewer - Read-only view of a past (closed) year: pairings and conversations.
@@ -153,9 +155,14 @@ export default function ArchiveViewer({ authUid, years, initialYear, closedYears
                             {selectedThread.messages.map((message, index) => (
                                 <li key={message.id ?? `message-${index}`} data-testid="archive-message" style={rowStyle}>
                                     <div style={{ fontWeight: 600, fontSize: '13px' }}>{message.label}</div>
-                                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                        {typeof message.content === 'string' ? message.content : ''}
-                                    </div>
+                                    {message.attachment && typeof message.attachment === 'object' && (
+                                        <MessageAttachment attachment={message.attachment} />
+                                    )}
+                                    {typeof message.content === 'string' && message.content !== '' && (
+                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                            {message.content}
+                                        </div>
+                                    )}
                                     <div className="text-muted" style={{ fontSize: '12px' }}>{formatDate(message.timestamp)}</div>
                                     <ReactionChips
                                         messageId={message.id}
@@ -184,7 +191,7 @@ function previewOf(thread) {
     if (!thread.messages.length) return 'No messages';
     const latest = thread.messages.find((message) => message.timestamp === thread.latestTimestamp)
         || thread.messages[thread.messages.length - 1];
-    const content = typeof latest?.content === 'string' ? latest.content : '';
+    const content = getMessagePreviewText(latest);
     return content.length > 80 ? `${content.slice(0, 80)}…` : content;
 }
 
