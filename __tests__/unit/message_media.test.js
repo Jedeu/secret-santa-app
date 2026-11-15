@@ -206,4 +206,29 @@ describe('getMessagePreviewText', () => {
         expect(getMessagePreviewText({ content: '', attachment: ATTACHMENT })).toBe('📷 Photo');
         expect(getMessagePreviewText({ content: '   ', attachment: { ...ATTACHMENT, format: 'gif' } })).toBe('📷 GIF');
     });
+
+    describe('GIPHY references', () => {
+        const REF = 'https://giphy.com/embed/SyntheticGif01';
+
+        test('a GIF-only reference previews as GIF', () => {
+            expect(getMessagePreviewText({ content: REF })).toBe('📷 GIF');
+            expect(getMessagePreviewText({ content: `${REF}\n   ` })).toBe('📷 GIF');
+        });
+
+        test('a captioned reference previews the caption', () => {
+            expect(getMessagePreviewText({ content: `${REF}\nMerry everything` })).toBe('📷 Merry everything');
+        });
+
+        test('a reference with an attachment uses the attachment branch', () => {
+            expect(getMessagePreviewText({ content: REF, attachment: ATTACHMENT })).toBe(`📷 ${REF}`);
+            expect(getMessagePreviewText({ content: '', attachment: ATTACHMENT })).toBe('📷 Photo');
+        });
+
+        test('a near-miss is unchanged text', () => {
+            expect(getMessagePreviewText({ content: 'https://giphy.com/embed/near-miss' })).toBe('https://giphy.com/embed/near-miss');
+            expect(getMessagePreviewText({ content: `${REF} trailing` })).toBe(`${REF} trailing`);
+            expect(getMessagePreviewText({ content: `Look ${REF}` })).toBe(`Look ${REF}`);
+            expect(getMessagePreviewText({ content: 'http://giphy.com/embed/SyntheticGif01' })).toBe('http://giphy.com/embed/SyntheticGif01');
+        });
+    });
 });

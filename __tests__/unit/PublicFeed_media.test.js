@@ -91,4 +91,45 @@ describe('PublicFeed media', () => {
         expect(screen.getByText('Plain text only')).toBeInTheDocument();
         expect(screen.queryByTestId('message-attachment')).not.toBeInTheDocument();
     });
+
+    describe('GIPHY references (no key configured)', () => {
+        const KEY_ENV = 'NEXT_PUBLIC_GIPHY_API_KEY';
+        const REF = 'https://giphy.com/embed/SyntheticGif01';
+        const NEAR_MISS = 'https://giphy.com/embed/near-miss';
+        let savedKey;
+
+        beforeEach(() => {
+            savedKey = process.env[KEY_ENV];
+            delete process.env[KEY_ENV];
+        });
+
+        afterEach(() => {
+            if (savedKey === undefined) {
+                delete process.env[KEY_ENV];
+            } else {
+                process.env[KEY_ENV] = savedKey;
+            }
+        });
+
+        test('preview label, embed src, caption-only text and a literal near-miss', () => {
+            const messages = [
+                { id: 'g1', fromId: 'ann', toId: 'ben', content: `${REF}\nSnow day`, timestamp: '2026-12-02T10:00:00.000Z', conversationId: ANN_TO_BEN },
+                { id: 'g2', fromId: 'ann', toId: 'ben', content: NEAR_MISS, timestamp: '2026-12-02T09:00:00.000Z', conversationId: ANN_TO_BEN },
+                { id: 'g3', fromId: 'cat', toId: 'ann', content: REF, timestamp: '2026-12-02T11:00:00.000Z', conversationId: CAT_TO_ANN },
+            ];
+            render(<PublicFeed messages={messages} allUsers={USERS} />);
+
+            expect(within(threadRow("🎁 Ben's Gift Exchange")).getByText('📷 Snow day')).toBeInTheDocument();
+            expect(within(threadRow("🎁 Ann's Gift Exchange")).getByText('📷 GIF')).toBeInTheDocument();
+
+            fireEvent.click(screen.getByText("🎁 Ben's Gift Exchange"));
+            const embed = screen.getByTestId('message-gif');
+            expect(embed.querySelector('iframe')).toHaveAttribute('src', REF);
+            const bubble = embed.parentElement;
+            expect(within(bubble).getByText('Snow day')).toBe(bubble);
+            expect(screen.queryByText(`${REF}\nSnow day`)).not.toBeInTheDocument();
+            expect(screen.getByText(NEAR_MISS)).toBeInTheDocument();
+            expect(screen.getAllByTestId('message-gif')).toHaveLength(1);
+        });
+    });
 });

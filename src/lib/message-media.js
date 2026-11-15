@@ -1,13 +1,16 @@
 /**
  * Message image attachments: shape, limits, header parser and URL builder.
  *
- * Pure module (no Firebase SDK, no imports), shared by the client and the server.
+ * Pure module (no Firebase SDK; imports only the pure giphy-reference module), shared by
+ * the client and the server.
  *
  * An attachment is written only by the server (copied from a `mediaUploads` record) and
  * rendered only through a URL built here from validated structured fields on a fixed
  * host. `sniffImage` is a bounded header parser, NOT a validator: it proves a JPEG, PNG
  * or GIF signature and plausible dimensions, never that the data decodes.
  */
+
+import { getMessageGif } from './giphy-reference';
 
 export const MEDIA_MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 export const MEDIA_STILL_TARGET_BYTES = 1024 * 1024;
@@ -211,5 +214,7 @@ export function getMessagePreviewText(message) {
         if (content.trim()) return `📷 ${content}`;
         return attachment.format === 'gif' ? '📷 GIF' : '📷 Photo';
     }
+    const gif = getMessageGif(message);
+    if (gif) return gif.caption.trim() ? `📷 ${gif.caption}` : '📷 GIF';
     return content;
 }

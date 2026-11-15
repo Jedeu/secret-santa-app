@@ -41,6 +41,7 @@ export default defineConfig({
             CLOUDINARY_API_KEY: 'e2e-key',
             CLOUDINARY_API_SECRET: 'e2e-secret',
             MEDIA_UPLOAD_API_BASE: 'http://127.0.0.1:8791',
+            NEXT_PUBLIC_GIPHY_API_KEY: 'e2e-giphy-placeholder',
         },
     },
 });

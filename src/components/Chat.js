@@ -9,6 +9,8 @@ import { useToast } from '@/components/ClientProviders';
 import ReactionPicker from '@/components/ReactionPicker';
 import ReactionChips from '@/components/ReactionChips';
 import MessageAttachment from '@/components/MessageAttachment';
+import GifPicker from '@/components/GifPicker';
+import MessageGif from '@/components/MessageGif';
 import {
     enqueueMessage,
     getConversationOutboxMessages,
@@ -28,13 +30,32 @@ import {
     uploadMessageMedia,
     describeMediaError
 } from '@/lib/media-client';
+import { isGiphyConfigured } from '@/lib/giphy-client';
+import {
+    GIF_MESSAGE_MAX_LENGTH,
+    buildGifMessageContent,
+    getMessageGif,
+    isGiphyId
+} from '@/lib/giphy-reference';
 
 const MEDIA_QUEUE_FAILURE_TEXT = "Couldn't queue the message on this device. Press Send to try again.";
 const MEDIA_UPLOAD_FAILURE_TEXT = 'Upload failed. Press Send to try again.';
-const MEDIA_PRIVACY_NOTICE = 'Images are stored at an unlisted link. Anyone who has the link can open it.';
+const GIF_UNAVAILABLE_TEXT = 'GIFs are unavailable right now.';
+const GIF_CAPTION_TOO_LONG_TEXT = 'That caption is too long to send with a GIF. Shorten it and try again.';
+const GIF_PREVIEW_FAILED_TEXT = 'Preview unavailable. You can still send this GIF.';
 
 function hasAttachmentObject(message) {
     return !!message?.attachment && typeof message.attachment === 'object';
+}
+
+// GIF picker and draft state, bound to one composer identity. Each holder carries the
+// media session captured when the picker opened, so any session change makes it stale.
+function emptyGifState(identity) {
+    return { identity, picker: null, draft: null };
+}
+
+function isGifHolderStale(holder) {
+    return !!holder && !isMediaSessionCurrent(holder.session);
 }
 
 function revokePreviewUrl(draft) {
@@ -106,6 +127,16 @@ export default function Chat({
     const [draftMedia, setDraftMedia] = useState(null);
     const isMediaUploading = draftMedia?.phase === 'uploading';
     const isMediaPreparing = draftMedia?.phase === 'preparing';
+    // GIFs: picker null | { session }; draft null | { session, id, title, urls, urlIndex, previewFailed }.
+    const gifEnabled = isGiphyConfigured();
+    const gifIdentity = `${authUid || ''}|${currentUser.id}|${otherUser.id}|${conversationId}`;
+    const [gifState, setGifState] = useState(() => emptyGifState(gifIdentity));
+    if (gifState.identity !== gifIdentity || isGifHolderStale(gifState.picker) || isGifHolderStale(gifState.draft)) {
+        // Conditional reset during render: clears, does not hide.
+        setGifState(emptyGifState(gifIdentity));
+    }
+    const gifPicker = gifEnabled ? gifState.picker : null;
+    const draftGif = gifState.draft;
     const draftMediaRef = useRef(null);
     const uploadTokenRef = useRef(0);
     const uploadAbortRef = useRef(null);
@@ -270,6 +301,7 @@ export default function Chat({
             showToast('An image is uploading. Remove it before attaching another.');
             return;
         }
+        setGifState((prev) => (prev.picker || prev.draft ? { ...prev, picker: null, draft: null } : prev));
 
         revokePreviewUrl(current);
         const clientMessageId = createClientMessageId();
@@ -458,6 +490,64 @@ export default function Chat({
         }
     };
 
+    // --- GIFs: every write is fenced by holder identity inside a functional updater ---
+
+    const closeGifPicker = (holder) => {
+        setGifState((prev) => (prev.picker === holder ? { ...prev, picker: null } : prev));
+    };
+
+    const toggleGifPicker = () => {
+        if (isMediaUploading || sendingMediaRef.current || draftMediaRef.current) return;
+        setShowEmojiPicker(false);
+        if (gifPicker) {
+            closeGifPicker(gifPicker);
+            return;
+        }
+        const session = captureMediaSession({ ownerUid: authUid, fromUserId: currentUser.id });
+        if (!session || !otherUser?.id || !conversationId) {
+            showToast(GIF_UNAVAILABLE_TEXT);
+            return;
+        }
+        setGifState((prev) => (prev.identity === gifIdentity && !prev.picker ? { ...prev, picker: { session } } : prev));
+    };
+
+    const handleGifSelect = (holder, gif) => {
+        if (sendingMediaRef.current || draftMediaRef.current) {
+            closeGifPicker(holder);
+            return;
+        }
+        if (!isMediaSessionCurrent(holder.session)) {
+            setGifState((prev) => (prev.picker === holder ? emptyGifState(prev.identity) : prev));
+            return;
+        }
+        if (!isGiphyId(gif?.id)) return;
+        const urls = Array.isArray(gif.previewUrls) ? gif.previewUrls.filter((url) => typeof url === 'string') : [];
+        const draft = {
+            session: holder.session,
+            id: gif.id,
+            title: typeof gif.title === 'string' ? gif.title : '',
+            urls,
+            urlIndex: 0,
+            previewFailed: urls.length === 0,
+        };
+        setGifState((prev) => (prev.picker === holder ? { ...prev, picker: null, draft } : prev));
+    };
+
+    const removeDraftGif = (draft) => {
+        setGifState((prev) => (prev.draft === draft ? { ...prev, draft: null } : prev));
+    };
+
+    const handleGifPreviewError = (draft, failedUrl) => {
+        setGifState((prev) => {
+            if (prev.draft !== draft || draft.urls[draft.urlIndex] !== failedUrl) return prev;
+            const nextIndex = draft.urlIndex + 1;
+            if (nextIndex < draft.urls.length) {
+                return { ...prev, draft: { ...draft, urlIndex: nextIndex } };
+            }
+            return { ...prev, draft: { ...draft, previewFailed: true } };
+        });
+    };
+
     const sendMessage = async (e) => {
         e.preventDefault();
         const draft = draftMediaRef.current;
@@ -465,7 +555,26 @@ export default function Chat({
             await sendDraftMedia(draft);
             return;
         }
-        const content = newMessage.trim();
+        const caption = newMessage.trim();
+        const gif = gifState.draft;
+        if (gif && !isMediaSessionCurrent(gif.session)) {
+            setGifState((prev) => emptyGifState(prev.identity));
+            showToast('Failed to queue message. Please try again.');
+            return;
+        }
+        let content = caption;
+        if (gif) {
+            const built = buildGifMessageContent(gif.id, caption);
+            if (built === null) {
+                removeDraftGif(gif);
+                return;
+            }
+            if (built.length > GIF_MESSAGE_MAX_LENGTH) {
+                showToast(GIF_CAPTION_TOO_LONG_TEXT);
+                return;
+            }
+            content = built;
+        }
         if (!content) {
             clearTyping(currentUser.id, conversationId);
             return;
@@ -481,6 +590,9 @@ export default function Chat({
                 content
             });
             setNewMessage('');
+            if (gif) {
+                removeDraftGif(gif);
+            }
             scrollToBottom('auto');
             drainOutboxForUser({ ownerUid: authUid, fromUserId: currentUser.id }).catch((error) => {
                 console.error('Outbox drain failed after enqueue:', error);
@@ -654,6 +766,8 @@ export default function Chat({
                 {messages.map(msg => {
                     const isMe = msg.fromId === currentUser.id;
                     const isReadReceipt = Boolean(isMe && otherLastReadAt && msg.timestamp && otherLastReadAt >= msg.timestamp);
+                    const gif = getMessageGif(msg);
+                    const text = gif ? gif.caption : msg.content;
                     return (
                         <div key={msg.id} style={{
                             display: 'flex',
@@ -703,7 +817,8 @@ export default function Chat({
                                     {hasAttachmentObject(msg) && (
                                         <MessageAttachment attachment={msg.attachment} />
                                     )}
-                                    {msg.content ? (
+                                    {gif && <MessageGif id={gif.id} />}
+                                    {text ? (
                                         <ReactMarkdown
                                             remarkPlugins={[remarkGfm]}
                                             components={{
@@ -722,7 +837,7 @@ export default function Chat({
                                                 p: ({ node, ...props }) => <p {...props} style={{ margin: 0, wordBreak: 'break-word' }} />
                                             }}
                                         >
-                                            {msg.content}
+                                            {text}
                                         </ReactMarkdown>
                                     ) : null}
                                     {reactionPickerMessageId === msg.id && (
@@ -769,6 +884,7 @@ export default function Chat({
                 })}
                 {outboxMessages.map((msg) => {
                     const isFailed = msg.status === 'failed';
+                    const gif = getMessageGif(msg);
                     return (
                         <div key={msg.clientMessageId} style={{
                             display: 'flex',
@@ -792,7 +908,8 @@ export default function Chat({
                                     {hasAttachmentObject(msg) && (
                                         <MessageAttachment attachment={msg.attachment} />
                                     )}
-                                    {msg.content}
+                                    {gif && <MessageGif id={gif.id} />}
+                                    {gif ? gif.caption : msg.content}
                                 </div>
                                 <span style={{
                                     fontSize: '10px',
@@ -822,6 +939,14 @@ export default function Chat({
                 })}
                 <div ref={bottomRef} />
             </div>
+
+            {gifPicker && (
+                <GifPicker
+                    onSelect={(gif) => handleGifSelect(gifPicker, gif)}
+                    onClose={() => closeGifPicker(gifPicker)}
+                    canRequest={() => isMediaSessionCurrent(gifPicker.session)}
+                />
+            )}
 
             <form onSubmit={sendMessage} style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}>
                 {draftMedia && (
@@ -866,15 +991,96 @@ export default function Chat({
                                             ? (draftMedia.errorText || '')
                                             : ''}
                             </span>
-                            <span style={{ fontSize: '10px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
-                                {MEDIA_PRIVACY_NOTICE}
-                            </span>
                         </div>
                         <button
                             type="button"
                             aria-label="Remove image"
                             title="Remove image"
                             onClick={removeDraftMedia}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--text-muted)',
+                                fontSize: '18px',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                lineHeight: 1,
+                                flexShrink: 0
+                            }}
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
+                {!draftMedia && draftGif && (
+                    <div
+                        data-testid="composer-gif"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px',
+                            border: '1px solid var(--border)',
+                            borderRadius: '8px',
+                            minWidth: 0
+                        }}
+                    >
+                        {!draftGif.previewFailed && typeof draftGif.urls[draftGif.urlIndex] === 'string' && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                                key={draftGif.urls[draftGif.urlIndex]}
+                                data-testid="composer-gif-preview"
+                                src={draftGif.urls[draftGif.urlIndex]}
+                                alt="GIF preview"
+                                referrerPolicy="no-referrer"
+                                onError={() => handleGifPreviewError(draftGif, draftGif.urls[draftGif.urlIndex])}
+                                style={{
+                                    maxWidth: '96px',
+                                    maxHeight: '96px',
+                                    objectFit: 'contain',
+                                    borderRadius: '6px',
+                                    display: 'block',
+                                    flexShrink: 0
+                                }}
+                            />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {draftGif.previewFailed && (
+                                <span
+                                    data-testid="composer-gif-status"
+                                    aria-live="polite"
+                                    style={{ fontSize: '12px', overflowWrap: 'anywhere' }}
+                                >
+                                    {GIF_PREVIEW_FAILED_TEXT}
+                                </span>
+                            )}
+                            <span
+                                style={{
+                                    display: 'block',
+                                    boxSizing: 'border-box',
+                                    width: '100%',
+                                    maxWidth: '172px',
+                                    background: '#000',
+                                    padding: '4px 6px',
+                                    borderRadius: '4px'
+                                }}
+                            >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                    data-testid="composer-gif-attribution"
+                                    src="/giphy/PoweredBy_200px-Black_HorizLogo.png"
+                                    alt="Powered by GIPHY"
+                                    width={200}
+                                    height={26}
+                                    style={{ display: 'block', width: '100%', maxWidth: '160px', height: 'auto' }}
+                                />
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            aria-label="Remove GIF"
+                            title="Remove GIF"
+                            onClick={() => removeDraftGif(draftGif)}
                             style={{
                                 background: 'transparent',
                                 border: 'none',
@@ -942,7 +1148,12 @@ export default function Chat({
                         )}
                         <button
                             type="button"
-                            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                            onClick={() => {
+                                if (gifPicker) {
+                                    closeGifPicker(gifPicker);
+                                }
+                                setShowEmojiPicker(!showEmojiPicker);
+                            }}
                             aria-label="Add emoji"
                             disabled={isMediaUploading}
                             style={{
@@ -974,7 +1185,7 @@ export default function Chat({
                 </div>
 
                 {showEmojiPicker && (
-                    <div ref={emojiPickerRef} style={{ position: 'absolute', bottom: '60px', right: '0', zIndex: 1000 }}>
+                    <div ref={emojiPickerRef} style={{ position: 'absolute', bottom: gifEnabled ? '70px' : '60px', right: '0', zIndex: 1000 }}>
                         <EmojiPicker
                             onEmojiClick={onEmojiClick}
                             theme="dark"
@@ -985,11 +1196,39 @@ export default function Chat({
                 )}
 
                 <div style={{
-                    fontSize: '10px',
-                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
                     paddingLeft: '4px'
                 }}>
-                    Tip: **bold** *italic* [link](url)
+                    {gifEnabled && (
+                        <button
+                            type="button"
+                            aria-label="Choose a GIF"
+                            title="Choose a GIF"
+                            aria-expanded={!!gifPicker}
+                            disabled={isMediaUploading || !!draftMedia}
+                            onClick={toggleGifPicker}
+                            style={{
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                border: '1px solid var(--border)',
+                                borderRadius: '6px',
+                                padding: '4px 10px',
+                                background: 'transparent',
+                                color: 'var(--foreground)',
+                                lineHeight: 1,
+                                flexShrink: 0,
+                                cursor: isMediaUploading || draftMedia ? 'default' : 'pointer',
+                                opacity: isMediaUploading || draftMedia ? 0.5 : 1
+                            }}
+                        >
+                            GIF
+                        </button>
+                    )}
+                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        Tip: **bold** *italic* [link](url)
+                    </span>
                 </div>
             </form>
         </div>

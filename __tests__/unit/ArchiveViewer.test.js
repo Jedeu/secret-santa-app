@@ -227,6 +227,66 @@ describe('ArchiveViewer', () => {
         expect(rows.filter((row) => within(row).queryByTestId('message-attachment'))).toHaveLength(1);
     });
 
+    describe('GIPHY references (no key configured)', () => {
+        const KEY_ENV = 'NEXT_PUBLIC_GIPHY_API_KEY';
+        const REF = 'https://giphy.com/embed/SyntheticGif01';
+        const NEAR_MISS = 'https://giphy.com/embed/near-miss';
+        let savedKey;
+
+        beforeEach(() => {
+            savedKey = process.env[KEY_ENV];
+            delete process.env[KEY_ENV];
+        });
+
+        afterEach(() => {
+            if (savedKey === undefined) {
+                delete process.env[KEY_ENV];
+            } else {
+                process.env[KEY_ENV] = savedKey;
+            }
+        });
+
+        test('preview label, embed src, caption-only text and a literal near-miss', () => {
+            const messages = [
+                MESSAGES[0],
+                {
+                    id: 'g1',
+                    fromId: 'ann',
+                    toId: 'ben',
+                    content: NEAR_MISS,
+                    timestamp: '2025-12-02T09:00:00.000Z',
+                    conversationId: 'santa_ann_recipient_ben',
+                },
+                {
+                    id: 'g2',
+                    fromId: 'ben',
+                    toId: 'ann',
+                    content: `${REF}\nLine one\nLine two`,
+                    timestamp: '2025-12-02T10:00:00.000Z',
+                    conversationId: 'santa_ann_recipient_ben',
+                },
+            ];
+            useYearArchive.mockReturnValue({ status: 'ready', data: { users: USERS, messages, reactions: REACTIONS }, reload });
+            renderViewer();
+
+            const threads = screen.getAllByTestId('archive-thread');
+            expect(within(threads[0]).getByText('📷 Line one\nLine two', { normalizer: (text) => text })).toBeInTheDocument();
+
+            fireEvent.click(threads[0]);
+            const rows = screen.getAllByTestId('archive-message');
+            const gifRows = rows.filter((row) => within(row).queryByTestId('message-gif'));
+            expect(gifRows).toHaveLength(1);
+            const [gifRow] = gifRows;
+            expect(within(gifRow).getByTestId('message-gif').querySelector('iframe')).toHaveAttribute('src', REF);
+            expect(within(gifRow).getByText('Line one\nLine two', { normalizer: (text) => text })).toBeInTheDocument();
+            expect(within(gifRow).queryByText(REF, { exact: false })).not.toBeInTheDocument();
+
+            const nearMissRow = rows.find((row) => within(row).queryByText(NEAR_MISS));
+            expect(nearMissRow).toBeDefined();
+            expect(within(nearMissRow).queryByTestId('message-gif')).not.toBeInTheDocument();
+        });
+    });
+
     test('the year select switches the requested year', () => {
         renderViewer({ years: [2026, 2025], initialYear: 2026, closedYears: [2025, 2026] });
         expect(useYearArchive).toHaveBeenLastCalledWith({ authUid: 'uid-a', year: 2026, immutable: true });
