@@ -4,6 +4,16 @@ const withPWA = require('@ducanh2912/next-pwa').default({
     register: true,
     skipWaiting: true,
     customWorkerSrc: 'worker',
+    extendDefaultRuntimeCaching: true,
+    workboxOptions: {
+        runtimeCaching: [
+            {
+                urlPattern: /^https:\/\/(?:[a-z0-9-]+\.)*giphy\.com(?::\d+)?\//i,
+                handler: 'NetworkOnly',
+                options: { fetchOptions: { cache: 'no-store' } },
+            },
+        ],
+    },
 });
 
 /** @type {import('next').NextConfig} */

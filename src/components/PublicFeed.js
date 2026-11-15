@@ -4,7 +4,9 @@ import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } fro
 import { buildAssignmentMap, resolveMessageConversation } from '@/lib/message-utils';
 import ReactionChips from '@/components/ReactionChips';
 import MessageAttachment from '@/components/MessageAttachment';
+import MessageGif from '@/components/MessageGif';
 import { getMessagePreviewText } from '@/lib/message-media';
+import { getMessageGif } from '@/lib/giphy-reference';
 
 // Legacy per-browser key; no longer read (it was shared across accounts).
 const LEGACY_LAST_VIEWED_KEY = 'publicFeedLastViewed';
@@ -334,32 +336,37 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                         maxWidth: '85%',
                                         alignItems: group.isSanta ? 'flex-end' : 'flex-start'
                                     }}>
-                                        {group.messages.map((msg) => (
-                                            <div key={msg.id} style={{ width: '100%' }}>
-                                                <div style={{
-                                                    padding: '8px 12px',
-                                                    background: 'var(--surface-highlight)',
-                                                    color: 'var(--foreground)',
-                                                    borderRadius: '4px',
-                                                    fontSize: '14px',
-                                                    borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
-                                                    borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
-                                                    marginBottom: '2px',
-                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                                }}>
-                                                    {msg.attachment && typeof msg.attachment === 'object' && (
-                                                        <MessageAttachment attachment={msg.attachment} />
-                                                    )}
-                                                    {msg.content ? msg.content : null}
+                                        {group.messages.map((msg) => {
+                                            const gif = getMessageGif(msg);
+                                            const text = gif ? gif.caption : msg.content;
+                                            return (
+                                                <div key={msg.id} style={{ width: '100%' }}>
+                                                    <div style={{
+                                                        padding: '8px 12px',
+                                                        background: 'var(--surface-highlight)',
+                                                        color: 'var(--foreground)',
+                                                        borderRadius: '4px',
+                                                        fontSize: '14px',
+                                                        borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
+                                                        borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
+                                                        marginBottom: '2px',
+                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                                    }}>
+                                                        {msg.attachment && typeof msg.attachment === 'object' && (
+                                                            <MessageAttachment attachment={msg.attachment} />
+                                                        )}
+                                                        {gif && <MessageGif id={gif.id} />}
+                                                        {text ? text : null}
+                                                    </div>
+                                                    <ReactionChips
+                                                        messageId={msg.id}
+                                                        allReactions={allReactions}
+                                                        currentUserId={userId}
+                                                        onToggle={null}
+                                                    />
                                                 </div>
-                                                <ReactionChips
-                                                    messageId={msg.id}
-                                                    allReactions={allReactions}
-                                                    currentUserId={userId}
-                                                    onToggle={null}
-                                                />
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             ));

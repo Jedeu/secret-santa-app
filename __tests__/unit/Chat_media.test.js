@@ -279,14 +279,14 @@ describe('Chat image attachments', () => {
     });
 
     describe('drafts', () => {
-        test('paste shows the preview and notice; Remove clears it, revokes the URL and never uploads', async () => {
+        test('paste shows the preview without the link notice; Remove clears it, revokes the URL and never uploads', async () => {
             await renderChat();
             const notPrevented = paste();
             expect(notPrevented).toBe(false);
             const preview = await screen.findByAltText('Attachment preview');
 
             expect(preview).toHaveAttribute('src', 'blob:preview-1');
-            expect(screen.getByText(NOTICE)).toBeInTheDocument();
+            expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
             expect(status()).toHaveTextContent('');
 
             fireEvent.click(screen.getByLabelText('Remove image'));

@@ -4,7 +4,9 @@ import { useYearArchive } from '@/hooks/useYearArchive';
 import { buildArchiveView } from '@/lib/archive-threads';
 import ReactionChips from '@/components/ReactionChips';
 import MessageAttachment from '@/components/MessageAttachment';
+import MessageGif from '@/components/MessageGif';
 import { getMessagePreviewText } from '@/lib/message-media';
+import { getMessageGif } from '@/lib/giphy-reference';
 
 /**
  * ArchiveViewer - Read-only view of a past (closed) year: pairings and conversations.
@@ -152,26 +154,31 @@ export default function ArchiveViewer({ authUid, years, initialYear, closedYears
                         <p className="text-muted">No messages</p>
                     ) : (
                         <ul style={listStyle}>
-                            {selectedThread.messages.map((message, index) => (
-                                <li key={message.id ?? `message-${index}`} data-testid="archive-message" style={rowStyle}>
-                                    <div style={{ fontWeight: 600, fontSize: '13px' }}>{message.label}</div>
-                                    {message.attachment && typeof message.attachment === 'object' && (
-                                        <MessageAttachment attachment={message.attachment} />
-                                    )}
-                                    {typeof message.content === 'string' && message.content !== '' && (
-                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                            {message.content}
-                                        </div>
-                                    )}
-                                    <div className="text-muted" style={{ fontSize: '12px' }}>{formatDate(message.timestamp)}</div>
-                                    <ReactionChips
-                                        messageId={message.id}
-                                        allReactions={data.reactions}
-                                        currentUserId={null}
-                                        onToggle={null}
-                                    />
-                                </li>
-                            ))}
+                            {selectedThread.messages.map((message, index) => {
+                                const gif = getMessageGif(message);
+                                const text = gif ? gif.caption : message.content;
+                                return (
+                                    <li key={message.id ?? `message-${index}`} data-testid="archive-message" style={rowStyle}>
+                                        <div style={{ fontWeight: 600, fontSize: '13px' }}>{message.label}</div>
+                                        {message.attachment && typeof message.attachment === 'object' && (
+                                            <MessageAttachment attachment={message.attachment} />
+                                        )}
+                                        {gif && <MessageGif id={gif.id} />}
+                                        {typeof text === 'string' && text !== '' && (
+                                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                                {text}
+                                            </div>
+                                        )}
+                                        <div className="text-muted" style={{ fontSize: '12px' }}>{formatDate(message.timestamp)}</div>
+                                        <ReactionChips
+                                            messageId={message.id}
+                                            allReactions={data.reactions}
+                                            currentUserId={null}
+                                            onToggle={null}
+                                        />
+                                    </li>
+                                );
+                            })}
                         </ul>
                     )}
                 </div>

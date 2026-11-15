@@ -93,6 +93,7 @@ Messages use a **conversationId-based system**:
 - `conversationId` is a **directional** string, not a hash — format `santa_{santaId}_recipient_{recipientId}`
 - Optional idempotency fields `clientMessageId` (UUID) and `clientCreatedAt` (ISO string) support safe retries; the message doc id is the `clientMessageId` when provided, else a fresh UUID
 - An optional `attachment` (one image or GIF) is copied by the server from a server-only `mediaUploads` record; clients never supply its fields. `content` may be empty only when an attachment is present
+- A GIPHY GIF is a text message, not an attachment: the first line of `content` is `https://giphy.com/embed/{id}`, optionally followed by a newline and a caption. `src/lib/giphy-reference.js` is the only builder and parser. Only this reference is stored — never GIPHY API objects, media URLs or media.
 - Real-time updates via Firestore listeners in `src/hooks/useRealtimeMessages.js`
 
 Key utilities in `src/lib/message-utils.js`:
@@ -208,6 +209,10 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - `src/lib/media-server.js`: Server-only media config, bounded body reader and Cloudinary upload
 - `src/lib/media-client.js`: Client image preparation, session-fenced upload and capability probe
 - `src/components/MessageAttachment.js`: Renders a message's image
+- `src/lib/giphy-reference.js`: Pure GIF reference builder/parser (shared by all renderers)
+- `src/lib/giphy-client.js`: Browser-only GIPHY Trending/Search client and service-worker policy probe
+- `src/components/GifPicker.js`: GIF browse/search panel with GIPHY attribution
+- `src/components/MessageGif.js`: Renders a GIF reference as a sandboxed GIPHY embed
 - `src/app/api/messages/media/route.js`: Image upload route
 - `firebase.json`: Emulator configuration
 - `firestore.rules`: Firestore security rules (authoritative; summarized under Important Notes)
@@ -228,6 +233,7 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - The message outbox stores one localStorage entry per queued message under secret-santa-message-outbox-v2:*; the v1 key is read-only legacy input. Tabs running an older build must reload before the outbox fixes apply.
 - Image attachments need `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` on the server; with any missing, the attach control is hidden and uploads return 503 while text works. Images are public-by-link: anyone with the URL can view them. Cloudinary's free limits are soft and each upload counts as a transformation; the app does not enforce a budget and does not change any hosting or Firebase billing setting.
 - The outbox stores media references under `secret-santa-message-outbox-v2:media-item:*` and never stores image bytes. An image is uploaded before it is queued; a late upload is queued only while the writable scope captured at Send is still current.
+- The GIF picker needs `NEXT_PUBLIC_GIPHY_API_KEY` (browser-visible); without it the GIF button is hidden and existing GIF messages still render. The beta key allows 100 calls per hour shared by all users and tabs, which the app cannot enforce. The app never proxies, uploads or stores GIPHY responses or media; results live only in picker and composer state bound to the current media session. The service worker serves all `giphy.com` hosts `NetworkOnly` with `cache: 'no-store'` (`next.config.js`). On activation and before every picker request, `worker/index.js` removes GIPHY entries from the older `cross-origin` cache and their rows in Workbox's `workbox-expiration` database, and acknowledges only if both succeeded; the picker makes no GIPHY request without that acknowledgement. That cleanup is pinned to the Workbox 7.1 expiration schema and fails closed on any other. Provider-owned embed and browser caching are outside the app's control.
 - Year lifecycle: `Close year` and `Start new year` are the only season transitions. The app has no bulk reset or deletion of year data and never writes to a closed year; the open year keeps its normal writes (messages, pairing claims, read markers, and adding or removing typing and reaction documents). In the app, only `POST /api/admin/year/close` and `POST /api/admin/year/start` call `closeYear` and `startNewYear`; these routes accept only an admin's Bearer ID token (verified email outside development), and no environment variable enables or disables them. The admin panel calls a route only after the admin types the year, and no deploy, sign-in, page load or background task starts a transition.
 - Firestore rules allow reads of the current year and of earlier years listed in `closedYears`, never a later year, and writes only in the single open year.
 - Automatic draw and reveal: `Start new year` is the only thing that draws recipients; there is no reroll. A profile with `drawMode: 'auto'` shows the reveal until `revealAckRecipientId` equals `recipientId`. Only `POST /api/reveal/acknowledge` writes that; bootstrap never does. The reveal is a UI step, not secrecy. Profiles without `drawMode` use manual selection.
