@@ -13,7 +13,7 @@ const buttonStyle = {
     padding: '2px',
 };
 
-export default function ReactionPicker({ onSelect, onClose, onMore }) {
+export default function ReactionPicker({ onSelect, onClose, onMore, onReply }) {
     const pickerRef = useRef(null);
     // Above the bubble by default; below it when the scrolling list would clip it (the top message).
     const [below, setBelow] = useState(false);
@@ -93,6 +93,27 @@ export default function ReactionPicker({ onSelect, onClose, onMore }) {
                     }}
                 >
                     +
+                </button>
+            )}
+            {onReply && (
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onReply();
+                        onClose?.();
+                    }}
+                    aria-label="Reply"
+                    title="Reply"
+                    style={{
+                        ...buttonStyle,
+                        borderLeft: '1px solid var(--border)',
+                        color: 'var(--foreground)',
+                        padding: '2px 2px 2px 8px',
+                        marginLeft: '2px',
+                    }}
+                >
+                    ↩
                 </button>
             )}
         </div>

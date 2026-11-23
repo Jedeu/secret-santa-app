@@ -5,6 +5,8 @@ import { buildAssignmentMap, resolveMessageConversation } from '@/lib/message-ut
 import ReactionChips from '@/components/ReactionChips';
 import MessageAttachment from '@/components/MessageAttachment';
 import MessageGif from '@/components/MessageGif';
+import MessageQuote from '@/components/MessageQuote';
+import { useMessageJump } from '@/hooks/useMessageJump';
 import { getMessagePreviewText } from '@/lib/message-media';
 import { getMessageGif } from '@/lib/giphy-reference';
 
@@ -27,6 +29,7 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
     // Threads without a hydrated marker show no unread badge.
     const [markers, setMarkers] = useState({});
     const markedRef = useRef({});
+    const { containerRef: messageListRef, highlightedId, jumpTo } = useMessageJump();
 
     // Discard the legacy shared key without reading it.
     useEffect(() => {
@@ -289,9 +292,11 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                     )
                 ) : (
                     // Message View
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px' }}>
+                    <div ref={messageListRef} style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px' }}>
                         {(() => {
                             const sortedMessages = threadsById[selectedThread]?.messages || [];
+                            // Quotes resolve only within this thread and reuse the feed's sender labels.
+                            const threadMessagesById = new Map(sortedMessages.map(msg => [msg.id, msg]));
                             const groups = [];
 
                             sortedMessages.forEach(msg => {
@@ -339,9 +344,10 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                         {group.messages.map((msg) => {
                                             const gif = getMessageGif(msg);
                                             const text = gif ? gif.caption : msg.content;
+                                            const quoted = msg.replyToId ? threadMessagesById.get(msg.replyToId) || null : null;
                                             return (
                                                 <div key={msg.id} style={{ width: '100%' }}>
-                                                    <div style={{
+                                                    <div data-message-id={msg.id} style={{
                                                         padding: '8px 12px',
                                                         background: 'var(--surface-highlight)',
                                                         color: 'var(--foreground)',
@@ -350,8 +356,18 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                                         borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
                                                         borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
                                                         marginBottom: '2px',
-                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                                        outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
+                                                        outlineOffset: '2px',
+                                                        transition: 'outline-color 300ms ease'
                                                     }}>
+                                                        {msg.replyToId && (
+                                                            <MessageQuote
+                                                                target={quoted}
+                                                                label={quoted ? (quoted.isSantaMsg === true ? '🎅 Santa' : quoted.fromName) : ''}
+                                                                onJump={jumpTo}
+                                                            />
+                                                        )}
                                                         {msg.attachment && typeof msg.attachment === 'object' && (
                                                             <MessageAttachment attachment={msg.attachment} />
                                                         )}

@@ -223,6 +223,7 @@ export function matchesStoredMessage(existing, request) {
     if (nullable(existing.clientMessageId) !== nullable(request.clientMessageId)) return false;
     if (nullable(existing.clientCreatedAt) !== nullable(request.clientCreatedAt)) return false;
     if (nullable(existing.attachment?.id) !== nullable(request.attachmentId)) return false;
+    if (nullable(existing.replyToId) !== nullable(request.replyToId)) return false;
     const requested = nullable(request.requestedConversationId);
     return requested === null || requested === existing.conversationId;
 }

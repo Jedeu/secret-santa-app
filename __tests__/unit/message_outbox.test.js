@@ -532,6 +532,29 @@ describe('message-outbox', () => {
             expect(pendingItems()).toHaveLength(0);
         });
 
+        test('replyToId is stored and sent for text and image messages; a non-UUID one is dropped', async () => {
+            const REPLY_TO = '9b2f6c1e-5d1a-4e7b-9c3d-2a1b0c9d8e7f';
+            const text = enqueue('Text reply', { replyToId: REPLY_TO });
+            jest.advanceTimersByTime(1);
+            enqueueMedia({ replyToId: REPLY_TO });
+            jest.advanceTimersByTime(1);
+            const plain = enqueue('Not a reply', { replyToId: 'm1' });
+
+            expect(JSON.parse(window.localStorage.getItem(OUTBOX_ITEM_PREFIX + text.clientMessageId)).replyToId).toBe(REPLY_TO);
+            expect(JSON.parse(window.localStorage.getItem(OUTBOX_ITEM_PREFIX + plain.clientMessageId))).not.toHaveProperty('replyToId');
+
+            const fetchImpl = jest.fn().mockResolvedValue(makeResponse({ ok: true, status: 200 }));
+            await drainOutboxForUser({ ownerUid: OWNER, fromUserId: FROM, fetchImpl });
+
+            const bodies = fetchImpl.mock.calls.map(([, request]) => JSON.parse(request.body));
+            expect(bodies.map((body) => [body.content, body.replyToId])).toEqual([
+                ['Text reply', REPLY_TO],
+                ['A caption', REPLY_TO],
+                ['Not a reply', undefined],
+            ]);
+            expect(bodies[1].attachment).toEqual({ id: ATTACHMENT.id });
+        });
+
         test('a permanent failure keeps the media item visible as failed', async () => {
             enqueueMedia();
             const fetchImpl = jest.fn().mockResolvedValue(makeResponse({ ok: false, status: 400, error: 'Attachment is not available for this message' }));

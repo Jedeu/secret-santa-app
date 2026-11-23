@@ -5,6 +5,8 @@ import { buildArchiveView } from '@/lib/archive-threads';
 import ReactionChips from '@/components/ReactionChips';
 import MessageAttachment from '@/components/MessageAttachment';
 import MessageGif from '@/components/MessageGif';
+import MessageQuote from '@/components/MessageQuote';
+import { useMessageJump } from '@/hooks/useMessageJump';
 import { getMessagePreviewText } from '@/lib/message-media';
 import { getMessageGif } from '@/lib/giphy-reference';
 
@@ -38,6 +40,12 @@ export default function ArchiveViewer({ authUid, years, initialYear, closedYears
     const selectedThread = view && threadId !== null
         ? view.threads.find((thread) => thread.id === threadId) || null
         : null;
+    // Quotes resolve only within the open thread and reuse the archive's labels.
+    const threadMessagesById = useMemo(
+        () => new Map((selectedThread?.messages || []).map((message) => [message.id, message])),
+        [selectedThread]
+    );
+    const { containerRef: messageListRef, highlightedId, jumpTo } = useMessageJump();
 
     const handleYearChange = (event) => {
         setYear(Number(event.target.value));
@@ -153,13 +161,26 @@ export default function ArchiveViewer({ authUid, years, initialYear, closedYears
                     {selectedThread.messages.length === 0 ? (
                         <p className="text-muted">No messages</p>
                     ) : (
-                        <ul style={listStyle}>
+                        <ul ref={messageListRef} style={listStyle}>
                             {selectedThread.messages.map((message, index) => {
                                 const gif = getMessageGif(message);
                                 const text = gif ? gif.caption : message.content;
+                                const quoted = message.replyToId ? threadMessagesById.get(message.replyToId) || null : null;
                                 return (
-                                    <li key={message.id ?? `message-${index}`} data-testid="archive-message" style={rowStyle}>
+                                    <li
+                                        key={message.id ?? `message-${index}`}
+                                        data-testid="archive-message"
+                                        data-message-id={message.id}
+                                        style={highlightedId === message.id ? { ...rowStyle, outline: '2px solid var(--accent)' } : rowStyle}
+                                    >
                                         <div style={{ fontWeight: 600, fontSize: '13px' }}>{message.label}</div>
+                                        {message.replyToId && (
+                                            <MessageQuote
+                                                target={quoted}
+                                                label={quoted ? quoted.label : ''}
+                                                onJump={jumpTo}
+                                            />
+                                        )}
                                         {message.attachment && typeof message.attachment === 'object' && (
                                             <MessageAttachment attachment={message.attachment} />
                                         )}

@@ -131,6 +131,8 @@ export async function POST(request) {
         const attachmentId = hasAttachment && typeof body.attachment?.id === 'string'
             ? body.attachment.id.trim()
             : '';
+        const hasReplyTo = body?.replyToId !== undefined && body?.replyToId !== null;
+        const replyToId = hasReplyTo && typeof body.replyToId === 'string' ? body.replyToId.trim() : '';
 
         if (!toId) {
             return NextResponse.json({ error: 'Recipient is required' }, { status: 400 });
@@ -138,6 +140,10 @@ export async function POST(request) {
 
         if (hasAttachment && !isUUIDLike(attachmentId)) {
             return NextResponse.json({ error: 'Invalid attachment', code: 'ATTACHMENT_INVALID' }, { status: 400 });
+        }
+
+        if (hasReplyTo && !isUUIDLike(replyToId)) {
+            return NextResponse.json({ error: 'Invalid reply target', code: 'REPLY_TARGET_INVALID' }, { status: 400 });
         }
 
         if (!content && !attachmentId) {
@@ -172,8 +178,15 @@ export async function POST(request) {
             const mediaRef = attachmentId
                 ? firestore.collection(MEDIA_UPLOADS_COLLECTION).doc(messageId)
                 : null;
-            const refs = mediaRef ? [recipientRef, messageRef, mediaRef] : [recipientRef, messageRef];
-            const [recipientSnap, messageSnap, mediaSnap] = await tx.getAll(...refs);
+            // A reply may quote only a message of the same year and conversation.
+            const replyRef = replyToId
+                ? firestore.collection(yearCollectionPath(year, 'messages').join('/')).doc(replyToId)
+                : null;
+            const refs = [recipientRef, messageRef, mediaRef, replyRef].filter(Boolean);
+            const snaps = await tx.getAll(...refs);
+            const [recipientSnap, messageSnap] = snaps;
+            const mediaSnap = mediaRef ? snaps[2] : null;
+            const replySnap = replyRef ? snaps[snaps.length - 1] : null;
 
             if (senderUserId && senderUserId !== sender.id) {
                 throw new SendRouteError(403, {
@@ -193,6 +206,7 @@ export async function POST(request) {
                     clientCreatedAt: clientCreatedAt || null,
                     requestedConversationId,
                     attachmentId: attachmentId || null,
+                    replyToId: replyToId || null,
                 });
                 if (matches) {
                     return { kind: 'replayed', message: existing };
@@ -212,6 +226,16 @@ export async function POST(request) {
                     error: 'Invalid conversation for this recipient',
                     code: resolved.error,
                 });
+            }
+
+            if (replyRef) {
+                const target = replySnap?.exists ? replySnap.data() : null;
+                if (!target || target.conversationId !== resolved.conversationId) {
+                    throw new SendRouteError(400, {
+                        error: 'Reply target is not in this conversation',
+                        code: 'REPLY_TARGET_INVALID',
+                    });
+                }
             }
 
             let attachment = null;
@@ -245,6 +269,7 @@ export async function POST(request) {
                 ...(clientMessageId ? { clientMessageId } : {}),
                 ...(clientCreatedAt ? { clientCreatedAt } : {}),
                 ...(attachment ? { attachment } : {}),
+                ...(replyToId ? { replyToId } : {}),
             };
             tx.create(messageRef, message);
             if (attachment) {
