@@ -1,4 +1,4 @@
-import { test, expect, BrowserContext, CDPSession, Page } from '@playwright/test';
+import { test, expect, BrowserContext, CDPSession, Locator, Page } from '@playwright/test';
 import { PARTICIPANTS } from '../src/lib/participants';
 
 /**
@@ -54,6 +54,21 @@ function bubble(page: Page, messageId: string) {
     return page.locator(`[data-message-id="${messageId}"]`);
 }
 
+// Messages above can still change height while media loads; touch where the bubble settled.
+async function stableCenter(locator: Locator) {
+    let previous = '';
+    let center = { x: 0, y: 0 };
+    await expect.poll(async () => {
+        const box = (await locator.boundingBox())!;
+        center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        const key = JSON.stringify(center);
+        const settled = key === previous;
+        previous = key;
+        return settled;
+    }, { intervals: [150] }).toBe(true);
+    return center;
+}
+
 // A real touch drag through Chromium's input pipeline, so touch-action and pointer
 // events behave as on a phone. Leaves the finger down when release is false.
 async function touchDrag(cdp: CDPSession, from: { x: number; y: number }, dx: number, dy: number, release = true) {
@@ -101,14 +116,16 @@ test('reply by swipe on a phone and from the tap menu on desktop; the feed keeps
     const questionBubble = bubble(recipientPage, questionDoc.id);
     await expect(questionBubble).toBeVisible({ timeout: 10000 });
     const cdp = await phone.newCDPSession(recipientPage);
-    const box = (await questionBubble.boundingBox())!;
-    const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
     // A mostly vertical drag is scrolling: no reply.
-    await touchDrag(cdp, start, 30, 120);
+    await touchDrag(cdp, await stableCenter(questionBubble), 30, 120);
     await expect(recipientPage.getByTestId('composer-reply')).toHaveCount(0);
 
-    await touchDrag(cdp, start, 90, 4, false);
+    // That drag may have scrolled a long conversation; bring the message back first.
+    await questionBubble.scrollIntoViewIfNeeded();
+    await touchDrag(cdp, await stableCenter(questionBubble), 90, 4, false);
+    await expect(recipientPage.getByTestId('swipe-to-reply').filter({ has: questionBubble }).locator(':scope > div'))
+        .toHaveCSS('transform', /matrix/);
     await shot(recipientPage, 'phone-1-swiping');
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 
