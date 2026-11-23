@@ -222,6 +222,51 @@ button {
   text-align: center;
 }
 
+/* Full emoji picker for reactions: bottom sheet on phones, centered dialog on desktop. */
+.reaction-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.reaction-sheet {
+  width: 100%;
+  height: min(60dvh, 450px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: #222;
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+}
+
+.reaction-sheet .EmojiPickerReact {
+  --epr-category-padding: 0;
+  --epr-category-label-padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
+/* The picker fits columns to its list's full width, so the inset lives outside the list. */
+.reaction-sheet .epr-body {
+  padding: 0 var(--epr-horizontal-padding);
+}
+
+@media (min-width: 800px) {
+  .reaction-sheet-backdrop {
+    align-items: center;
+  }
+
+  .reaction-sheet {
+    width: 380px;
+    height: 450px;
+    padding-bottom: 0;
+    border-radius: 12px;
+  }
+}
+
 /* Mobile recipient reveal fills the viewport; other login cards and desktop stay unchanged. */
 @media (width < 800px) {
   .recipient-reveal-screen {

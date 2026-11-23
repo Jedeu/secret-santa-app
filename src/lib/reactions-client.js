@@ -6,6 +6,26 @@ import { getWritableScope, scopedDocRef } from '@/lib/year-client';
 
 const UNAVAILABLE_MESSAGE = 'Reactions are unavailable right now';
 
+// Mirrors firestore.rules: 1-16 UTF-16 units and no ASCII except the keycap characters # * 0-9.
+const MAX_EMOJI_LENGTH = 16;
+const FORBIDDEN_ASCII = /[\x00-\x22\x24-\x29\x2B-\x2F\x3A-\x7F]/;
+const EMOJI_MARKER = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
+
+// True for exactly one emoji (one grapheme), including skin-tone, flag and ZWJ sequences.
+export function isReactionEmoji(value) {
+    if (typeof value !== 'string' || value.length === 0 || value.length > MAX_EMOJI_LENGTH) {
+        return false;
+    }
+    if (FORBIDDEN_ASCII.test(value) || !EMOJI_MARKER.test(value)) {
+        return false;
+    }
+    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+        const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value);
+        return Array.from(graphemes).length === 1;
+    }
+    return true;
+}
+
 function reactionDocId(messageId, userId, emoji) {
     return `${messageId}_${userId}_${emoji}`;
 }
@@ -19,7 +39,7 @@ function logReactionDebug(action, messageId, emoji) {
 }
 
 export async function toggleReaction(messageId, userId, emoji) {
-    if (!firestore || !messageId || !userId || !emoji) {
+    if (!firestore || !messageId || !userId || !isReactionEmoji(emoji)) {
         throw new Error('Invalid reaction payload');
     }
 

@@ -109,7 +109,10 @@ service cloud.firestore {
         && request.resource.data.messageId is string
         && request.resource.data.userId is string
         && request.resource.data.emoji is string
-        && request.resource.data.emoji.size() <= 4
+        && request.resource.data.emoji.size() >= 1
+        && request.resource.data.emoji.size() <= 16
+        // One emoji: no ASCII except the keycap characters # * 0-9. The client checks for a single emoji.
+        && request.resource.data.emoji.matches('[^\\x00-\\x22\\x24-\\x29\\x2B-\\x2F\\x3A-\\x7F]+')
         && request.resource.data.createdAt is string
         && authMatchesUser(ys, request.resource.data.userId)
         && reactionId == (request.resource.data.messageId + '_' + request.resource.data.userId + '_' + request.resource.data.emoji)

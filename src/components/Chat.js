@@ -8,6 +8,7 @@ import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { useToast } from '@/components/ClientProviders';
 import ReactionPicker from '@/components/ReactionPicker';
 import ReactionChips from '@/components/ReactionChips';
+import ReactionEmojiSheet from '@/components/ReactionEmojiSheet';
 import MessageAttachment from '@/components/MessageAttachment';
 import GifPicker from '@/components/GifPicker';
 import MessageGif from '@/components/MessageGif';
@@ -681,10 +682,14 @@ export default function Chat({
         }
     }, [showEmojiPicker]);
 
-    const reactionPickerMessageId =
+    // The quick row and the full picker (`full`) never show together.
+    const reactionTargetId =
         reactionPickerState.conversationId === conversationId
             ? reactionPickerState.messageId
             : null;
+    const reactionPickerMessageId = reactionPickerState.full ? null : reactionTargetId;
+    const reactionSheetMessageId = reactionPickerState.full ? reactionTargetId : null;
+    const closeReactionPicker = () => setReactionPickerState({ conversationId, messageId: null });
 
     useEffect(() => {
         const onVisibility = () => {
@@ -842,8 +847,9 @@ export default function Chat({
                                     ) : null}
                                     {reactionPickerMessageId === msg.id && (
                                         <ReactionPicker
-                                            onClose={() => setReactionPickerState({ conversationId, messageId: null })}
+                                            onClose={closeReactionPicker}
                                             onSelect={(emoji) => handleToggleReaction(msg.id, emoji)}
+                                            onMore={() => setReactionPickerState({ conversationId, messageId: msg.id, full: true })}
                                         />
                                     )}
                                 </div>
@@ -939,6 +945,13 @@ export default function Chat({
                 })}
                 <div ref={bottomRef} />
             </div>
+
+            {reactionSheetMessageId && (
+                <ReactionEmojiSheet
+                    onClose={closeReactionPicker}
+                    onSelect={(emoji) => handleToggleReaction(reactionSheetMessageId, emoji)}
+                />
+            )}
 
             {gifPicker && (
                 <GifPicker

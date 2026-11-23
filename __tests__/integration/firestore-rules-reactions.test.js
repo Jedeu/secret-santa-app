@@ -70,6 +70,31 @@ describe('firestore rules: reactions', () => {
         );
     });
 
+    function reactWith(db, emoji) {
+        return setDoc(doc(db, 'reactions', `msg-1_user-a_${emoji}`), {
+            messageId: 'msg-1',
+            userId: 'user-a',
+            emoji,
+            createdAt: new Date().toISOString(),
+        });
+    }
+
+    test.each(['❤️', '👍🏽', '🇬🇧', '1️⃣', '👩‍💻', '🏳️‍🌈', '🤷🏽‍♀️', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '👨🏻‍❤️‍💋‍👨🏼'])(
+        'create accepts any emoji, including ZWJ sequences: %s',
+        async (emoji) => {
+            const db = authedDb(testEnv, 'user-a', 'user-a@example.com');
+            await assertSucceeds(reactWith(db, emoji));
+        }
+    );
+
+    test.each(['abc', 'ok', '👍 ', '👍!', '🎄'.repeat(9)])(
+        'create rejects text and over-long values: %s',
+        async (emoji) => {
+            const db = authedDb(testEnv, 'user-a', 'user-a@example.com');
+            await assertFails(reactWith(db, emoji));
+        }
+    );
+
     test('owner can delete own reaction', async () => {
         await seedDoc(testEnv, 'reactions', 'msg-1_user-a_🎄', {
             messageId: 'msg-1',
