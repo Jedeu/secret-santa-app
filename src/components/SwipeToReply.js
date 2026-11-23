@@ -69,8 +69,9 @@ export default function SwipeToReply({ onReply, children }) {
                 return;
             }
             if (dx <= START_SLOP || dx < Math.abs(dy) * 1.5) return;
+            // Touch pointers are implicitly captured by the element they started on,
+            // so the rest of the gesture keeps arriving here without setPointerCapture.
             gesture.active = true;
-            event.currentTarget.setPointerCapture?.(event.pointerId);
         }
         const pull = Math.min(Math.max(dx - START_SLOP, 0), MAX_PULL);
         setPull(pull, false);
@@ -89,7 +90,6 @@ export default function SwipeToReply({ onReply, children }) {
             onPointerMove={onPointerMove}
             onPointerUp={(event) => end(event, true)}
             onPointerCancel={(event) => end(event, false)}
-            onLostPointerCapture={(event) => end(event, false)}
             onClickCapture={(event) => {
                 if (!suppressClickRef.current) return;
                 suppressClickRef.current = false;

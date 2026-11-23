@@ -854,7 +854,8 @@ export default function Chat({
                                         position: 'relative',
                                         cursor: 'pointer',
                                         outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
-                                        outlineOffset: '2px',
+                                        // Inset: the list clips horizontal overflow, and own bubbles sit at its edge.
+                                        outlineOffset: '-2px',
                                         transition: 'outline-color 300ms ease'
                                     }}
                                 >
