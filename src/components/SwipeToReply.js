@@ -33,16 +33,19 @@ export default function SwipeToReply({ onReply, children }) {
         }
     };
 
-    const end = (commit) => {
+    // Only the finger that started the gesture can end it; other touches are ignored.
+    const end = (event, commit) => {
         const gesture = gestureRef.current;
+        if (!gesture || gesture.pointerId !== event.pointerId) return;
         gestureRef.current = null;
-        if (!gesture?.active) return;
+        if (!gesture.active) return;
         suppressClickRef.current = true;
         setPull(0, true);
         if (commit && gesture.armed) onReply?.();
     };
 
     const onPointerDown = (event) => {
+        if (gestureRef.current) return;
         suppressClickRef.current = false;
         if (event.pointerType !== 'touch' || typeof onReply !== 'function') return;
         if (event.clientX < EDGE_GUARD) return;
@@ -84,8 +87,9 @@ export default function SwipeToReply({ onReply, children }) {
             data-testid="swipe-to-reply"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={() => end(true)}
-            onPointerCancel={() => end(false)}
+            onPointerUp={(event) => end(event, true)}
+            onPointerCancel={(event) => end(event, false)}
+            onLostPointerCapture={(event) => end(event, false)}
             onClickCapture={(event) => {
                 if (!suppressClickRef.current) return;
                 suppressClickRef.current = false;

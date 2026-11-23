@@ -47,11 +47,11 @@ const scrollIntoView = jest.fn();
 window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
 
 // jsdom has no PointerEvent; set the fields SwipeToReply reads on a plain event.
-function pointer(element, type, { x, y = 100, pointerType = 'touch' }) {
+function pointer(element, type, { x, y = 100, pointerType = 'touch', pointerId = 1 }) {
     const event = createEvent[type](element);
     Object.defineProperties(event, {
         pointerType: { value: pointerType },
-        pointerId: { value: 1 },
+        pointerId: { value: pointerId },
         clientX: { value: x },
         clientY: { value: y },
     });
@@ -137,6 +137,34 @@ describe('Chat replies', () => {
         pointer(row, 'pointerUp', { x: 200 });
 
         expect(screen.getByTestId('composer-reply')).toBeTruthy();
+    });
+
+    test('a second finger neither hijacks nor strands a swipe', () => {
+        renderChat();
+        const row = screen.getAllByTestId('swipe-to-reply')[0];
+        const content = row.lastChild;
+
+        pointer(row, 'pointerDown', { x: 100 });
+        pointer(row, 'pointerMove', { x: 200 });
+        pointer(row, 'pointerDown', { x: 300, pointerId: 2 });
+        pointer(row, 'pointerUp', { x: 300, pointerId: 2 });
+        expect(content.style.transform).toBe('translateX(72px)');
+
+        pointer(row, 'pointerUp', { x: 200 });
+        expect(content.style.transform).toBe('');
+        expect(screen.getByTestId('composer-reply')).toBeTruthy();
+    });
+
+    test('Escape cancels the reply even after jumping from its preview', () => {
+        renderChat();
+
+        fireEvent.click(screen.getByText(question.content));
+        fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+        const preview = screen.getByRole('button', { name: /^Replying to Santa/ });
+        fireEvent.click(preview);
+        fireEvent.keyDown(preview, { key: 'Escape' });
+
+        expect(screen.queryByTestId('composer-reply')).toBeNull();
     });
 
     test('a vertical drag is left to scrolling and starts nothing', () => {

@@ -1019,7 +1019,16 @@ export default function Chat({
                 />
             )}
 
-            <form onSubmit={sendMessage} style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}>
+            <form
+                onSubmit={sendMessage}
+                onKeyDown={(event) => {
+                    // Escape anywhere in the composer, the reply preview included, cancels the reply.
+                    if (event.key === 'Escape' && replyTarget) {
+                        clearReply(replyTarget.id);
+                    }
+                }}
+                style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}
+            >
                 {replyTarget && (
                     <div
                         data-testid="composer-reply"
@@ -1243,11 +1252,6 @@ export default function Chat({
                             value={newMessage}
                             onChange={handleInputChange}
                             onBlur={() => clearTyping(currentUser.id, conversationId)}
-                            onKeyDown={(event) => {
-                                if (event.key === 'Escape' && replyTarget) {
-                                    clearReply(replyTarget.id);
-                                }
-                            }}
                             onPaste={handlePaste}
                             disabled={isMediaUploading}
                             placeholder="Type a message..."
