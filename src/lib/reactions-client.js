@@ -6,24 +6,23 @@ import { getWritableScope, scopedDocRef } from '@/lib/year-client';
 
 const UNAVAILABLE_MESSAGE = 'Reactions are unavailable right now';
 
-// Mirrors firestore.rules: 1-16 UTF-16 units and no ASCII except the keycap characters # * 0-9.
+// firestore.rules allows 1-16 UTF-16 units (the longest emoji is 15).
 const MAX_EMOJI_LENGTH = 16;
-const FORBIDDEN_ASCII = /[\x00-\x22\x24-\x29\x2B-\x2F\x3A-\x7F]/;
-const EMOJI_MARKER = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
+// One pictograph (a lone flag letter is not one) with optional variation selector, skin tone
+// and subdivision-flag tags.
+const EMOJI_PART = '(?!\\p{Regional_Indicator})(?:\\p{Extended_Pictographic}|\\p{Emoji_Presentation})(?:\\uFE0F|\\p{Emoji_Modifier})*(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})?';
+// A keycap, a flag, or pictographs joined by ZWJ.
+const SINGLE_EMOJI = new RegExp(
+    `^(?:[#*0-9]\\uFE0F?\\u20E3|\\p{Regional_Indicator}{2}|${EMOJI_PART}(?:\\u200D${EMOJI_PART})*)$`,
+    'u'
+);
 
-// True for exactly one emoji (one grapheme), including skin-tone, flag and ZWJ sequences.
+// True for exactly one emoji, including skin-tone, flag, keycap and ZWJ sequences.
 export function isReactionEmoji(value) {
-    if (typeof value !== 'string' || value.length === 0 || value.length > MAX_EMOJI_LENGTH) {
-        return false;
-    }
-    if (FORBIDDEN_ASCII.test(value) || !EMOJI_MARKER.test(value)) {
-        return false;
-    }
-    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-        const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value);
-        return Array.from(graphemes).length === 1;
-    }
-    return true;
+    return typeof value === 'string'
+        && value.length > 0
+        && value.length <= MAX_EMOJI_LENGTH
+        && SINGLE_EMOJI.test(value);
 }
 
 function reactionDocId(messageId, userId, emoji) {

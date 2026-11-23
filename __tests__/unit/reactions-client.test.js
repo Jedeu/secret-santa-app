@@ -81,7 +81,7 @@ describe('reactions-client', () => {
         ['👍', '❤️', '👍🏽', '🇬🇧', '1️⃣', '👩‍💻', '🏳️‍🌈', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '👨🏻‍❤️‍💋‍👨🏼'].forEach((emoji) => {
             expect(isReactionEmoji(emoji)).toBe(true);
         });
-        ['', 'abc', '1', '👍👍', '👍 ', '🎄'.repeat(9), null, 42].forEach((value) => {
+        ['', 'abc', '1', '👍👍', '👍 ', '👍é', '⃣', 'é⃣', '中⃣', '🇬', '🎄'.repeat(9), null, 42].forEach((value) => {
             expect(isReactionEmoji(value)).toBe(false);
         });
     });
