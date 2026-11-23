@@ -150,7 +150,10 @@ test('reply by swipe on a phone and from the tap menu on desktop; the feed keeps
 
     // The public feed quotes with its anonymous labels.
     await santaPage.locator('.desktop-only').getByRole('button', { name: /public feed/i }).click();
-    await santaPage.getByText(`🎁 ${recipientName}'s Gift Exchange`).click();
+    // Earlier pairings can leave another thread with the same name; open the one whose
+    // latest message is this test's follow-up.
+    await santaPage.getByText(followUp, { exact: true }).click();
+    await expect(santaPage.getByText(`🎁 ${recipientName}'s Gift Exchange`)).toBeVisible();
     const answerQuote = bubble(santaPage, answerDoc.id).getByTestId('message-quote');
     await expect(answerQuote).toContainText('🎅 Santa');
     await expect(answerQuote).toContainText(question);
