@@ -161,6 +161,7 @@ Clients cannot create, update or delete messages under the rules; the server is 
 ```javascript
 { messageId: string, userId: string, emoji: string, createdAt: string }
 ```
+`emoji` is any single emoji, including skin-tone, flag and ZWJ sequences: the rules allow 1–16 UTF-16 units with no ASCII except the keycap characters `# * 0-9`, and `isReactionEmoji` in `src/lib/reactions-client.js` checks for exactly one emoji. The six quick reactions are in `ReactionPicker.js`; its "+" opens the full picker (`ReactionEmojiSheet.js`).
 
 **pushTokens collection**: Web Push subscription storage, managed server-side by `src/lib/push-server.js`.
 

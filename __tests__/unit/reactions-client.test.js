@@ -18,7 +18,7 @@ jest.mock('@/lib/firebase-client', () => ({
     firestore: { _isMock: true },
 }));
 
-import { toggleReaction } from '@/lib/reactions-client';
+import { isReactionEmoji, toggleReaction } from '@/lib/reactions-client';
 import { setWritableScope } from '@/lib/year-client';
 
 describe('reactions-client', () => {
@@ -75,6 +75,27 @@ describe('reactions-client', () => {
         await expect(toggleReaction('msg-4', 'user-4', '👍')).rejects.toThrow('Reactions are unavailable right now');
         expect(mockGetDoc).not.toHaveBeenCalled();
         expect(mockSetDoc).not.toHaveBeenCalled();
+    });
+
+    test('isReactionEmoji accepts one emoji of any shape and rejects anything else', () => {
+        ['👍', '❤️', '👍🏽', '🇬🇧', '1️⃣', '👩‍💻', '🏳️‍🌈', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '👨🏻‍❤️‍💋‍👨🏼'].forEach((emoji) => {
+            expect(isReactionEmoji(emoji)).toBe(true);
+        });
+        ['', 'abc', '1', '👍👍', '👍 ', '👍é', '⃣', 'é⃣', '中⃣', '🇬', '🎄'.repeat(9), null, 42].forEach((value) => {
+            expect(isReactionEmoji(value)).toBe(false);
+        });
+    });
+
+    test('a ZWJ emoji toggles under a deterministic id; text is rejected before any read', async () => {
+        mockGetDoc.mockResolvedValue({ exists: () => false });
+        mockSetDoc.mockResolvedValue(undefined);
+
+        await toggleReaction('msg-6', 'user-6', '👩‍💻');
+        expect(mockDoc).toHaveBeenCalledWith(expect.anything(), 'reactions', 'msg-6_user-6_👩‍💻');
+
+        mockGetDoc.mockClear();
+        await expect(toggleReaction('msg-6', 'user-6', 'abc')).rejects.toThrow('Invalid reaction payload');
+        expect(mockGetDoc).not.toHaveBeenCalled();
     });
 
     test('a getDoc held across a scope change throws and writes nothing', async () => {
