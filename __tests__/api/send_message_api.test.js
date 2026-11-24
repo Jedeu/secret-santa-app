@@ -772,3 +772,93 @@ describe('POST /api/messages/send with an attachment', () => {
         expect(sendIncomingMessagePush).not.toHaveBeenCalled();
     });
 });
+
+describe('POST /api/messages/send with a reply', () => {
+    const TARGET_ID = '9b2f6c1e-5d1a-4e7b-9c3d-2a1b0c9d8e7f';
+    const OTHER_CONV = `santa_${OTHER_ID}_recipient_${SANTA_ID}`;
+
+    function target(conversationId) {
+        return {
+            id: TARGET_ID,
+            fromId: RECIPIENT_ID,
+            toId: SANTA_ID,
+            content: 'What would you like?',
+            timestamp: '2026-02-12T19:00:00.000Z',
+            conversationId,
+        };
+    }
+
+    function replyBody(overrides = {}) {
+        return {
+            toId: RECIPIENT_ID,
+            content: 'A book, please',
+            conversationId: CONV_SANTA_TO_RECIPIENT,
+            clientMessageId: CLIENT_MESSAGE_ID,
+            clientCreatedAt: CLIENT_CREATED_AT,
+            replyToId: TARGET_ID,
+            ...overrides,
+        };
+    }
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        verifyRequestToken.mockResolvedValue({ uid: 'auth-uid', email: 'sender@example.test' });
+        sendIncomingMessagePush.mockResolvedValue({ totalTokens: 0, successCount: 0, failureCount: 0, cleanedTokenCount: 0 });
+    });
+
+    test('stores replyToId when the quoted message is in the same year and conversation', async () => {
+        const store = useStore({
+            users: oneWayUsers,
+            sender: SANTA_ID,
+            year: 2026,
+            messages: { [TARGET_ID]: target(CONV_SANTA_TO_RECIPIENT) },
+        });
+
+        const res = await POST(createRequest({ body: replyBody() }));
+
+        expect(res.status).toBe(200);
+        expect(store['years/2026/messages'][CLIENT_MESSAGE_ID].replyToId).toBe(TARGET_ID);
+        expect(txLog[0].getAll.mock.calls[0]).toContainEqual({ __collection: 'years/2026/messages', id: TARGET_ID });
+    });
+
+    test.each([
+        ['from another conversation', { [TARGET_ID]: target(OTHER_CONV) }],
+        ['that does not exist', {}],
+    ])('a quoted message %s -> 400 REPLY_TARGET_INVALID and writes nothing', async (_label, messages) => {
+        const store = useStore({ users: oneWayUsers, sender: SANTA_ID, year: 2026, messages });
+
+        const res = await POST(createRequest({ body: replyBody() }));
+
+        expect(res.status).toBe(400);
+        expect((await res.json()).code).toBe('REPLY_TARGET_INVALID');
+        expect(store['years/2026/messages'][CLIENT_MESSAGE_ID]).toBeUndefined();
+        expect(sendIncomingMessagePush).not.toHaveBeenCalled();
+    });
+
+    test('a malformed replyToId -> 400 before any transaction', async () => {
+        useStore({ users: oneWayUsers, sender: SANTA_ID });
+
+        const res = await POST(createRequest({ body: replyBody({ replyToId: 'not-a-uuid' }) }));
+
+        expect(res.status).toBe(400);
+        expect((await res.json()).code).toBe('REPLY_TARGET_INVALID');
+        expect(runFencedTransaction).not.toHaveBeenCalled();
+    });
+
+    test('a replay must carry the same replyToId', async () => {
+        const store = useStore({
+            users: oneWayUsers,
+            sender: SANTA_ID,
+            year: 2026,
+            messages: { [TARGET_ID]: target(CONV_SANTA_TO_RECIPIENT) },
+        });
+
+        expect((await POST(createRequest({ body: replyBody() }))).status).toBe(200);
+        const replay = await POST(createRequest({ body: replyBody() }));
+        expect((await replay.json()).replayed).toBe(true);
+
+        const withoutReply = await POST(createRequest({ body: replyBody({ replyToId: undefined }) }));
+        expect(withoutReply.status).toBe(409);
+        expect(store['years/2026/messages'][CLIENT_MESSAGE_ID].replyToId).toBe(TARGET_ID);
+    });
+});

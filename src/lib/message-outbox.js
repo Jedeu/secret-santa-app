@@ -7,10 +7,10 @@ import { isRenderableAttachment, toPublicAttachment, isUuid } from '@/lib/messag
  *
  * Storage layout (every operation is a single-key setItem/removeItem, so tabs never
  * overwrite each other's queued messages):
- * - item:{id}       = { clientMessageId, ownerUid|null, fromUserId, toId, conversationId, content, createdAt }
- *                     text messages; written once, never rewritten
+ * - item:{id}       = { clientMessageId, ownerUid|null, fromUserId, toId, conversationId, content, createdAt,
+ *                       replyToId? } text messages; written once, never rewritten
  * - media-item:{id} = { clientMessageId, ownerUid, fromUserId, toId, conversationId, content, createdAt,
- *                       attachment } image messages (content may be empty); the attachment is the
+ *                       attachment, replyToId? } image messages (content may be empty); the attachment is the
  *                     10-key server-built reference returned by the upload, never image bytes.
  *                     A separate prefix, so a tab on an older build can neither delete these
  *                     nor send their caption without the image. Written once, never rewritten.
@@ -367,6 +367,7 @@ async function sendOutboxItem({ item, token, fetchImpl }) {
                 clientCreatedAt: item.createdAt,
                 senderUserId: item.fromUserId,
                 ...(item.attachment ? { attachment: { id: item.attachment.id } } : {}),
+                ...(isUuid(item.replyToId) ? { replyToId: item.replyToId } : {}),
             }),
             ...(controller ? { signal: controller.signal } : {}),
         });
@@ -429,7 +430,12 @@ export function subscribeOutbox(callback) {
  * for. Writes one media-item key, or nothing when the id already has a tombstone or an
  * item key (then returns the live item, if any).
  */
-function enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, content, attachment, clientMessageId }) {
+// The quoted message id, kept only when it is a UUID; otherwise the message is sent as a plain message.
+function replyFields(replyToId) {
+    return isUuid(replyToId) ? { replyToId } : {};
+}
+
+function enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, content, attachment, clientMessageId, replyToId }) {
     const publicAttachment = toPublicAttachment(attachment);
 
     if (!hasWindow() || !ownerUid || !fromUserId || !toId || !isUuid(clientMessageId) || !publicAttachment) {
@@ -452,6 +458,7 @@ function enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, conte
         content: normalizeContent(content),
         createdAt: asIso(),
         attachment: publicAttachment,
+        ...replyFields(replyToId),
     };
 
     // Single-key write; throws on quota errors.
@@ -469,9 +476,10 @@ export function enqueueMessage({
     content,
     attachment = null,
     clientMessageId = null,
+    replyToId = null,
 }) {
     if (attachment !== null && attachment !== undefined) {
-        return enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, content, attachment, clientMessageId });
+        return enqueueMediaMessage({ ownerUid, fromUserId, toId, conversationId, content, attachment, clientMessageId, replyToId });
     }
 
     const normalizedContent = normalizeContent(content);
@@ -490,6 +498,7 @@ export function enqueueMessage({
         conversationId: conversationId || null,
         content: normalizedContent,
         createdAt: asIso(),
+        ...replyFields(replyToId),
     };
 
     // Single-key write; throws on quota errors.

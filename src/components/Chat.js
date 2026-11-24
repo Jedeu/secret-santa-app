@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
@@ -12,6 +12,10 @@ import ReactionEmojiSheet from '@/components/ReactionEmojiSheet';
 import MessageAttachment from '@/components/MessageAttachment';
 import GifPicker from '@/components/GifPicker';
 import MessageGif from '@/components/MessageGif';
+import MessageQuote from '@/components/MessageQuote';
+import SwipeToReply from '@/components/SwipeToReply';
+import { useMessageJump } from '@/hooks/useMessageJump';
+import { getMessagePreviewText } from '@/lib/message-media';
 import {
     enqueueMessage,
     getConversationOutboxMessages,
@@ -138,6 +142,14 @@ export default function Chat({
     }
     const gifPicker = gifEnabled ? gifState.picker : null;
     const draftGif = gifState.draft;
+    // Reply draft, bound to the same composer identity: switching chats drops it.
+    const [replyState, setReplyState] = useState({ identity: gifIdentity, messageId: null });
+    // Quotes resolve only within this conversation's messages.
+    const messagesById = useMemo(() => new Map(messages.map((msg) => [msg.id, msg])), [messages]);
+    const replyTarget = replyState.identity === gifIdentity && replyState.messageId
+        ? messagesById.get(replyState.messageId) || null
+        : null;
+    const { containerRef: messageListRef, highlightedId, jumpTo } = useMessageJump();
     const draftMediaRef = useRef(null);
     const uploadTokenRef = useRef(0);
     const uploadAbortRef = useRef(null);
@@ -152,6 +164,11 @@ export default function Chat({
     const otherLastReadAt = useOtherUserLastRead(otherUser.id, conversationId);
     const isOtherTyping = useTypingIndicator(conversationId, otherUser.id);
     const { showToast } = useToast();
+    // The label this chat already shows for a message's sender; quotes reuse it.
+    const senderLabel = (msg) => {
+        if (msg.fromId === currentUser.id) return 'You';
+        return isSantaChat ? 'Santa 🎅' : otherUser.name;
+    };
     // Read markers record the latest message the user has actually observed,
     // never "now" (a message stamped later than the marker stays unread).
     const latestObservedAt = getLatestMessageTimestamp(messages);
@@ -399,6 +416,7 @@ export default function Chat({
             conversationId,
             content: newMessage.trim(),
             clientMessageId: draft.clientMessageId,
+            ...(replyTarget ? { replyToId: replyTarget.id } : {}),
         };
         uploadTokenRef.current += 1;
         const token = uploadTokenRef.current;
@@ -482,6 +500,7 @@ export default function Chat({
                 revokePreviewUrl(draftMediaRef.current);
                 setDraft(null);
                 setNewMessage('');
+                clearReply(captured.replyToId);
                 scrollToBottom('auto');
             }
         } finally {
@@ -588,9 +607,11 @@ export default function Chat({
                 fromUserId: currentUser.id,
                 toId: otherUser.id,
                 conversationId,
-                content
+                content,
+                ...(replyTarget ? { replyToId: replyTarget.id } : {})
             });
             setNewMessage('');
+            clearReply(replyTarget?.id);
             if (gif) {
                 removeDraftGif(gif);
             }
@@ -602,6 +623,17 @@ export default function Chat({
             console.error('Error enqueuing message:', error);
             showToast('Failed to queue message. Please try again.');
         }
+    };
+
+    const startReply = (msg) => {
+        setReplyState({ identity: gifIdentity, messageId: msg.id });
+        inputRef.current?.focus();
+    };
+
+    // Clears the reply draft only while it still quotes this message.
+    const clearReply = (messageId) => {
+        if (!messageId) return;
+        setReplyState((prev) => (prev.messageId === messageId ? { ...prev, messageId: null } : prev));
     };
 
     const retryFailedMessage = (clientMessageId) => {
@@ -765,7 +797,8 @@ export default function Chat({
             )}
 
             <div
-                style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}
+                ref={messageListRef}
+                style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '10px 0' }}
                 onScroll={handleScroll}
             >
                 {messages.map(msg => {
@@ -773,8 +806,10 @@ export default function Chat({
                     const isReadReceipt = Boolean(isMe && otherLastReadAt && msg.timestamp && otherLastReadAt >= msg.timestamp);
                     const gif = getMessageGif(msg);
                     const text = gif ? gif.caption : msg.content;
+                    const quoted = msg.replyToId ? messagesById.get(msg.replyToId) || null : null;
                     return (
-                        <div key={msg.id} style={{
+                        <SwipeToReply key={msg.id} onReply={() => startReply(msg)}>
+                        <div style={{
                             display: 'flex',
                             justifyContent: isMe ? 'flex-end' : 'flex-start',
                             marginBottom: '12px'
@@ -793,10 +828,11 @@ export default function Chat({
                                         marginLeft: '4px',
                                         fontWeight: '500'
                                     }}>
-                                        {isSantaChat ? (msg.fromId === currentUser.id ? 'You' : 'Santa 🎅') : (msg.fromId === currentUser.id ? 'You' : otherUser.name)}
+                                        {senderLabel(msg)}
                                     </span>
                                 )}
                                 <div
+                                    data-message-id={msg.id}
                                     onClick={() => {
                                         setReactionPickerState((prev) => {
                                             if (
@@ -816,9 +852,21 @@ export default function Chat({
                                         fontSize: '14px',
                                         boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                                         position: 'relative',
-                                        cursor: 'pointer'
+                                        cursor: 'pointer',
+                                        outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
+                                        // Inset: the list clips horizontal overflow, and own bubbles sit at its edge.
+                                        outlineOffset: '-2px',
+                                        transition: 'outline-color 300ms ease'
                                     }}
                                 >
+                                    {msg.replyToId && (
+                                        <MessageQuote
+                                            target={quoted}
+                                            label={quoted ? senderLabel(quoted) : ''}
+                                            onJump={jumpTo}
+                                            tone={isMe ? 'own' : 'other'}
+                                        />
+                                    )}
                                     {hasAttachmentObject(msg) && (
                                         <MessageAttachment attachment={msg.attachment} />
                                     )}
@@ -850,6 +898,7 @@ export default function Chat({
                                             onClose={closeReactionPicker}
                                             onSelect={(emoji) => handleToggleReaction(msg.id, emoji)}
                                             onMore={() => setReactionPickerState({ conversationId, messageId: msg.id, full: true })}
+                                            onReply={() => startReply(msg)}
                                         />
                                     )}
                                 </div>
@@ -886,11 +935,13 @@ export default function Chat({
                                 </span>
                             </div>
                         </div>
+                        </SwipeToReply>
                     );
                 })}
                 {outboxMessages.map((msg) => {
                     const isFailed = msg.status === 'failed';
                     const gif = getMessageGif(msg);
+                    const quoted = msg.replyToId ? messagesById.get(msg.replyToId) || null : null;
                     return (
                         <div key={msg.clientMessageId} style={{
                             display: 'flex',
@@ -911,6 +962,14 @@ export default function Chat({
                                     fontSize: '14px',
                                     border: isFailed ? '1px solid #dc2626' : '1px dashed rgba(255, 255, 255, 0.45)'
                                 }}>
+                                    {msg.replyToId && (
+                                        <MessageQuote
+                                            target={quoted}
+                                            label={quoted ? senderLabel(quoted) : ''}
+                                            onJump={jumpTo}
+                                            tone="own"
+                                        />
+                                    )}
                                     {hasAttachmentObject(msg) && (
                                         <MessageAttachment attachment={msg.attachment} />
                                     )}
@@ -961,7 +1020,82 @@ export default function Chat({
                 />
             )}
 
-            <form onSubmit={sendMessage} style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}>
+            <form
+                onSubmit={sendMessage}
+                onKeyDown={(event) => {
+                    // Escape anywhere in the composer, the reply preview included, cancels the reply.
+                    if (event.key === 'Escape' && replyTarget) {
+                        clearReply(replyTarget.id);
+                    }
+                }}
+                style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}
+            >
+                {replyTarget && (
+                    <div
+                        data-testid="composer-reply"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px 6px 6px 10px',
+                            border: '1px solid var(--border)',
+                            borderLeft: '3px solid var(--primary)',
+                            borderRadius: '8px',
+                            minWidth: 0
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => jumpTo(replyTarget.id)}
+                            aria-label={`Replying to ${senderLabel(replyTarget)}. Show original message`}
+                            style={{
+                                flex: 1,
+                                minWidth: 0,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px',
+                                textAlign: 'left',
+                                font: 'inherit',
+                                color: 'inherit',
+                                background: 'transparent',
+                                border: 'none',
+                                padding: 0,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <span style={{ fontSize: '12px', fontWeight: 600 }}>
+                                Replying to {senderLabel(replyTarget)}
+                            </span>
+                            <span style={{
+                                fontSize: '12px',
+                                color: 'var(--text-muted)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                {getMessagePreviewText(replyTarget)}
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="Cancel reply"
+                            title="Cancel reply"
+                            onClick={() => clearReply(replyTarget.id)}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--text-muted)',
+                                fontSize: '18px',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                lineHeight: 1,
+                                flexShrink: 0
+                            }}
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
                 {draftMedia && (
                     <div
                         data-testid="composer-attachment"

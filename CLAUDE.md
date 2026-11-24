@@ -93,6 +93,7 @@ Messages use a **conversationId-based system**:
 - `conversationId` is a **directional** string, not a hash — format `santa_{santaId}_recipient_{recipientId}`
 - Optional idempotency fields `clientMessageId` (UUID) and `clientCreatedAt` (ISO string) support safe retries; the message doc id is the `clientMessageId` when provided, else a fresh UUID
 - An optional `attachment` (one image or GIF) is copied by the server from a server-only `mediaUploads` record; clients never supply its fields. `content` may be empty only when an attachment is present
+- An optional `replyToId` makes a message a reply. The server stores it only when that message exists in the same year with the same `conversationId` (else 400 `REPLY_TARGET_INVALID`), so a quote can never link two conversations. Nothing about the quoted message is copied: every view looks it up by id within the thread it is showing and labels it with that view's own sender label (`MessageQuote`).
 - A GIPHY GIF is a text message, not an attachment: the first line of `content` is `https://giphy.com/embed/{id}`, optionally followed by a newline and a caption. `src/lib/giphy-reference.js` is the only builder and parser. Only this reference is stored — never GIPHY API objects, media URLs or media.
 - Real-time updates via Firestore listeners in `src/hooks/useRealtimeMessages.js`
 
@@ -141,7 +142,8 @@ Key utilities in `src/lib/message-utils.js`:
     version: number,
     format: 'jpg' | 'png' | 'gif',
     width: number, height: number, bytes: number
-  }
+  },
+  replyToId?: string          // Optional; id of the quoted message in the same year and conversation
 }
 ```
 
