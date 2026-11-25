@@ -4,18 +4,30 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import Sidebar from '@/components/Sidebar';
 import TabNavigation from '@/components/TabNavigation';
+import UserMenuBar from '@/components/UserMenuBar';
 
 describe('Sidebar Component', () => {
-    const mockCurrentUser = { id: 'user-1', name: 'Test User', email: 'test@example.com' };
     const mockOnTabChange = jest.fn();
     const mockOnSignOut = jest.fn();
 
+    // The sidebar's header is the same one-line user bar the phone layout uses.
+    const userBar = (adminControl = null) => (
+        <UserMenuBar
+            name="Test User"
+            soundEnabled
+            onToggleSound={jest.fn()}
+            pushControl={<span>Push notifications</span>}
+            pushOn={false}
+            adminControl={adminControl}
+            onSignOut={mockOnSignOut}
+        />
+    );
+
     const defaultProps = {
-        currentUser: mockCurrentUser,
         activeTab: 'recipient',
         onTabChange: mockOnTabChange,
         unreadCounts: { recipient: 0, santa: 0 },
-        onSignOut: mockOnSignOut
+        header: userBar()
     };
 
     beforeEach(() => {
@@ -23,9 +35,17 @@ describe('Sidebar Component', () => {
     });
 
     // 1. Renders user info correctly
-    test('renders user name and greeting', () => {
+    test('renders the user bar greeting in its header', () => {
         render(<Sidebar {...defaultProps} />);
-        expect(screen.getByText('Hi, Test User 👋')).toBeInTheDocument();
+        expect(screen.getByTestId('user-greeting')).toHaveTextContent('Hi Test User');
+    });
+
+    test("labels the Recipient item with the recipient's name when known", () => {
+        render(<Sidebar {...defaultProps} recipientLabel="Blake" />);
+        // Visible label is the name; the accessible name keeps "Recipient" for screen readers.
+        const item = screen.getByRole('button', { name: /recipient: blake/i });
+        expect(item).toBeInTheDocument();
+        expect(item).toHaveAttribute('aria-current', 'page');
     });
 
     // 2. Navigation items
@@ -69,8 +89,8 @@ describe('Sidebar Component', () => {
     });
 
     // 6. Admin season control
-    test('renders a supplied adminControl node', () => {
-        render(<Sidebar {...defaultProps} adminControl={<button type="button">Close 2025</button>} />);
+    test('renders a supplied adminControl node on the user bar', () => {
+        render(<Sidebar {...defaultProps} header={userBar(<button type="button">Close 2025</button>)} />);
         expect(screen.getByRole('button', { name: 'Close 2025' })).toBeInTheDocument();
     });
 
@@ -98,10 +118,11 @@ describe('Sidebar Component', () => {
         expect(screen.getByRole('button', { name: /archives/i })).toHaveStyle({ fontWeight: '600' });
     });
 
-    // 8. Sign Out
-    test('calls onSignOut when clicked', () => {
+    // 8. Sign Out lives in the user bar's menu
+    test('calls onSignOut from the user bar menu', () => {
         render(<Sidebar {...defaultProps} />);
-        const signOutButton = screen.getByRole('button', { name: /sign out/i });
+        fireEvent.click(screen.getByTestId('user-greeting'));
+        const signOutButton = screen.getByRole('menuitem', { name: /sign out/i });
         fireEvent.click(signOutButton);
         expect(mockOnSignOut).toHaveBeenCalled();
     });

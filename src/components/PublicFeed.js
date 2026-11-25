@@ -229,12 +229,12 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
             marginBottom: 0,
             overflow: 'hidden'
         }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
+            <div className={'feed-head' + (selectedThread ? '' : ' is-list')} style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
                 {selectedThread && (
                     <button
                         onClick={() => setSelectedThread(null)}
-                        className="btn"
-                        style={{ width: 'auto', padding: '5px 10px', marginRight: '10px', fontSize: '12px' }}
+                        className="btn btn-quiet"
+                        style={{ width: 'auto', padding: '5px 10px', marginRight: '10px', fontSize: '12px', flexShrink: 0 }}
                     >
                         ← Back
                     </button>
@@ -274,8 +274,8 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                 </div>
                                 {thread.unreadCount > 0 && (
                                     <span style={{
-                                        background: 'var(--primary)',
-                                        color: 'white',
+                                        background: 'var(--badge-bg)',
+                                        color: 'var(--badge-fg)',
                                         fontSize: '11px',
                                         fontWeight: 'bold',
                                         padding: '4px 8px',
@@ -349,14 +349,13 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                                 <div key={msg.id} style={{ width: '100%' }}>
                                                     <div data-message-id={msg.id} style={{
                                                         padding: '8px 12px',
-                                                        background: 'var(--surface-highlight)',
+                                                        // Santa's notes are outlined like your own chat bubbles; others are filled.
+                                                        background: group.isSanta ? 'transparent' : 'var(--bubble-other-bg)',
                                                         color: 'var(--foreground)',
-                                                        borderRadius: '4px',
+                                                        borderRadius: 'var(--bubble-radius)',
                                                         fontSize: '14px',
-                                                        borderLeft: !group.isSanta ? '3px solid var(--accent)' : 'none',
-                                                        borderRight: group.isSanta ? '3px solid var(--primary)' : 'none',
                                                         marginBottom: '2px',
-                                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                                        boxShadow: group.isSanta ? 'var(--bubble-own-shadow)' : 'none',
                                                         outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
                                                         outlineOffset: '2px',
                                                         transition: 'outline-color 300ms ease'

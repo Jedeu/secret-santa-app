@@ -221,8 +221,8 @@ async function switchToTab(
     const tabButton = page.getByRole('button', { name: new RegExp(tabName, 'i') });
     await tabButton.click();
 
-    // Wait for tab to become active (has bold font weight)
-    await expect(tabButton).toHaveCSS('font-weight', '600');
+    // Wait for tab to become active
+    await expect(tabButton).toHaveAttribute('aria-current', 'page');
 }
 
 /**

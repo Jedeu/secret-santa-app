@@ -65,14 +65,15 @@ test.describe('Desktop Layout', () => {
     });
 
     test('Sidebar displays user greeting', async ({ page }) => {
-        // Verify "Hi, User" greeting is in the sidebar
+        // The one-line user bar at the top of the sidebar reads "HI JED" (text "Hi Jed", uppercased by CSS)
         const sidebar = page.locator('.desktop-only');
-        await expect(sidebar.getByText(/hi, jed/i)).toBeVisible();
+        await expect(sidebar.getByTestId('user-greeting')).toHaveText(/hi jed/i);
     });
 
-    test('Sidebar displays Sign out button', async ({ page }) => {
-        // Verify Sign out is in the sidebar footer
+    test('Sidebar user menu contains Sign out', async ({ page }) => {
+        // Sign out lives in the user bar's menu, opened from "HI JED ▾"
         const sidebar = page.locator('.desktop-only');
-        await expect(sidebar.getByRole('button', { name: /sign out/i })).toBeVisible();
+        await sidebar.getByTestId('user-greeting').click();
+        await expect(sidebar.getByRole('menuitem', { name: /sign out/i })).toBeVisible();
     });
 });

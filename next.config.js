@@ -22,6 +22,8 @@ const nextConfig = {
     // jose (firebase-admin dependency) ships ESM-only. next/jest folds this list
     // into its node_modules transform allowlist so CJS test runs can parse it.
     transpilePackages: ['jose'],
+    // The dev-only Next.js indicator sits bottom-left, on top of the composer's "+" button on phones.
+    devIndicators: false,
 };
 
 module.exports = withPWA(nextConfig);

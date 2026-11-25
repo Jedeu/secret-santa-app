@@ -7,20 +7,25 @@ function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
     return (
         <button
             onClick={onClick}
+            aria-current={active ? 'page' : undefined}
             style={{
                 background: 'transparent',
                 border: 'none',
-                borderBottom: active ? '2px solid var(--primary)' : '2px solid transparent',
-                color: active ? 'var(--primary)' : 'var(--text-muted)',
+                borderBottom: active ? '3px solid var(--tab-active-fg)' : '3px solid transparent',
+                color: active ? 'var(--tab-active-fg)' : 'var(--text-muted)',
                 fontSize: '14px',
                 fontWeight: active ? '600' : '400',
-                padding: '12px 20px',
+                padding: '12px 4px 10px',
+                flex: '1 0 auto',
+                minWidth: 0,
+                justifyContent: 'center',
+                whiteSpace: 'nowrap',
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                transition: 'color 0.15s ease, border-color 0.15s ease',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                marginBottom: '-2px'
+                marginBottom: '-1px'
             }}
         >
             {children}
@@ -32,8 +37,8 @@ function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
                     aria-atomic="true"
                     aria-label={`${badgeLabel}: ${unreadCount} unread messages`}
                     style={{
-                        background: 'var(--primary)',
-                        color: 'white',
+                        background: 'var(--badge-bg)',
+                        color: 'var(--badge-fg)',
                         fontSize: '10px',
                         fontWeight: 'bold',
                         padding: '2px 6px',
@@ -60,13 +65,13 @@ function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
  * @param {number} props.unreadCounts.santa - Unread count for santa tab
  * @param {boolean} [props.showArchive] - Show the "📚 Archives" tab
  */
-export default function TabNavigation({ activeTab, onTabChange, unreadCounts, showArchive = false }) {
+export default function TabNavigation({ activeTab, onTabChange, unreadCounts, showArchive = false, recipientLabel = null }) {
     return (
-        <div style={{
+        <div className="tab-nav" style={{
             display: 'flex',
-            borderBottom: '2px solid var(--border)',
-            marginBottom: '20px',
-            gap: '8px',
+            borderBottom: '1px solid var(--border)',
+            padding: '0 8px',
+            gap: 0,
             overflowX: 'auto',
             overflowY: 'hidden',
             whiteSpace: 'nowrap'
@@ -77,7 +82,10 @@ export default function TabNavigation({ activeTab, onTabChange, unreadCounts, sh
                 unreadCount={unreadCounts?.recipient || 0}
                 badgeLabel="Recipient"
             >
-                {'\ud83c\udf81 Recipient'}
+                {recipientLabel ? (
+                    // The tab shows the recipient's name; its accessible name still says Recipient.
+                    <><span className="sr-only">Recipient: </span>{'\ud83c\udf81 ' + recipientLabel}</>
+                ) : '\ud83c\udf81 Recipient'}
             </TabButton>
             <TabButton
                 active={activeTab === 'santa'}

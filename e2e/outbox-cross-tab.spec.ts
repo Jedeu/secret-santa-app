@@ -277,7 +277,8 @@ test.describe('Outbox across tabs', () => {
         await expect.poll(() => requests.filter((r) => r.body?.content === content).length).toBeGreaterThan(0);
         const originalUid = tokenUid(requests.find((r) => r.body?.content === content)!.authorization);
 
-        await page1.locator('.desktop-only').getByRole('button', { name: 'Sign out' }).click();
+        await page1.locator('.desktop-only').getByTestId('user-greeting').click();
+        await page1.locator('.desktop-only').getByRole('menuitem', { name: 'Sign out' }).click();
         await expect(page1.getByRole('button', { name: /sign in with google/i })).toBeVisible({ timeout: 15000 });
 
         // Sign in as another participant in the same page realm (keeps the held request's

@@ -484,4 +484,66 @@ describe('PushNotificationsControl', () => {
             expect(showToast).not.toHaveBeenCalled();
         });
     });
+
+    describe('variant="toggle" (the account menu row)', () => {
+        test('renders "Push notifications" as a switch driven by the same toggle, and reports the effective state', async () => {
+            const onEffectiveChange = jest.fn();
+            render(<PushNotificationsControl variant="toggle" authUid={AUTH_UID} onEffectiveChange={onEffectiveChange} />);
+
+            const toggle = await screen.findByRole('switch', { name: 'Push notifications' });
+            expect(toggle).toHaveAttribute('aria-checked', 'false');
+            await waitFor(() => expect(onEffectiveChange).toHaveBeenLastCalledWith(false));
+
+            fireEvent.click(toggle);
+            await waitFor(() => {
+                expect(enablePushForCurrentUser).toHaveBeenCalledWith({ authUid: AUTH_UID });
+                expect(toggle).toHaveAttribute('aria-checked', 'true');
+                expect(onEffectiveChange).toHaveBeenLastCalledWith(true);
+            });
+
+            fireEvent.click(toggle);
+            await waitFor(() => {
+                expect(disablePushForCurrentUser).toHaveBeenCalledWith({ authUid: AUTH_UID });
+                expect(onEffectiveChange).toHaveBeenLastCalledWith(false);
+            });
+        });
+
+        test('enabled preference without permission is not effectively on', async () => {
+            mockPreferences.set(AUTH_UID, 'enabled');
+            mockNotificationPermission('default');
+            const onEffectiveChange = jest.fn();
+            render(<PushNotificationsControl variant="toggle" authUid={AUTH_UID} onEffectiveChange={onEffectiveChange} />);
+
+            expect(await screen.findByRole('switch', { name: 'Push notifications' })).toHaveAttribute('aria-checked', 'false');
+            expect(onEffectiveChange).not.toHaveBeenCalledWith(true);
+        });
+
+        test('unsupported: the switch is off and disabled, with a reason line', async () => {
+            isPushSupported.mockReturnValue(false);
+            const onEffectiveChange = jest.fn();
+            render(<PushNotificationsControl variant="toggle" authUid={AUTH_UID} onEffectiveChange={onEffectiveChange} />);
+
+            const toggle = await screen.findByRole('switch', { name: 'Push notifications' });
+            expect(toggle).toBeDisabled();
+            expect(toggle).toHaveAttribute('aria-checked', 'false');
+            expect(screen.getByText('Not available in this browser.')).toBeInTheDocument();
+            expect(onEffectiveChange).not.toHaveBeenCalledWith(true);
+        });
+
+        test('blocked permission shows the existing blocked reason', async () => {
+            mockNotificationPermission('denied');
+            render(<PushNotificationsControl variant="toggle" authUid={AUTH_UID} />);
+
+            expect(await screen.findByText('Browser permission is blocked. Enable notifications in settings.')).toBeInTheDocument();
+        });
+
+        test('iOS outside the Home Screen: disabled, with the install reason', async () => {
+            Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'iPhone' });
+            render(<PushNotificationsControl variant="toggle" authUid={AUTH_UID} />);
+
+            const toggle = await screen.findByRole('switch', { name: 'Push notifications' });
+            await waitFor(() => expect(toggle).toBeDisabled());
+            expect(screen.getByText('Install to Home Screen to enable iOS notifications.')).toBeInTheDocument();
+        });
+    });
 });

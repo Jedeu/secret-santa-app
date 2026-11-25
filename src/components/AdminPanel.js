@@ -65,7 +65,7 @@ export default function AdminPanel({ userEmail, season, onComplete }) {
 function buttonStyle(busy) {
     return {
         background: 'var(--primary)',
-        color: 'white',
+        color: 'var(--on-primary)',
         fontSize: '12px',
         padding: '6px 12px',
         border: 'none',

@@ -435,7 +435,32 @@ async function openRecipientChat(page: Page, mobile = false): Promise<void> {
     await openTab(page, /recipient/i, mobile);
     await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
     // No skip path: the button must exist on a dev server started by playwright.config.ts.
+    // It lives in the composer's "+" drawer; open it to check, then close it again.
+    await openAddMenu(page);
     await expect(page.getByRole('button', { name: 'Choose a GIF' })).toBeVisible({ timeout: 15000 });
+    await closeAddMenu(page);
+}
+
+function addMenuButton(page: Page) {
+    return page.getByRole('button', { name: 'Add attachment, emoji or GIF' });
+}
+
+async function openAddMenu(page: Page): Promise<void> {
+    if ((await addMenuButton(page).getAttribute('aria-expanded')) !== 'true') {
+        await addMenuButton(page).click();
+    }
+}
+
+async function closeAddMenu(page: Page): Promise<void> {
+    if ((await addMenuButton(page).getAttribute('aria-expanded')) === 'true') {
+        await addMenuButton(page).click();
+    }
+}
+
+/** Opens the GIF picker through the composer's "+" drawer. */
+async function clickGifButton(page: Page): Promise<void> {
+    await openAddMenu(page);
+    await gifButton(page).click();
 }
 
 async function newGifContext(browser: Browser, viewport = DESKTOP) {
@@ -492,7 +517,7 @@ async function expectGifBubbleCaption(page: Page, ref: string, caption: string):
 }
 
 async function openPickerWithTiles(page: Page): Promise<void> {
-    await gifButton(page).click();
+    await clickGifButton(page);
     await expect(page.getByTestId('gif-picker')).toBeVisible();
     await expect(tiles(page).first()).toBeVisible({ timeout: 15000 });
 }
@@ -692,7 +717,7 @@ test.describe.serial('GIF picker', () => {
             stub.nextApi(async (route) => {
                 await route.fulfill({ status: 429, contentType: 'application/json', headers: CORS, body: JSON.stringify({ message: 'Synthetic limit' }) });
             });
-            await gifButton(page).click();
+            await clickGifButton(page);
             await expect(pickerStatus(page)).toHaveText(BUSY_TEXT, { timeout: 15000 });
             expect(stub.apiCalls).toHaveLength(1);
 
@@ -703,7 +728,7 @@ test.describe.serial('GIF picker', () => {
             await expect(pickerStatus(page)).toHaveText(BUSY_TEXT);
 
             await page.getByRole('button', { name: 'Close GIF picker' }).click();
-            await gifButton(page).click();
+            await clickGifButton(page);
             await expect(pickerStatus(page)).toHaveText(BUSY_TEXT);
             await page.waitForTimeout(500);
             expect(stub.apiCalls).toHaveLength(1);
@@ -730,7 +755,7 @@ test.describe.serial('GIF picker', () => {
             stub.nextApi(async (route) => {
                 await route.abort('failed');
             });
-            await gifButton(page).click();
+            await clickGifButton(page);
             await expect(pickerStatus(page)).toHaveText(GENERIC_TEXT, { timeout: 15000 });
             expect(stub.apiCalls).toHaveLength(1);
 
@@ -792,7 +817,7 @@ test.describe.serial('GIF picker', () => {
                 await gate.promise;
                 await stub.fulfillPage(route, url);
             });
-            await gifButton(page).click();
+            await clickGifButton(page);
             await expect(pickerStatus(page)).toHaveText('Loading GIFs…');
             await expect.poll(() => stub.apiCalls.length).toBe(1);
 
@@ -824,15 +849,21 @@ test.describe.serial('GIF picker', () => {
         try {
             const { page } = await signIn(context, firstName);
             await openRecipientChat(page);
+            await openAddMenu(page);
             await expect(page.getByRole('button', { name: 'Attach image' })).toBeVisible({ timeout: 15000 });
+            await closeAddMenu(page);
             stub.expectQuietBeforePicker();
             const png = await makeStillInPage(page, { width: 200, height: 150, type: 'image/png' });
 
             await pasteImage(page, png, 'image/png');
             await expect(page.getByAltText('Attachment preview')).toBeVisible({ timeout: 15000 });
+            await openAddMenu(page);
             await expect(gifButton(page)).toBeDisabled();
+            await closeAddMenu(page);
             await page.getByRole('button', { name: 'Remove image' }).click();
+            await openAddMenu(page);
             await expect(gifButton(page)).toBeEnabled();
+            await closeAddMenu(page);
 
             await openPickerWithTiles(page);
             await selectTile(page, stub, 0);

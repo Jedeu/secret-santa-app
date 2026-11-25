@@ -4,6 +4,8 @@ import ClientProviders from '@/components/ClientProviders';
 export const viewport = {
     width: 'device-width',
     initialScale: 1,
+    // Evergreen page background (globals.css --background), matching manifest.json.
+    themeColor: '#0e1512',
 };
 
 export const metadata = {
