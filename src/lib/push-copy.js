@@ -47,12 +47,31 @@ export function getReceiverChat(message) {
     return null;
 }
 
-/** Markdown markers removed, whitespace collapsed, cut to PREVIEW_MAX_LENGTH characters. */
+// Line starts the chat renders as Markdown blocks: headings, quotes, list items.
+const BLOCK_MARKER = /^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/;
+
+function stripBlockMarkers(line) {
+    let current = line;
+    let next = current.replace(BLOCK_MARKER, '');
+    while (next !== current) {
+        current = next;
+        next = current.replace(BLOCK_MARKER, '');
+    }
+    return current;
+}
+
+/** Plain text of a Markdown message, whitespace collapsed, cut to PREVIEW_MAX_LENGTH characters. */
 export function toPreviewText(value) {
     if (typeof value !== 'string') return '';
     const plain = value
+        .split('\n')
+        .map(stripBlockMarkers)
+        .join(' ')
         .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/(\*\*|__|~~|`)/g, '')
+        .replace(/`/g, '')
+        .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
+        .replace(/(^|[^\w*])\*(?!\s)(.+?)\*(?!\w)/g, '$1$2')
+        .replace(/(^|[^\w])_(?!\s)(.+?)_(?!\w)/g, '$1$2')
         .replace(/\s+/g, ' ')
         .trim();
     const chars = Array.from(plain);

@@ -48,6 +48,10 @@ describe('push-copy', () => {
     test('previews drop markdown and whitespace and stop at 100 characters', () => {
         expect(toPreviewText('**Big** hint:\n\n`socks` and [a link](https://example.com) ~~no~~'))
             .toBe('Big hint: socks and a link no');
+        expect(toPreviewText('*hint* and _socks_ and ***very***')).toBe('hint and socks and very');
+        expect(toPreviewText('# Hint\n> socks\n- one\n2. two')).toBe('Hint socks one two');
+        // Not emphasis: left alone.
+        expect(toPreviewText('snake_case and 5 * 3')).toBe('snake_case and 5 * 3');
         expect(toPreviewText('a'.repeat(150))).toBe(`${'a'.repeat(99)}\u2026`);
         // Cut by characters, so an emoji is never split into a broken half.
         expect(toPreviewText(`${'a'.repeat(98)}\ud83c\udf84\ud83c\udf84\ud83c\udf84`))

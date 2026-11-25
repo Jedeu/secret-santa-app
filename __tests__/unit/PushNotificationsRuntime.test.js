@@ -3,6 +3,7 @@
  */
 
 import { act, render } from '@testing-library/react';
+import AuthGuard from '@/components/AuthGuard';
 import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 import { useToast } from '@/components/ClientProviders';
 import {
@@ -14,6 +15,10 @@ import {
 jest.mock('@/components/ClientProviders', () => ({
     useToast: jest.fn(),
 }));
+
+jest.mock('firebase/auth', () => ({ signInWithPopup: jest.fn(), GoogleAuthProvider: jest.fn() }));
+jest.mock('@/lib/firebase-client', () => ({ clientAuth: null }));
+jest.mock('@/lib/sign-out', () => ({ signOutCurrentUser: jest.fn() }));
 
 jest.mock('@/lib/push-client', () => ({
     attachForegroundListener: jest.fn(),
@@ -214,6 +219,24 @@ describe('PushNotificationsRuntime', () => {
             rerender(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" unreadTotal={0} pushOn />);
             await flush();
             expect(navigator.clearAppBadge).toHaveBeenCalledTimes(2);
+        });
+
+        test('signing out clears the Home Screen badge', async () => {
+            const user = { id: 'user-1' };
+            const tree = (currentUser) => (
+                <AuthGuard isLoading={false} currentUser={currentUser} authError={null}>
+                    <PushNotificationsRuntime currentUser={currentUser} authUid="uid-1" unreadTotal={2} pushOn />
+                </AuthGuard>
+            );
+            const { rerender } = render(tree(user));
+            await flush();
+            expect(navigator.setAppBadge).toHaveBeenCalledWith(2);
+            expect(navigator.clearAppBadge).not.toHaveBeenCalled();
+
+            rerender(tree(null));
+            await flush();
+
+            expect(navigator.clearAppBadge).toHaveBeenCalledTimes(1);
         });
     });
 });

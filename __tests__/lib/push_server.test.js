@@ -321,6 +321,15 @@ describe('push-server', () => {
             expect(sentPayload().data.unreadTotal).toBe('5');
         });
 
+        test('a message already read when the count runs: no count and a cleared badge', async () => {
+            useFakeFirestore({ unreadCounts: {} });
+
+            await sendIncomingMessagePush({ year: 2026, message: fromSanta(), receiver: null });
+
+            expect(sentPayload().notification.title).toBe('\ud83c\udf85 Your Santa');
+            expect(sentPayload().data.unreadTotal).toBe('0');
+        });
+
         test('a failing count (index not deployed yet) still sends, without a count', async () => {
             jest.spyOn(console, 'warn').mockImplementation(() => {});
             useFakeFirestore({ countError: Object.assign(new Error('needs index'), { code: 9 }) });

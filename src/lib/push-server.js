@@ -114,10 +114,11 @@ async function getUnreadCounts({ year, message, receiver, chat }) {
         : [message.conversationId];
     try {
         const counts = await countUnread(firestore, year, message.toId, ids);
+        // Counts may be 0 when the receiver read the message before this ran; the badge
+        // then clears and the title shows no count.
         return {
-            // The message that triggered this push is unread by definition.
-            unread: Math.max(counts[0], 1),
-            unreadTotal: Math.max(counts.reduce((sum, count) => sum + count, 0), 1),
+            unread: counts[0],
+            unreadTotal: counts.reduce((sum, count) => sum + count, 0),
         };
     } catch (error) {
         console.warn('Push unread count unavailable:', error?.code ?? 'unknown');

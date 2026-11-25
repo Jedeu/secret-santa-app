@@ -144,5 +144,12 @@ export default function PushNotificationsRuntime({
         ignoreFailure(() => (count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge?.()));
     }, [userId, pushOn, unreadTotal]);
 
+    // Signing out unmounts this runtime (AuthGuard): leave no badge behind.
+    useEffect(() => () => {
+        if (typeof navigator !== 'undefined' && typeof navigator.clearAppBadge === 'function') {
+            ignoreFailure(() => navigator.clearAppBadge());
+        }
+    }, []);
+
     return null;
 }
