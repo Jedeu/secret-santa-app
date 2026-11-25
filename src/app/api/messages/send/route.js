@@ -279,7 +279,12 @@ export async function POST(request) {
                     updatedAt: message.timestamp,
                 });
             }
-            return { kind: 'created', message };
+            return {
+                kind: 'created',
+                message,
+                year,
+                receiver: { recipientId: recipient.recipientId ?? null, gifterId: recipient.gifterId ?? null },
+            };
         };
 
         let result = null;
@@ -301,9 +306,9 @@ export async function POST(request) {
         if (result.kind === 'created') {
             try {
                 await sendIncomingMessagePush({
-                    toUserId: result.message.toId,
-                    conversationId: result.message.conversationId,
-                    fromUserId: result.message.fromId,
+                    year: result.year,
+                    message: result.message,
+                    receiver: result.receiver,
                 });
             } catch (pushError) {
                 console.error('Push dispatch failed:', pushError);

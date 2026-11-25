@@ -75,6 +75,32 @@ describe('worker push display', () => {
         expect(listeners.notificationclick).toEqual(expect.any(Function));
     });
 
+    test('a push sets the Home Screen badge to the unread total and nothing else', async () => {
+        const setAppBadge = jest.fn(() => Promise.resolve());
+        global.self.navigator = { setAppBadge };
+        jest.isolateModules(() => {
+            require(WORKER_PATH);
+        });
+
+        const push = (payload) => {
+            const waits = [];
+            listeners.push({
+                data: { json: () => payload },
+                waitUntil: (promise) => waits.push(promise),
+            });
+            return Promise.all(waits);
+        };
+
+        await push({ data: { unreadTotal: '4' }, notification: { title: 'x' } });
+        await push({ data: { unreadTotal: '' } });
+        await push({ data: { unreadTotal: '-1' } });
+        await push({});
+
+        expect(setAppBadge).toHaveBeenCalledTimes(1);
+        expect(setAppBadge).toHaveBeenCalledWith(4);
+        expect(showNotification).not.toHaveBeenCalled();
+    });
+
     test('the worker source never calls showNotification and has no custom tag', () => {
         const source = fs.readFileSync(WORKER_PATH, 'utf8');
 

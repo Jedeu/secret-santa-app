@@ -3,6 +3,7 @@
  */
 
 import { act, render } from '@testing-library/react';
+import AuthGuard from '@/components/AuthGuard';
 import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 import { useToast } from '@/components/ClientProviders';
 import {
@@ -14,6 +15,10 @@ import {
 jest.mock('@/components/ClientProviders', () => ({
     useToast: jest.fn(),
 }));
+
+jest.mock('firebase/auth', () => ({ signInWithPopup: jest.fn(), GoogleAuthProvider: jest.fn() }));
+jest.mock('@/lib/firebase-client', () => ({ clientAuth: null }));
+jest.mock('@/lib/sign-out', () => ({ signOutCurrentUser: jest.fn() }));
 
 jest.mock('@/lib/push-client', () => ({
     attachForegroundListener: jest.fn(),
@@ -45,7 +50,7 @@ describe('PushNotificationsRuntime', () => {
         });
     });
 
-    test('syncs with the auth uid and shows toast using contextual payload body from data first', async () => {
+    test('syncs with the auth uid and toasts the chat title with the payload body', async () => {
         render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" />);
 
         expect(syncPushTokenIfGranted).toHaveBeenCalledTimes(1);
@@ -54,22 +59,36 @@ describe('PushNotificationsRuntime', () => {
 
         act(() => {
             foregroundHandler?.({
-                data: { notificationBody: 'You have a new message from Santa' },
+                data: { chat: 'santa', body: 'Did you get my hint?' },
                 notification: { body: 'Fallback body' },
             });
         });
 
-        expect(showToast).toHaveBeenCalledWith('You have a new message from Santa', 'success');
+        expect(showToast).toHaveBeenCalledWith('\ud83c\udf85 Your Santa: Did you get my hint?', 'success');
     });
 
-    test('falls back to generic body when payload has no notification text', () => {
+    test('falls back to generic copy when payload has no notification text', () => {
         render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" />);
 
         act(() => {
             foregroundHandler?.({ data: {}, notification: {} });
         });
 
-        expect(showToast).toHaveBeenCalledWith('You have a new message', 'success');
+        expect(showToast).toHaveBeenCalledWith('Secret Santa: Sent you a message', 'success');
+    });
+
+    test('no toast for the chat already on screen; other chats still toast', () => {
+        render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" activeTab="recipient" />);
+
+        act(() => {
+            foregroundHandler?.({ data: { chat: 'recipient', body: 'Sent you a message' } });
+        });
+        expect(showToast).not.toHaveBeenCalled();
+
+        act(() => {
+            foregroundHandler?.({ data: { chat: 'santa', body: 'Hello' } });
+        });
+        expect(showToast).toHaveBeenCalledWith('\ud83c\udf85 Your Santa: Hello', 'success');
     });
 
     test('does not show toast when document is hidden', () => {
@@ -77,9 +96,7 @@ describe('PushNotificationsRuntime', () => {
         render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" />);
 
         act(() => {
-            foregroundHandler?.({
-                data: { notificationBody: 'You have a new message from your recipient' },
-            });
+            foregroundHandler?.({ data: { chat: 'recipient', body: 'Sent you a message' } });
         });
 
         expect(showToast).not.toHaveBeenCalled();
@@ -110,5 +127,116 @@ describe('PushNotificationsRuntime', () => {
 
         expect(cancelPushOperations).toHaveBeenCalledTimes(1);
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    describe('opening chats, the tray and the Home Screen badge', () => {
+        let swListeners;
+        let trayNotifications;
+        let getNotifications;
+
+        beforeEach(() => {
+            swListeners = {};
+            trayNotifications = [{ close: jest.fn() }, { close: jest.fn() }];
+            getNotifications = jest.fn(() => Promise.resolve(trayNotifications));
+            Object.defineProperty(navigator, 'serviceWorker', {
+                configurable: true,
+                value: {
+                    addEventListener: jest.fn((type, handler) => { swListeners[type] = handler; }),
+                    removeEventListener: jest.fn(),
+                    getRegistration: jest.fn(() => Promise.resolve({ getNotifications })),
+                },
+            });
+            Object.defineProperty(navigator, 'setAppBadge', { configurable: true, value: jest.fn(() => Promise.resolve()) });
+            Object.defineProperty(navigator, 'clearAppBadge', { configurable: true, value: jest.fn(() => Promise.resolve()) });
+        });
+
+        afterEach(() => {
+            delete navigator.serviceWorker;
+            delete navigator.setAppBadge;
+            delete navigator.clearAppBadge;
+            window.history.replaceState(null, '', '/');
+        });
+
+        const flush = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+        test('a cold start on /?chat=santa opens the Santa tab and strips the parameter', () => {
+            window.history.replaceState(null, '', '/?chat=santa&keep=1');
+            const onOpenChat = jest.fn();
+
+            render(<PushNotificationsRuntime currentUser={null} authUid={null} onOpenChat={onOpenChat} />);
+
+            expect(onOpenChat).toHaveBeenCalledWith('santa');
+            expect(window.location.search).toBe('?keep=1');
+        });
+
+        test('an unknown chat parameter is stripped and ignored', () => {
+            window.history.replaceState(null, '', '/?chat=feed');
+            const onOpenChat = jest.fn();
+
+            render(<PushNotificationsRuntime currentUser={null} authUid={null} onOpenChat={onOpenChat} />);
+
+            expect(onOpenChat).not.toHaveBeenCalled();
+            expect(window.location.search).toBe('');
+        });
+
+        test("tapping a notification while the app is open follows FCM's notification-clicked message", () => {
+            const onOpenChat = jest.fn();
+            render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" onOpenChat={onOpenChat} />);
+
+            act(() => {
+                swListeners.message({ data: { isFirebaseMessaging: true, messageType: 'push-received', data: { chat: 'santa' } } });
+                swListeners.message({ data: { messageType: 'notification-clicked', data: { chat: 'santa' } } });
+            });
+            expect(onOpenChat).not.toHaveBeenCalled();
+
+            act(() => {
+                swListeners.message({ data: { isFirebaseMessaging: true, messageType: 'notification-clicked', data: { chat: 'recipient' } } });
+            });
+            expect(onOpenChat).toHaveBeenCalledWith('recipient');
+        });
+
+        test('viewing a chat closes its notifications in the tray', async () => {
+            const { rerender } = render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" activeTab="feed" />);
+            await flush();
+            expect(getNotifications).not.toHaveBeenCalled();
+
+            rerender(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" activeTab="santa" />);
+            await flush();
+
+            expect(getNotifications).toHaveBeenCalledWith({ tag: 'chat-santa' });
+            trayNotifications.forEach((notification) => expect(notification.close).toHaveBeenCalled());
+        });
+
+        test('the Home Screen badge shows unread totals only while push is on', async () => {
+            const { rerender } = render(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" unreadTotal={3} pushOn />);
+            await flush();
+            expect(navigator.setAppBadge).toHaveBeenCalledWith(3);
+
+            rerender(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" unreadTotal={3} pushOn={false} />);
+            await flush();
+            expect(navigator.clearAppBadge).toHaveBeenCalledTimes(1);
+
+            rerender(<PushNotificationsRuntime currentUser={{ id: 'user-1' }} authUid="uid-1" unreadTotal={0} pushOn />);
+            await flush();
+            expect(navigator.clearAppBadge).toHaveBeenCalledTimes(2);
+        });
+
+        test('signing out clears the Home Screen badge', async () => {
+            const user = { id: 'user-1' };
+            const tree = (currentUser) => (
+                <AuthGuard isLoading={false} currentUser={currentUser} authError={null}>
+                    <PushNotificationsRuntime currentUser={currentUser} authUid="uid-1" unreadTotal={2} pushOn />
+                </AuthGuard>
+            );
+            const { rerender } = render(tree(user));
+            await flush();
+            expect(navigator.setAppBadge).toHaveBeenCalledWith(2);
+            expect(navigator.clearAppBadge).not.toHaveBeenCalled();
+
+            rerender(tree(null));
+            await flush();
+
+            expect(navigator.clearAppBadge).toHaveBeenCalledTimes(1);
+        });
     });
 });

@@ -355,7 +355,14 @@ export default function Home() {
             authEmail={authEmail}
             onRetry={refreshUser}
         >
-            <PushNotificationsRuntime currentUser={currentUser} authUid={authUid} />
+            <PushNotificationsRuntime
+                currentUser={currentUser}
+                authUid={authUid}
+                activeTab={activeTab}
+                onOpenChat={setActiveTab}
+                unreadTotal={unreadCounts.recipient + unreadCounts.santa}
+                pushOn={pushOn}
+            />
             {yearOpen && <MessageOutboxRuntime currentUser={currentUser} authUid={authUid} />}
             <NotificationSoundRuntime
                 soundEnabled={soundEnabled && pushOn}

@@ -409,7 +409,7 @@ describe('worker GIPHY policy', () => {
 
     describe('registration', () => {
         test('existing listeners stay registered alongside activate and message', () => {
-            expect(Object.keys(listeners).sort()).toEqual(['activate', 'message', 'notificationclick']);
+            expect(Object.keys(listeners).sort()).toEqual(['activate', 'message', 'notificationclick', 'push']);
             expect(listeners.notificationclick).toEqual(expect.any(Function));
         });
 
@@ -723,7 +723,7 @@ describe('worker GIPHY policy', () => {
             install({ caches, idb });
 
             await expect(activate()).resolves.toBeUndefined();
-            expect(Object.keys(listeners).sort()).toEqual(['activate', 'message', 'notificationclick']);
+            expect(Object.keys(listeners).sort()).toEqual(['activate', 'message', 'notificationclick', 'push']);
             await expect(probe()).resolves.toEqual(NOT_READY);
         });
     });
