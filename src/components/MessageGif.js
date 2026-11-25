@@ -5,7 +5,9 @@ import { getGiphyEmbedUrl } from '@/lib/giphy-reference';
  * Renders a GIF reference as a sandboxed GIPHY embed. The embed URL is rebuilt from
  * the validated id; no key or API call is needed. The referrer is suppressed.
  */
-export default function MessageGif({ id, width = 280 }) {
+export const GIF_WIDTH = 280;
+
+export default function MessageGif({ id, width = GIF_WIDTH }) {
     const embedUrl = getGiphyEmbedUrl(id);
 
     if (!embedUrl) {
