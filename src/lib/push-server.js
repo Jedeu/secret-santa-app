@@ -1,19 +1,20 @@
 import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { firestore, messaging } from '@/lib/firebase';
-import { parseConversationId } from '@/lib/message-utils';
+import { getConversationId } from '@/lib/message-utils';
 import { resolveParticipant, runFencedTransaction } from '@/lib/participant-admission';
+import { buildPushNotification, describeMessage, getReceiverChat } from '@/lib/push-copy';
+import { yearCollectionPath } from '@/lib/year-paths';
 
 const PUSH_TOKENS_COLLECTION = 'pushTokens';
 const NOTIFICATION_ICON = '/icons/icon-192x192.png';
+// Monochrome silhouette: Android draws the badge as a white mask in the status bar.
+const NOTIFICATION_BADGE = '/icons/badge-96x96.png';
 
 const INVALID_TOKEN_ERROR_CODES = new Set([
     'messaging/registration-token-not-registered',
     'messaging/invalid-registration-token',
 ]);
-const GENERIC_MESSAGE_BODY = 'You have a new message';
-const SANTA_MESSAGE_BODY = 'You have a new message from Santa';
-const RECIPIENT_MESSAGE_BODY = 'You have a new message from your recipient';
 
 function hashPushToken(token) {
     return createHash('sha256').update(token).digest('hex');
@@ -55,37 +56,106 @@ function zeroResult(extra = {}) {
     };
 }
 
-function resolveSenderRole({ conversationId, fromUserId }) {
-    if (!fromUserId) {
-        return '';
+function toIsoTimestamp(value) {
+    if (typeof value === 'string') {
+        return Number.isNaN(Date.parse(value)) ? null : value;
     }
-
-    const parsedConversation = parseConversationId(conversationId);
-    if (!parsedConversation) {
-        return '';
+    if (value && typeof value.toDate === 'function') {
+        return value.toDate().toISOString();
     }
-
-    if (fromUserId === parsedConversation.santaId) {
-        return 'santa';
-    }
-
-    if (fromUserId === parsedConversation.recipientId) {
-        return 'recipient';
-    }
-
-    return '';
+    return null;
 }
 
-function getNotificationBody(senderRole) {
-    if (senderRole === 'santa') {
-        return SANTA_MESSAGE_BODY;
-    }
+/**
+ * Unread messages to `userId` in each conversation: those after the user's lastRead
+ * marker, or all of them without one. Needs the messages (conversationId, toId,
+ * timestamp) index in firestore.indexes.json.
+ *
+ * @returns {Promise<number[]>} one count per conversation id, in order
+ */
+async function countUnread(db, year, userId, conversationIds) {
+    const lastReadCollection = db.collection(yearCollectionPath(year, 'lastRead').join('/'));
+    const messagesCollection = db.collection(yearCollectionPath(year, 'messages').join('/'));
+    const markers = await db.getAll(
+        ...conversationIds.map((id) => lastReadCollection.doc(`${userId}_${id}`))
+    );
 
-    if (senderRole === 'recipient') {
-        return RECIPIENT_MESSAGE_BODY;
-    }
+    return Promise.all(conversationIds.map(async (id, index) => {
+        const marker = markers[index];
+        const since = toIsoTimestamp(marker?.exists ? marker.data()?.lastReadAt : null);
+        let query = messagesCollection
+            .where('conversationId', '==', id)
+            .where('toId', '==', userId);
+        if (since) {
+            query = query.where('timestamp', '>', since);
+        }
+        const snapshot = await query.count().get();
+        return snapshot.data().count;
+    }));
+}
 
-    return GENERIC_MESSAGE_BODY;
+/** The receiver's other conversation: as Santa when this message reached them as recipient, and the reverse. */
+function getOtherConversationId(chat, toUserId, receiver) {
+    if (chat === 'santa') return getConversationId(toUserId, receiver?.recipientId);
+    if (chat === 'recipient') return getConversationId(receiver?.gifterId, toUserId);
+    return null;
+}
+
+/**
+ * Unread count of this chat and across both of the receiver's chats, or nulls when the
+ * count cannot be read (for instance before the index is deployed). Never throws: the
+ * notification goes out either way.
+ */
+async function getUnreadCounts({ year, message, receiver, chat }) {
+    if (!chat) return { unread: null, unreadTotal: null };
+    const otherId = getOtherConversationId(chat, message.toId, receiver);
+    const ids = otherId && otherId !== message.conversationId
+        ? [message.conversationId, otherId]
+        : [message.conversationId];
+    try {
+        const counts = await countUnread(firestore, year, message.toId, ids);
+        return {
+            // The message that triggered this push is unread by definition.
+            unread: Math.max(counts[0], 1),
+            unreadTotal: Math.max(counts.reduce((sum, count) => sum + count, 0), 1),
+        };
+    } catch (error) {
+        console.warn('Push unread count unavailable:', error?.code ?? 'unknown');
+        return { unread: null, unreadTotal: null };
+    }
+}
+
+/**
+ * The FCM payload for one message, minus tokens. No user id, conversation id, name,
+ * photo or attachment URL is included anywhere: only the receiver-side chat and kind.
+ */
+export function buildIncomingMessagePayload({ message, unread = null, unreadTotal = null }) {
+    const chat = getReceiverChat(message);
+    const { kind, text } = describeMessage(message);
+    const { title, body } = buildPushNotification({ chat, kind, text, unread });
+
+    return {
+        notification: { title, body },
+        data: {
+            type: 'incoming_message',
+            chat: chat || '',
+            kind,
+            title,
+            body,
+            unreadTotal: Number.isInteger(unreadTotal) ? String(unreadTotal) : '',
+        },
+        webpush: {
+            fcmOptions: {
+                link: chat ? `/?chat=${chat}` : '/',
+            },
+            notification: {
+                tag: chat ? `chat-${chat}` : 'chat',
+                renotify: true,
+                icon: NOTIFICATION_ICON,
+                badge: NOTIFICATION_BADGE,
+            },
+        },
+    };
 }
 
 /**
@@ -263,7 +333,12 @@ export async function cleanupInvalidTokens({ epoch, sent, fcmResponse } = {}) {
     });
 }
 
-export async function sendIncomingMessagePush({ toUserId, conversationId = null, fromUserId = null }) {
+/**
+ * @param {{ year: number, message: object, receiver?: { recipientId?: string, gifterId?: string } }} args
+ *   message: the stored message; receiver: the assignments of the user it was sent to.
+ */
+export async function sendIncomingMessagePush({ year, message, receiver = null }) {
+    const toUserId = message?.toId;
     if (!isPushDispatchEnabled()) {
         return zeroResult({ skipped: 'disabled' });
     }
@@ -304,31 +379,12 @@ export async function sendIncomingMessagePush({ toUserId, conversationId = null,
     }
 
     const tokens = sent.map((entry) => entry.token);
-    const senderRole = resolveSenderRole({ conversationId, fromUserId });
-    const notificationBody = getNotificationBody(senderRole);
+    const chat = getReceiverChat(message);
+    const { unread, unreadTotal } = await getUnreadCounts({ year, message, receiver, chat });
 
     const fcmResponse = await messaging.sendEachForMulticast({
         tokens,
-        notification: {
-            title: 'Secret Santa',
-            body: notificationBody,
-        },
-        data: {
-            type: 'incoming_message',
-            conversationId: conversationId || '',
-            senderRole,
-            notificationBody,
-        },
-        webpush: {
-            fcmOptions: {
-                link: '/',
-            },
-            notification: {
-                tag: conversationId ? `conversation-${conversationId}` : 'conversation',
-                icon: NOTIFICATION_ICON,
-                badge: NOTIFICATION_ICON,
-            },
-        },
+        ...buildIncomingMessagePayload({ message, unread, unreadTotal }),
     });
 
     const cleanedTokenCount = await cleanupInvalidTokens({ epoch, sent, fcmResponse });

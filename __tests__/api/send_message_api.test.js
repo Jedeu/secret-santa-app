@@ -204,9 +204,9 @@ describe('POST /api/messages/send', () => {
             clientCreatedAt: CLIENT_CREATED_AT
         }));
         expect(sendIncomingMessagePush).toHaveBeenCalledWith({
-            toUserId: RECIPIENT_ID,
-            conversationId: CONV_SANTA_TO_RECIPIENT,
-            fromUserId: SANTA_ID
+            year: 2025,
+            message: store.messages[CLIENT_MESSAGE_ID],
+            receiver: { recipientId: OTHER_ID, gifterId: SANTA_ID }
         });
     });
 

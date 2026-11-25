@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="46 60 420 420">
+  <!-- Source of public/icons/badge-96x96.png, the notification badge: regenerate with `node scripts/generate-icons.mjs`.
+       Android draws only its alpha channel, as a white mask in the status bar, so it is one solid white gift on transparency. -->
+  <g fill="#fff">
+    <!-- lid and box, split by the ribbon -->
+    <rect x="76" y="212" width="160" height="72" rx="16"/>
+    <rect x="276" y="212" width="160" height="72" rx="16"/>
+    <rect x="100" y="304" width="136" height="148" rx="16"/>
+    <rect x="276" y="304" width="136" height="148" rx="16"/>
+    <!-- bow -->
+    <path fill-rule="evenodd" d="M246 196 C 206 198, 130 190, 122 148 C 114 104, 168 88, 204 116 C 228 136, 242 168, 246 196 Z M222 176 C 206 154, 184 138, 168 142 C 154 146, 156 164, 170 170 C 186 176, 206 178, 222 176 Z"/>
+    <path fill-rule="evenodd" d="M266 196 C 306 198, 382 190, 390 148 C 398 104, 344 88, 308 116 C 284 136, 270 168, 266 196 Z M290 176 C 306 154, 328 138, 344 142 C 358 146, 356 164, 342 170 C 326 176, 306 178, 290 176 Z"/>
+  </g>
+</svg>

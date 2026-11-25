@@ -26,6 +26,27 @@ if (hasMessagingConfig()) {
     getMessaging(app);
 }
 
+// Home Screen badge: the server sends the receiver's unread total with each push.
+// This listener only sets the badge; FCM still draws the notification.
+function readUnreadTotal(event) {
+    try {
+        const value = event.data?.json()?.data?.unreadTotal;
+        if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+        return Number(value);
+    } catch {
+        return null;
+    }
+}
+
+self.addEventListener('push', (event) => {
+    const total = readUnreadTotal(event);
+    const setAppBadge = self.navigator?.setAppBadge;
+    if (total === null || typeof setAppBadge !== 'function') return;
+    event.waitUntil(Promise.resolve()
+        .then(() => setAppBadge.call(self.navigator, total))
+        .catch(() => undefined));
+});
+
 self.addEventListener('notificationclick', (event) => {
     event.notification?.close();
 

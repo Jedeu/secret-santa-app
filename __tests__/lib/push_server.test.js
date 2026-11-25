@@ -13,6 +13,7 @@ import { resolveParticipant, runFencedTransaction } from '@/lib/participant-admi
 jest.mock('@/lib/firebase', () => ({
     firestore: {
         collection: jest.fn(),
+        getAll: jest.fn(),
         runTransaction: jest.fn(),
     },
     messaging: {
@@ -51,6 +52,9 @@ function useFakeFirestore({
     tokens = [{ token: 'push-token-1', revision: 'rev-1' }],
     txLifecycle = undefined,
     rows = {},
+    lastRead = {},
+    unreadCounts = {},
+    countError = null,
 } = {}) {
     const queryChain = {
         where: jest.fn(),
@@ -76,8 +80,31 @@ function useFakeFirestore({
                 doc: (id) => ({ __key: id }),
             };
         }
+        if (name === 'years/2026/lastRead') {
+            return { doc: (id) => ({ __lastRead: id }) };
+        }
+        if (name === 'years/2026/messages') {
+            // count() of the unread query: unreadCounts[conversationId], recorded with its filters.
+            const countQuery = (filters) => ({
+                where: (field, op, value) => countQuery([...filters, [field, op, value]]),
+                count: () => ({
+                    get: async () => {
+                        countQueries.push(filters);
+                        if (countError) throw countError;
+                        const conversationId = filters.find(([field]) => field === 'conversationId')?.[2];
+                        return { data: () => ({ count: unreadCounts[conversationId] ?? 0 }) };
+                    },
+                }),
+            });
+            return { where: (field, op, value) => countQuery([[field, op, value]]) };
+        }
         throw new Error(`Unexpected collection: ${name}`);
     });
+    const countQueries = [];
+    firestore.getAll.mockImplementation(async (...refs) => refs.map((ref) => {
+        const row = lastRead[ref.__lastRead];
+        return { exists: !!row, data: () => row };
+    }));
 
     const tx = {
         getAll: jest.fn(async (...refs) => refs.map((ref) => {
@@ -93,7 +120,31 @@ function useFakeFirestore({
     };
     firestore.runTransaction.mockImplementation(async (fn) => fn(tx));
 
-    return { tx, queryChain, lifecycleRef };
+    return { tx, queryChain, lifecycleRef, countQueries };
+}
+
+const SANTA_ID = 'santa-123';
+const RECIPIENT_ID = 'recipient-123';
+const CONVERSATION_ID = `santa_${SANTA_ID}_recipient_${RECIPIENT_ID}`;
+
+function fromSanta(fields = {}) {
+    return {
+        id: 'message-1',
+        fromId: SANTA_ID,
+        toId: RECIPIENT_ID,
+        conversationId: CONVERSATION_ID,
+        timestamp: '2026-12-09T09:41:00.000Z',
+        content: 'Did you get my hint? 👀',
+        ...fields,
+    };
+}
+
+function fromRecipient(fields = {}) {
+    return fromSanta({ fromId: RECIPIENT_ID, toId: SANTA_ID, content: 'Thanks! Love, Blake', ...fields });
+}
+
+function sentPayload() {
+    return messaging.sendEachForMulticast.mock.calls[0][0];
 }
 
 // Rows are keyed by sha256(token); compute the keys the module will use.
@@ -126,7 +177,7 @@ describe('push-server', () => {
             setEnv({ PUSH_DISPATCH_ENABLED: 'false', NODE_ENV: 'production' });
             useFakeFirestore();
 
-            const result = await sendIncomingMessagePush({ toUserId: 'u1' });
+            const result = await sendIncomingMessagePush({ year: 2026, message: { toId: 'u1' } });
 
             expect(result).toMatchObject({ totalTokens: 0, skipped: 'disabled' });
             expect(firestore.collection).not.toHaveBeenCalled();
@@ -137,7 +188,7 @@ describe('push-server', () => {
             setEnv({ PUSH_DISPATCH_ENABLED: undefined, NODE_ENV: 'production', FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080' });
             useFakeFirestore();
 
-            const result = await sendIncomingMessagePush({ toUserId: 'u1' });
+            const result = await sendIncomingMessagePush({ year: 2026, message: { toId: 'u1' } });
 
             expect(result.skipped).toBe('disabled');
             expect(firestore.collection).not.toHaveBeenCalled();
@@ -153,7 +204,7 @@ describe('push-server', () => {
             setEnv({ PUSH_DISPATCH_ENABLED: undefined, NODE_ENV: 'test' });
             useFakeFirestore();
 
-            const result = await sendIncomingMessagePush({ toUserId: 'u1' });
+            const result = await sendIncomingMessagePush({ year: 2026, message: { toId: 'u1' } });
 
             expect(result.skipped).toBe('disabled');
             expect(firestore.collection).not.toHaveBeenCalled();
@@ -172,41 +223,46 @@ describe('push-server', () => {
     });
 
     describe('sendIncomingMessagePush (dispatch enabled)', () => {
-        test('sends recipient contextual notification copy with icon and badge', async () => {
+        test('a message from your Santa: previewed, grouped per chat, opens the Santa tab, no ids', async () => {
             useFakeFirestore({
                 tokens: [
                     { token: 'push-token-1', revision: 'rev-1' },
                     { token: 'push-token-1', revision: 'rev-1' },
                 ],
+                unreadCounts: { [CONVERSATION_ID]: 1 },
             });
 
             const result = await sendIncomingMessagePush({
-                toUserId: 'recipient-123',
-                conversationId: 'santa_santa-123_recipient_recipient-123',
-                fromUserId: 'recipient-123',
+                year: 2026,
+                message: fromSanta(),
+                receiver: { recipientId: 'someone-else', gifterId: SANTA_ID },
             });
 
-            expect(messaging.sendEachForMulticast).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    tokens: ['push-token-1'],
+            expect(sentPayload()).toEqual({
+                tokens: ['push-token-1'],
+                notification: { title: '🎅 Your Santa', body: 'Did you get my hint? 👀' },
+                data: {
+                    type: 'incoming_message',
+                    chat: 'santa',
+                    kind: 'text',
+                    title: '🎅 Your Santa',
+                    body: 'Did you get my hint? 👀',
+                    unreadTotal: '1',
+                },
+                webpush: {
+                    fcmOptions: { link: '/?chat=santa' },
                     notification: {
-                        title: 'Secret Santa',
-                        body: 'You have a new message from your recipient',
+                        tag: 'chat-santa',
+                        renotify: true,
+                        icon: '/icons/icon-192x192.png',
+                        badge: '/icons/badge-96x96.png',
                     },
-                    data: expect.objectContaining({
-                        senderRole: 'recipient',
-                        notificationBody: 'You have a new message from your recipient',
-                    }),
-                    webpush: {
-                        fcmOptions: { link: '/' },
-                        notification: {
-                            tag: 'conversation-santa_santa-123_recipient_recipient-123',
-                            icon: '/icons/icon-192x192.png',
-                            badge: '/icons/icon-192x192.png',
-                        },
-                    },
-                })
-            );
+                },
+            });
+            // Anonymity: no user id or conversation id anywhere in what reaches FCM.
+            const serialized = JSON.stringify({ ...sentPayload(), tokens: [] });
+            expect(serialized).not.toContain(SANTA_ID);
+            expect(serialized).not.toContain(RECIPIENT_ID);
 
             expect(result).toMatchObject({
                 totalTokens: 1,
@@ -216,41 +272,80 @@ describe('push-server', () => {
             });
         });
 
-        test('sends Santa contextual notification copy', async () => {
-            useFakeFirestore();
+        test('a message from your recipient never previews its text', async () => {
+            useFakeFirestore({ unreadCounts: { [CONVERSATION_ID]: 1 } });
 
             await sendIncomingMessagePush({
-                toUserId: 'recipient-123',
-                conversationId: 'santa_santa-123_recipient_recipient-123',
-                fromUserId: 'santa-123',
+                year: 2026,
+                message: fromRecipient(),
+                receiver: { recipientId: RECIPIENT_ID, gifterId: 'someone-else' },
             });
 
-            expect(messaging.sendEachForMulticast).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    notification: {
-                        title: 'Secret Santa',
-                        body: 'You have a new message from Santa',
-                    },
-                    data: expect.objectContaining({ senderRole: 'santa' }),
-                })
-            );
+            const payload = sentPayload();
+            expect(payload.notification).toEqual({ title: '🎁 Your recipient', body: 'Sent you a message' });
+            expect(payload.data).toMatchObject({ chat: 'recipient', kind: 'text', body: 'Sent you a message' });
+            expect(payload.webpush.fcmOptions.link).toBe('/?chat=recipient');
+            expect(payload.webpush.notification.tag).toBe('chat-recipient');
+            expect(JSON.stringify(payload)).not.toContain('Blake');
         });
 
-        test('falls back to generic copy when sender role is unknown', async () => {
-            useFakeFirestore();
-
-            await sendIncomingMessagePush({
-                toUserId: 'recipient-123',
-                conversationId: 'invalid-conversation-id',
-                fromUserId: 'mystery-user',
+        test('counts unread since lastRead in this chat and across both chats', async () => {
+            const otherConversationId = `santa_${RECIPIENT_ID}_recipient_their-recipient`;
+            const { countQueries } = useFakeFirestore({
+                lastRead: {
+                    [`${RECIPIENT_ID}_${CONVERSATION_ID}`]: {
+                        lastReadAt: { toDate: () => new Date('2026-12-09T09:00:00.000Z') },
+                    },
+                },
+                unreadCounts: { [CONVERSATION_ID]: 3, [otherConversationId]: 2 },
             });
 
-            expect(messaging.sendEachForMulticast).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    notification: { title: 'Secret Santa', body: 'You have a new message' },
-                    data: expect.objectContaining({ senderRole: '' }),
-                })
-            );
+            await sendIncomingMessagePush({
+                year: 2026,
+                message: fromSanta(),
+                receiver: { recipientId: 'their-recipient', gifterId: SANTA_ID },
+            });
+
+            expect(countQueries).toEqual([
+                [
+                    ['conversationId', '==', CONVERSATION_ID],
+                    ['toId', '==', RECIPIENT_ID],
+                    ['timestamp', '>', '2026-12-09T09:00:00.000Z'],
+                ],
+                [
+                    ['conversationId', '==', otherConversationId],
+                    ['toId', '==', RECIPIENT_ID],
+                ],
+            ]);
+            expect(sentPayload().notification.title).toBe('🎅 Your Santa · 3 new');
+            expect(sentPayload().data.unreadTotal).toBe('5');
+        });
+
+        test('a failing count (index not deployed yet) still sends, without a count', async () => {
+            jest.spyOn(console, 'warn').mockImplementation(() => {});
+            useFakeFirestore({ countError: Object.assign(new Error('needs index'), { code: 9 }) });
+
+            await sendIncomingMessagePush({ year: 2026, message: fromSanta(), receiver: null });
+
+            expect(sentPayload().notification).toEqual({ title: '🎅 Your Santa', body: 'Did you get my hint? 👀' });
+            expect(sentPayload().data.unreadTotal).toBe('');
+            expect(console.warn).toHaveBeenCalledWith('Push unread count unavailable:', 9);
+            console.warn.mockRestore();
+        });
+
+        test('falls back to generic copy when the chat is unknown', async () => {
+            const { countQueries } = useFakeFirestore();
+
+            await sendIncomingMessagePush({
+                year: 2026,
+                message: fromSanta({ conversationId: 'invalid-conversation-id' }),
+            });
+
+            expect(sentPayload().notification).toEqual({ title: 'Secret Santa', body: 'Sent you a message' });
+            expect(sentPayload().data).toMatchObject({ chat: '', unreadTotal: '' });
+            expect(sentPayload().webpush.fcmOptions.link).toBe('/');
+            expect(sentPayload().webpush.notification.tag).toBe('chat');
+            expect(countQueries).toEqual([]);
         });
 
         test.each([
@@ -259,7 +354,7 @@ describe('push-server', () => {
         ])('lifecycle %s -> skipped inactive, no FCM', async (_label, lifecycle) => {
             const { queryChain } = useFakeFirestore({ lifecycle });
 
-            const result = await sendIncomingMessagePush({ toUserId: 'u1' });
+            const result = await sendIncomingMessagePush({ year: 2026, message: { toId: 'u1' } });
 
             expect(result).toMatchObject({ totalTokens: 0, skipped: 'inactive' });
             expect(queryChain.get).not.toHaveBeenCalled();
@@ -282,7 +377,7 @@ describe('push-server', () => {
                 responses: [INVALID, INVALID],
             });
 
-            const result = await sendIncomingMessagePush({ toUserId: 'u1' });
+            const result = await sendIncomingMessagePush({ year: 2026, message: { toId: 'u1' } });
 
             expect(result.cleanedTokenCount).toBe(2);
             expect(tx.update).toHaveBeenCalledTimes(2);
@@ -298,7 +393,7 @@ describe('push-server', () => {
                 responses: [INVALID],
             });
 
-            const result = await sendIncomingMessagePush({ toUserId: 'u1' });
+            const result = await sendIncomingMessagePush({ year: 2026, message: { toId: 'u1' } });
 
             expect(result.cleanedTokenCount).toBe(0);
             expect(tx.update).not.toHaveBeenCalled();
