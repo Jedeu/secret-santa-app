@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Source of every app icon in public/icons and src/app/favicon.ico: regenerate with `node scripts/generate-icons.mjs`.
+       Full-bleed and opaque (iOS fills transparency black); the artwork stays inside the central 80% circle (maskable safe zone). -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="44%" r="68%">
+      <stop offset="0" stop-color="#22302a"/>
+      <stop offset="1" stop-color="#0e1512"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a8c68"/>
+      <stop offset="1" stop-color="#36694f"/>
+    </linearGradient>
+    <linearGradient id="lid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#74c696"/>
+      <stop offset="1" stop-color="#5aa77b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eec880"/>
+      <stop offset="1" stop-color="#d9a84e"/>
+    </linearGradient>
+    <g id="loop">
+      <path d="M256 228 C 218 230, 140 222, 130 182 C 120 140, 170 122, 206 148 C 232 168, 250 200, 256 228 Z" fill="url(#gold)"/>
+      <path d="M238 214 C 220 188, 192 166, 174 170 C 158 174, 160 194, 176 202 C 192 210, 218 214, 238 214 Z" fill="#a97c33"/>
+    </g>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- box -->
+  <rect x="146" y="276" width="220" height="132" rx="12" fill="url(#body)"/>
+  <rect x="146" y="276" width="220" height="16" fill="#2c5a43"/>
+  <rect x="128" y="224" width="256" height="60" rx="14" fill="url(#lid)"/>
+
+  <!-- ribbon -->
+  <rect x="232" y="284" width="48" height="124" fill="url(#gold)"/>
+  <rect x="232" y="284" width="48" height="14" fill="#b8893a"/>
+  <rect x="230" y="224" width="52" height="60" fill="#eec880"/>
+
+  <!-- bow -->
+  <use href="#loop"/>
+  <use href="#loop" transform="translate(512 0) scale(-1 1)"/>
+  <rect x="228" y="196" width="56" height="44" rx="16" fill="#d9a84e"/>
+  <rect x="232" y="198" width="48" height="36" rx="13" fill="#eec880"/>
+</svg>
