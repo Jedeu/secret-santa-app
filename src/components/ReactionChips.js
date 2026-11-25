@@ -45,14 +45,14 @@ export default function ReactionChips({ messageId, allReactions = [], currentUse
             {chips.map((chip) => {
                 const sharedStyle = {
                     border: chip.reactedByCurrentUser
-                        ? '1px solid var(--primary)'
-                        : '1px solid var(--border)',
+                        ? '1px solid var(--chip-active-border)'
+                        : '1px solid var(--chip-border)',
                     borderRadius: '12px',
                     padding: '2px 8px',
                     fontSize: '12px',
                     background: chip.reactedByCurrentUser
-                        ? 'rgba(58, 134, 255, 0.18)'
-                        : 'var(--surface)',
+                        ? 'var(--chip-active-bg)'
+                        : 'var(--chip-bg)',
                     color: 'var(--foreground)',
                 };
 

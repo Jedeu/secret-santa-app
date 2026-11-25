@@ -84,7 +84,7 @@ test.describe('Messaging - With Auth (requires emulator setup)', () => {
             await santaTab.click();
 
             // Should switch to Santa tab view
-            await expect(santaTab).toHaveCSS('font-weight', '600');
+            await expect(santaTab).toHaveAttribute('aria-current', 'page');
         }
     });
 

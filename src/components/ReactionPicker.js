@@ -56,7 +56,7 @@ export default function ReactionPicker({ onSelect, onClose, onMore, onReply }) {
                 display: 'flex',
                 gap: '4px',
                 zIndex: 50,
-                boxShadow: '0 8px 16px rgba(0,0,0,0.25)',
+                boxShadow: 'var(--pop-shadow)',
             }}
         >
             {QUICK_REACTIONS.map((emoji) => (

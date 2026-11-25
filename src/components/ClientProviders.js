@@ -32,9 +32,9 @@ function ToastViewport({ toasts, onDismiss }) {
         >
             {toasts.map(toast => {
                 const accent = toast.type === 'error'
-                    ? '#dc3545'
+                    ? 'var(--danger)'
                     : toast.type === 'success'
-                        ? '#198754'
+                        ? 'var(--success)'
                         : 'var(--primary)';
 
                 return (
@@ -49,7 +49,7 @@ function ToastViewport({ toasts, onDismiss }) {
                             borderLeft: `4px solid ${accent}`,
                             borderRadius: '8px',
                             padding: '10px 12px',
-                            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                            boxShadow: 'var(--pop-shadow)',
                             display: 'flex',
                             justifyContent: 'space-between',
                             gap: '10px',

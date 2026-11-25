@@ -13,6 +13,7 @@ import { getConversationId, filterMessages, buildViewerAssignmentMap } from '@/l
 import { getRosterNames } from '@/lib/participants';
 import { yearCollectionRef } from '@/lib/year-client';
 import { getRevealState } from '@/lib/recipient-reveal';
+import { isAdmin } from '@/lib/config';
 
 // Component imports
 import AuthGuard from '@/components/AuthGuard';
@@ -27,6 +28,7 @@ import PushNotificationsControl from '@/components/PushNotificationsControl';
 import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 import MessageOutboxRuntime from '@/components/MessageOutboxRuntime';
 import NotificationSoundRuntime from '@/components/NotificationSoundRuntime';
+import UserMenuBar from '@/components/UserMenuBar';
 
 const EMPTY_USERS = [];
 const USERS_FETCH_TIMEOUT_MS = 10000;
@@ -68,6 +70,9 @@ export default function Home() {
 
         return window.localStorage.getItem('soundEnabled') !== 'false';
     });
+    // Effective push state reported by PushNotificationsControl. Sound is a sub-setting of
+    // push: the chime only plays while push is effectively on.
+    const [pushOn, setPushOn] = useState(false);
 
     const adminControl = <AdminPanel userEmail={currentUser?.email} season={season} onComplete={refreshUser} />;
 
@@ -214,20 +219,21 @@ export default function Home() {
         window.localStorage.setItem('soundEnabled', soundEnabled ? 'true' : 'false');
     }, [soundEnabled]);
 
-    const standaloneHeader = (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-            <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' 👋'}</h1>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                {adminControl}
-                <button
-                    onClick={handleSignOut}
-                    style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}
-                >
-                    Sign out
-                </button>
-            </div>
-        </div>
+    // One-line "HI {NAME} ▾" bar: its menu holds Push notifications, Sound on (only while push
+    // is on) and Sign out; the admin season control sits right-aligned on the same line.
+    const userBar = (
+        <UserMenuBar
+            name={currentUser?.name}
+            soundEnabled={soundEnabled}
+            onToggleSound={() => setSoundEnabled(prev => !prev)}
+            pushControl={<PushNotificationsControl variant="toggle" authUid={authUid} onEffectiveChange={setPushOn} />}
+            pushOn={pushOn}
+            adminControl={isAdmin(currentUser?.email) ? adminControl : null}
+            onSignOut={handleSignOut}
+        />
     );
+
+    const standaloneHeader = <div className="standalone-bar">{userBar}</div>;
 
     let body;
     if (!yearOpen) {
@@ -287,60 +293,25 @@ export default function Home() {
         );
     } else {
         // 5. Chats in the open year.
+        const recipientLabel = allUsers.find(u => u.id === currentUser?.recipientId)?.name || null;
         body = (
-            <main className="container">
+            <main className="container chat-layout">
                 {/* Desktop Sidebar */}
                 <div className="desktop-only" style={{ width: '280px', flexShrink: 0 }}>
                     <Sidebar
-                        currentUser={currentUser}
                         activeTab={activeTab}
                         onTabChange={setActiveTab}
                         unreadCounts={unreadCounts}
-                        pushControl={<PushNotificationsControl compact authUid={authUid} />}
-                        onSignOut={handleSignOut}
-                        adminControl={adminControl}
                         showArchive={archiveYears.length > 0}
+                        header={userBar}
+                        recipientLabel={recipientLabel}
                     />
                 </div>
 
                 {/* Main Content Area */}
                 <div className="main-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                     {/* Mobile Header */}
-                    <div className="mobile-only mobile-header">
-                        <h1 className="title" data-testid="user-greeting" style={{ margin: 0, fontSize: '20px' }}>{'Hi, ' + currentUser?.name + ' 👋'}</h1>
-                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                            <button
-                                type="button"
-                                onClick={() => setSoundEnabled(prev => !prev)}
-                                aria-label={soundEnabled ? 'Mute notification sound' : 'Enable notification sound'}
-                                title={soundEnabled ? 'Mute notification sound' : 'Enable notification sound'}
-                                style={{
-                                    background: 'transparent',
-                                    border: '1px solid var(--border)',
-                                    color: 'var(--foreground)',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    width: '32px',
-                                    height: '32px',
-                                    lineHeight: 1,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '16px'
-                                }}
-                            >
-                                {soundEnabled ? '🔊' : '🔇'}
-                            </button>
-                            <PushNotificationsControl compact authUid={authUid} />
-                            {adminControl}
-                            <button
-                                onClick={handleSignOut}
-                                style={{ color: 'var(--text-muted)', fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer' }}
-                            >
-                                Sign out
-                            </button>
-                        </div>
-                    </div>
+                    <div className="mobile-only">{userBar}</div>
 
                     {/* Mobile Tabs */}
                     <div className="mobile-only">
@@ -349,6 +320,7 @@ export default function Home() {
                             onTabChange={setActiveTab}
                             unreadCounts={unreadCounts}
                             showArchive={archiveYears.length > 0}
+                            recipientLabel={recipientLabel}
                         />
                     </div>
                     <ChatTabs
@@ -382,7 +354,7 @@ export default function Home() {
             <PushNotificationsRuntime currentUser={currentUser} authUid={authUid} />
             {yearOpen && <MessageOutboxRuntime currentUser={currentUser} authUid={authUid} />}
             <NotificationSoundRuntime
-                soundEnabled={soundEnabled}
+                soundEnabled={soundEnabled && pushOn}
                 currentUserId={currentUser?.id}
                 allMessages={allMessages}
                 allMessagesLoading={allMessagesLoading}

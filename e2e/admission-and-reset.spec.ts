@@ -85,7 +85,9 @@ test.describe('Admission and reset', () => {
         await input.fill('Draft that must not follow the tab');
 
         await sidebar.getByRole('button', { name: /santa/i }).click();
-        await expect(page.getByText('Chat with your Santa')).toBeVisible();
+        // The selected tab names the chat; the chat keeps a screen-reader heading.
+        await expect(sidebar.getByRole('button', { name: /santa/i })).toHaveAttribute('aria-current', 'page');
+        await expect(page.getByRole('heading', { name: 'Chat with your Santa 🎅' })).toBeAttached();
         await expect(page.getByPlaceholder('Type a message...')).toHaveValue('');
 
         await sidebar.getByRole('button', { name: /recipient/i }).click();

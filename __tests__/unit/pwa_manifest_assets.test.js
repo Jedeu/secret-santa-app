@@ -24,8 +24,8 @@ describe('PWA manifest and icon assets', () => {
             short_name: 'Santa',
             start_url: '/',
             display: 'standalone',
-            background_color: '#0a0a0a',
-            theme_color: '#ff3b30',
+            background_color: '#0e1512',
+            theme_color: '#0e1512',
             orientation: 'portrait',
         });
 

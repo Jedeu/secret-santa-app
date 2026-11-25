@@ -162,7 +162,8 @@ test('reply by swipe on a phone and from the tap menu on desktop; the feed keeps
     const followUpOnPhone = bubble(recipientPage, followUpDoc.id);
     await expect(followUpOnPhone.getByTestId('message-quote')).toContainText('You');
     await followUpOnPhone.getByTestId('message-quote').tap();
-    await expect(bubble(recipientPage, answerDoc.id)).toHaveCSS('outline-color', 'rgb(0, 122, 255)');
+    // The jump highlight uses the accent (Evergreen candle-gold, #e0b25a).
+    await expect(bubble(recipientPage, answerDoc.id)).toHaveCSS('outline-color', 'rgb(224, 178, 90)');
     await shot(recipientPage, 'phone-4-jumped-to-original');
 
     // The public feed quotes with its anonymous labels.

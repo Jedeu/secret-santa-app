@@ -125,7 +125,12 @@ async function openSignedIn(context: BrowserContext, name: string) {
 async function openRecipientChat(page: Page): Promise<void> {
     await page.locator('.desktop-only').getByRole('button', { name: /recipient/i }).click();
     await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
+    // Attach lives in the composer's "+" drawer: open it to check the capability, then close it.
+    const addMenu = page.getByRole('button', { name: 'Add attachment, emoji or GIF' });
+    await addMenu.click();
     await expect(page.getByRole('button', { name: 'Attach image' })).toBeVisible({ timeout: 15000 });
+    await addMenu.click();
+    await expect(addMenu).toHaveAttribute('aria-expanded', 'false');
 }
 
 async function emulatorGet(page: Page, path: string): Promise<any> {

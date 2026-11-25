@@ -22,6 +22,7 @@ describe('app layout metadata', () => {
         expect(viewport).toEqual({
             width: 'device-width',
             initialScale: 1,
+            themeColor: '#0e1512',
         });
         expect(viewport).not.toHaveProperty('maximumScale');
         expect(viewport).not.toHaveProperty('userScalable');

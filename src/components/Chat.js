@@ -119,6 +119,10 @@ export default function Chat({
     // const messages = useRealtimeMessages(currentUser.id, otherUser.id);
     const [newMessage, setNewMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    // The "+" drawer (Attach, Emoji, GIF). Its options stay mounted and are hidden with CSS.
+    const [showAddMenu, setShowAddMenu] = useState(false);
+    const addMenuRef = useRef(null);
+    const addButtonRef = useRef(null);
     const [reactionPickerState, setReactionPickerState] = useState({
         conversationId,
         messageId: null,
@@ -700,6 +704,32 @@ export default function Chat({
         setShowEmojiPicker(false);
     };
 
+    // Close the "+" drawer on an outside tap, and move focus into it when it opens.
+    useEffect(() => {
+        if (!showAddMenu) return undefined;
+        addMenuRef.current?.querySelector('button:not([disabled])')?.focus();
+        const onPointer = (event) => {
+            if (addMenuRef.current?.contains(event.target) || addButtonRef.current?.contains(event.target)) return;
+            setShowAddMenu(false);
+        };
+        document.addEventListener('mousedown', onPointer);
+        document.addEventListener('touchstart', onPointer);
+        return () => {
+            document.removeEventListener('mousedown', onPointer);
+            document.removeEventListener('touchstart', onPointer);
+        };
+    }, [showAddMenu]);
+
+    const toggleEmojiPicker = () => {
+        if (gifPicker) {
+            closeGifPicker(gifPicker);
+        }
+        setShowEmojiPicker(!showEmojiPicker);
+    };
+
+
+    const hasSomethingToSend = !!newMessage.trim() || !!draftMedia || !!draftGif;
+
     // Close emoji picker when clicking outside
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -758,18 +788,14 @@ export default function Chat({
             marginBottom: 0, // Remove margin in full-height mode
             overflow: 'hidden' // Ensure content doesn't spill out
         }}>
-            <h3 className="subtitle" style={{
-                borderBottom: '1px solid var(--border)',
-                paddingBottom: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-            }}>
+            {/* The selected tab names the chat on screen; this heading (and its live unread
+                count) stays for screen readers. */}
+            <h3 className="sr-only">
                 {isSantaChat ? 'Chat with your Santa 🎅' : `Chat with ${otherUser.name} 🎁`}
                 {unreadCount > 0 && (
                     <span style={{
-                        background: 'var(--primary)',
-                        color: 'white',
+                        background: 'var(--badge-bg)',
+                        color: 'var(--badge-fg)',
                         fontSize: '11px',
                         fontWeight: 'bold',
                         padding: '2px 8px',
@@ -787,7 +813,7 @@ export default function Chat({
                 )}
             </h3>
             {isOtherTyping && (
-                <div style={{
+                <div className="chat-typing" style={{
                     fontSize: '12px',
                     color: 'var(--text-muted)',
                     padding: '4px 0'
@@ -845,12 +871,14 @@ export default function Chat({
                                         });
                                     }}
                                     style={{
-                                        background: isMe ? 'var(--primary)' : 'var(--surface-highlight)',
-                                        color: isMe ? 'white' : 'var(--foreground)',
+                                        background: isMe ? 'var(--bubble-own-bg)' : 'var(--bubble-other-bg)',
+                                        color: isMe ? 'var(--bubble-own-fg)' : 'var(--bubble-other-fg)',
                                         padding: '8px 12px',
-                                        borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                                        borderRadius: isMe
+                                            ? 'var(--bubble-radius) var(--bubble-radius) var(--bubble-tail) var(--bubble-radius)'
+                                            : 'var(--bubble-radius) var(--bubble-radius) var(--bubble-radius) var(--bubble-tail)',
                                         fontSize: '14px',
-                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                        boxShadow: isMe ? 'var(--bubble-own-shadow)' : 'var(--bubble-shadow)',
                                         position: 'relative',
                                         cursor: 'pointer',
                                         outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -878,7 +906,7 @@ export default function Chat({
                                                 // Customize link styling
                                                 a: ({ node, ...props }) => (
                                                     <a {...props} style={{
-                                                        color: isMe ? 'white' : 'var(--primary)',
+                                                        color: isMe ? 'var(--bubble-own-link)' : 'var(--link)',
                                                         textDecoration: 'underline'
                                                     }} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} />
                                                 ),
@@ -910,13 +938,13 @@ export default function Chat({
                                         onToggle={(emoji) => handleToggleReaction(msg.id, emoji)}
                                     />
                                 </div>
-                                <span style={{
+                                <span className="chat-meta" style={{
                                     fontSize: '10px',
                                     color: 'var(--text-muted)',
                                     marginTop: '2px',
                                     paddingRight: isMe ? '4px' : 0,
                                     paddingLeft: isMe ? 0 : '4px',
-                                    opacity: 0.8
+                                    opacity: 'var(--meta-opacity)'
                                 }}>
                                     {formatRelativeTime(msg.timestamp)}
                                     {isMe && (
@@ -925,7 +953,7 @@ export default function Chat({
                                             title={isReadReceipt ? 'Read' : 'Delivered'}
                                             style={{
                                                 marginLeft: '6px',
-                                                color: isReadReceipt ? 'var(--accent)' : 'var(--text-muted)',
+                                                color: isReadReceipt ? 'var(--read-tick)' : 'var(--text-muted)',
                                                 fontWeight: '600'
                                             }}
                                         >
@@ -955,12 +983,12 @@ export default function Chat({
                                 maxWidth: '75%'
                             }}>
                                 <div style={{
-                                    background: isFailed ? '#7f1d1d' : 'rgba(58, 134, 255, 0.25)',
-                                    color: 'white',
+                                    background: isFailed ? 'var(--failed-bg)' : 'var(--pending-bg)',
+                                    color: isFailed ? 'var(--failed-fg)' : 'var(--pending-fg)',
                                     padding: '8px 12px',
-                                    borderRadius: '18px 18px 4px 18px',
+                                    borderRadius: 'var(--bubble-radius) var(--bubble-radius) var(--bubble-tail) var(--bubble-radius)',
                                     fontSize: '14px',
-                                    border: isFailed ? '1px solid #dc2626' : '1px dashed rgba(255, 255, 255, 0.45)'
+                                    border: isFailed ? 'var(--failed-border)' : 'var(--pending-border)'
                                 }}>
                                     {msg.replyToId && (
                                         <MessageQuote
@@ -1023,11 +1051,18 @@ export default function Chat({
             <form
                 onSubmit={sendMessage}
                 onKeyDown={(event) => {
-                    // Escape anywhere in the composer, the reply preview included, cancels the reply.
+                    // Escape closes the "+" drawer first; otherwise, anywhere in the composer
+                    // (the reply preview included), it cancels the reply.
+                    if (event.key === 'Escape' && showAddMenu) {
+                        setShowAddMenu(false);
+                        addButtonRef.current?.focus();
+                        return;
+                    }
                     if (event.key === 'Escape' && replyTarget) {
                         clearReply(replyTarget.id);
                     }
                 }}
+                className="chat-composer"
                 style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}
             >
                 {replyTarget && (
@@ -1039,7 +1074,7 @@ export default function Chat({
                             gap: '8px',
                             padding: '6px 6px 6px 10px',
                             border: '1px solid var(--border)',
-                            borderLeft: '3px solid var(--primary)',
+                            borderLeft: '3px solid var(--quote-bar)',
                             borderRadius: '8px',
                             minWidth: 0
                         }}
@@ -1243,96 +1278,117 @@ export default function Chat({
                         </button>
                     </div>
                 )}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            className="input"
-                            style={{ marginBottom: 0, paddingRight: mediaEnabled ? '80px' : '45px' }}
-                            value={newMessage}
-                            onChange={handleInputChange}
-                            onBlur={() => clearTyping(currentUser.id, conversationId)}
-                            onPaste={handlePaste}
-                            disabled={isMediaUploading}
-                            placeholder="Type a message..."
-                        />
+                <div className="composer-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                        ref={addButtonRef}
+                        type="button"
+                        className={'composer-add' + (showAddMenu ? ' is-open' : '')}
+                        aria-label="Add attachment, emoji or GIF"
+                        title="Add"
+                        aria-expanded={showAddMenu}
+                        aria-controls="composer-add-menu"
+                        onClick={() => setShowAddMenu((prev) => !prev)}
+                    >
+                        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+                            <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                    </button>
+                    <div
+                        ref={addMenuRef}
+                        id="composer-add-menu"
+                        role="group"
+                        aria-label="Add to message"
+                        className={'composer-add-menu' + (showAddMenu ? ' is-open' : '')}
+                    >
                         {mediaEnabled && (
-                            <>
-                                <button
-                                    type="button"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    aria-label="Attach image"
-                                    title="Attach image"
-                                    disabled={isMediaUploading}
-                                    style={{
-                                        position: 'absolute',
-                                        right: '40px',
-                                        top: '50%',
-                                        transform: 'translateY(-50%)',
-                                        background: 'transparent',
-                                        border: 'none',
-                                        fontSize: '20px',
-                                        cursor: isMediaUploading ? 'default' : 'pointer',
-                                        padding: '4px',
-                                        lineHeight: 1,
-                                        opacity: isMediaUploading ? 0.5 : 1
-                                    }}
-                                >
-                                    📎
-                                </button>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/gif"
-                                    data-testid="composer-file-input"
-                                    onChange={handleFileChange}
-                                    tabIndex={-1}
-                                    aria-hidden="true"
-                                    style={{ display: 'none' }}
-                                />
-                            </>
+                            <button
+                                type="button"
+                                className="composer-add-item"
+                                onClick={() => {
+                                    setShowAddMenu(false);
+                                    fileInputRef.current?.click();
+                                }}
+                                aria-label="Attach image"
+                                title="Attach image"
+                                disabled={isMediaUploading}
+                            >
+                                <span className="composer-add-icon" aria-hidden="true">📎</span>
+                                <span>Photo</span>
+                            </button>
                         )}
                         <button
                             type="button"
+                            className="composer-add-item"
                             onClick={() => {
-                                if (gifPicker) {
-                                    closeGifPicker(gifPicker);
-                                }
-                                setShowEmojiPicker(!showEmojiPicker);
+                                setShowAddMenu(false);
+                                toggleEmojiPicker();
                             }}
                             aria-label="Add emoji"
-                            disabled={isMediaUploading}
-                            style={{
-                                position: 'absolute',
-                                right: '8px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'transparent',
-                                border: 'none',
-                                fontSize: '20px',
-                                cursor: isMediaUploading ? 'default' : 'pointer',
-                                padding: '4px',
-                                lineHeight: 1,
-                                opacity: isMediaUploading ? 0.5 : 1
-                            }}
                             title="Add emoji"
+                            disabled={isMediaUploading}
                         >
-                            😊
+                            <span className="composer-add-icon" aria-hidden="true">😊</span>
+                            <span>Emoji</span>
                         </button>
+                        {gifEnabled && (
+                            <button
+                                type="button"
+                                className="composer-add-item"
+                                aria-label="Choose a GIF"
+                                title="Choose a GIF"
+                                aria-expanded={!!gifPicker}
+                                disabled={isMediaUploading || !!draftMedia}
+                                onClick={() => {
+                                    setShowAddMenu(false);
+                                    toggleGifPicker();
+                                }}
+                            >
+                                <span className="composer-add-icon composer-add-gif" aria-hidden="true">GIF</span>
+                                <span>GIF</span>
+                            </button>
+                        )}
                     </div>
+                    {mediaEnabled && (
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/gif"
+                            data-testid="composer-file-input"
+                            onChange={handleFileChange}
+                            tabIndex={-1}
+                            aria-hidden="true"
+                            style={{ display: 'none' }}
+                        />
+                    )}
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        className="input composer-input"
+                        style={{ marginBottom: 0, flex: 1, minWidth: 0 }}
+                        value={newMessage}
+                        onChange={handleInputChange}
+                        onBlur={() => clearTyping(currentUser.id, conversationId)}
+                        onPaste={handlePaste}
+                        disabled={isMediaUploading}
+                        placeholder="Type a message..."
+                        aria-label="Message"
+                    />
                     <button
                         type="submit"
-                        className="btn"
-                        style={{ width: 'auto' }}
-                        disabled={isMediaUploading || isMediaPreparing}
+                        className="composer-send"
+                        aria-label="Send"
+                        title="Send"
+                        disabled={isMediaUploading || isMediaPreparing || !hasSomethingToSend}
                     >
+                        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M3.4 20.4 21 12 3.4 3.6 3.4 10.2 15 12 3.4 13.8z" fill="currentColor" />
+                        </svg>
                         Send
                     </button>
                 </div>
 
                 {showEmojiPicker && (
-                    <div ref={emojiPickerRef} style={{ position: 'absolute', bottom: gifEnabled ? '70px' : '60px', right: '0', zIndex: 1000 }}>
+                    <div ref={emojiPickerRef} className="composer-emoji" style={{ position: 'absolute', bottom: '56px', left: '0', zIndex: 1000 }}>
                         <EmojiPicker
                             onEmojiClick={onEmojiClick}
                             theme="dark"
@@ -1341,42 +1397,6 @@ export default function Chat({
                         />
                     </div>
                 )}
-
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    paddingLeft: '4px'
-                }}>
-                    {gifEnabled && (
-                        <button
-                            type="button"
-                            aria-label="Choose a GIF"
-                            title="Choose a GIF"
-                            aria-expanded={!!gifPicker}
-                            disabled={isMediaUploading || !!draftMedia}
-                            onClick={toggleGifPicker}
-                            style={{
-                                fontSize: '12px',
-                                fontWeight: 'bold',
-                                border: '1px solid var(--border)',
-                                borderRadius: '6px',
-                                padding: '4px 10px',
-                                background: 'transparent',
-                                color: 'var(--foreground)',
-                                lineHeight: 1,
-                                flexShrink: 0,
-                                cursor: isMediaUploading || draftMedia ? 'default' : 'pointer',
-                                opacity: isMediaUploading || draftMedia ? 0.5 : 1
-                            }}
-                        >
-                            GIF
-                        </button>
-                    )}
-                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                        Tip: **bold** *italic* [link](url)
-                    </span>
-                </div>
             </form>
         </div>
     );

@@ -71,7 +71,7 @@ function enableFailureNote(error, uid) {
  * Per-device push toggle. Desired state is this account's stored preference, changed
  * only by this toggle (in any tab); effective = desired 'enabled' + permission granted.
  */
-export default function PushNotificationsControl({ compact = false, authUid = null }) {
+export default function PushNotificationsControl({ compact = false, authUid = null, variant = 'button', onEffectiveChange = null }) {
     const { showToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [preference, setPreference] = useState(null);
@@ -205,9 +205,52 @@ export default function PushNotificationsControl({ compact = false, authUid = nu
 
     const showRetry = Boolean(registrationNote?.retry) && preference === 'enabled' && permission === 'granted';
 
+    // Lets the page know whether push is effectively on (e.g. to gate the in-app sound).
+    const reportedEnabled = supported && effectiveEnabled;
+    useEffect(() => {
+        onEffectiveChange?.(reportedEnabled);
+    }, [onEffectiveChange, reportedEnabled]);
+
+    if (variant === 'toggle') {
+        // Same state and handlers as the button below, rendered as a labelled switch.
+        const disabled = !supported || loading || iosInstallRequired || !authUid;
+        const reason = !supported
+            ? 'Not available in this browser.'
+            : loading
+                ? 'Saving…'
+                : iosInstallRequired
+                    ? 'Install to Home Screen to enable iOS notifications.'
+                    : permission === 'denied'
+                        ? 'Browser permission is blocked. Enable notifications in settings.'
+                        : registrationNote?.text || null;
+        return (
+            <div className="push-toggle">
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={reportedEnabled}
+                    className="push-toggle-row"
+                    onClick={togglePush}
+                    disabled={disabled}
+                >
+                    <span className="push-toggle-label">Push notifications</span>
+                    <span className={'user-menu-switch' + (reportedEnabled ? ' is-on' : '')} aria-hidden="true">
+                        <span className="user-menu-switch-knob" />
+                    </span>
+                </button>
+                {reason && <span className="push-toggle-note">{reason}</span>}
+                {showRetry && (
+                    <button type="button" className="push-toggle-retry" onClick={retryRegistration} disabled={loading || !authUid}>
+                        Try again
+                    </button>
+                )}
+            </div>
+        );
+    }
+
     if (!supported) {
         return (
-            <span style={{ fontSize: compact ? '11px' : '12px', color: 'var(--text-muted)' }}>
+            <span className="push-unavailable" style={{ fontSize: compact ? '11px' : '12px', color: 'var(--text-muted)' }}>
                 Notifications unavailable
             </span>
         );
@@ -220,8 +263,8 @@ export default function PushNotificationsControl({ compact = false, authUid = nu
                 onClick={togglePush}
                 disabled={loading || iosInstallRequired || !authUid}
                 style={{
-                    background: effectiveEnabled ? '#198754' : 'var(--surface-highlight)',
-                    color: effectiveEnabled ? 'white' : 'var(--foreground)',
+                    background: effectiveEnabled ? 'var(--success)' : 'var(--surface-highlight)',
+                    color: effectiveEnabled ? 'var(--on-success)' : 'var(--foreground)',
                     border: '1px solid var(--border)',
                     borderRadius: '6px',
                     padding: compact ? '4px 8px' : '6px 10px',

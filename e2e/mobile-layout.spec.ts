@@ -51,10 +51,12 @@ test.describe('Mobile Layout', () => {
     });
 
     test('displays Mobile Header with user greeting', async ({ page }) => {
-        // Verify mobile header is visible with user greeting
-        const mobileHeader = page.locator('.mobile-header');
+        // The one-line user bar reads "HI JED" (text "Hi Jed", uppercased by CSS) and does not wrap
+        const mobileHeader = page.locator('.mobile-only .user-bar');
         await expect(mobileHeader).toBeVisible();
-        await expect(mobileHeader.getByText(/hi, jed/i)).toBeVisible();
+        await expect(mobileHeader.getByTestId('user-greeting')).toHaveText(/hi jed/i);
+        const box = await mobileHeader.boundingBox();
+        expect(box!.height).toBeLessThan(60);
     });
 
     test('displays Mobile TabNavigation buttons', async ({ page }) => {
@@ -64,9 +66,10 @@ test.describe('Mobile Layout', () => {
         await expect(page.getByRole('button', { name: /public feed/i })).toBeVisible();
     });
 
-    test('Mobile header contains Sign out button', async ({ page }) => {
-        // Verify Sign out is visible in mobile header
-        const mobileHeader = page.locator('.mobile-header');
-        await expect(mobileHeader.getByRole('button', { name: /sign out/i })).toBeVisible();
+    test('Mobile header menu contains Sign out', async ({ page }) => {
+        // Sign out lives in the user bar's menu, opened from "HI JED ▾"
+        const mobileHeader = page.locator('.mobile-only .user-bar');
+        await mobileHeader.getByTestId('user-greeting').click();
+        await expect(mobileHeader.getByRole('menuitem', { name: /sign out/i })).toBeVisible();
     });
 });
