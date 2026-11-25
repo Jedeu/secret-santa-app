@@ -9,7 +9,7 @@ import { useToast } from '@/components/ClientProviders';
 import ReactionPicker from '@/components/ReactionPicker';
 import ReactionChips from '@/components/ReactionChips';
 import ReactionEmojiSheet from '@/components/ReactionEmojiSheet';
-import MessageAttachment from '@/components/MessageAttachment';
+import MessageAttachment, { mediaBubbleWidth } from '@/components/MessageAttachment';
 import GifPicker from '@/components/GifPicker';
 import MessageGif from '@/components/MessageGif';
 import MessageQuote from '@/components/MessageQuote';
@@ -879,6 +879,9 @@ export default function Chat({
                                             : 'var(--bubble-radius) var(--bubble-radius) var(--bubble-radius) var(--bubble-tail)',
                                         fontSize: '14px',
                                         boxShadow: isMe ? 'var(--bubble-own-shadow)' : 'var(--bubble-shadow)',
+                                        // An image or GIF sets the width; its caption wraps under it.
+                                        width: mediaBubbleWidth(msg, gif) ?? undefined,
+                                        maxWidth: '100%',
                                         position: 'relative',
                                         cursor: 'pointer',
                                         outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -988,7 +991,9 @@ export default function Chat({
                                     padding: '8px 12px',
                                     borderRadius: 'var(--bubble-radius) var(--bubble-radius) var(--bubble-tail) var(--bubble-radius)',
                                     fontSize: '14px',
-                                    border: isFailed ? 'var(--failed-border)' : 'var(--pending-border)'
+                                    border: isFailed ? 'var(--failed-border)' : 'var(--pending-border)',
+                                    width: mediaBubbleWidth(msg, gif) ?? undefined,
+                                    maxWidth: '100%'
                                 }}>
                                     {msg.replyToId && (
                                         <MessageQuote
