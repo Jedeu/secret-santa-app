@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { render, screen, fireEvent } from '@testing-library/react';
-import MessageAttachment from '@/components/MessageAttachment';
+import MessageAttachment, { attachmentDisplayWidth, mediaBubbleWidth } from '@/components/MessageAttachment';
 
 const ATTACHMENT = {
     id: '3f2b8c1d-5e6a-4b7c-9d8e-1f2a3b4c5d6e',
@@ -56,6 +56,28 @@ describe('MessageAttachment', () => {
 
         expect(screen.queryByTestId('message-attachment')).not.toBeInTheDocument();
         expect(screen.getByTestId('message-attachment-unavailable')).toHaveTextContent('Image unavailable');
+    });
+
+    // Bug: on desktop a captioned image's bubble grew to the caption's width and the image
+    // was letterboxed inside it. The image now has its real display width and the bubble hugs it.
+    test('shows the image at its scaled width, and the bubble hugs it', () => {
+        render(<MessageAttachment attachment={ATTACHMENT} />);
+        // 1600x1200 fits 320x320 at 320 wide (240 tall).
+        expect(screen.getByTestId('message-attachment').style.width).toBe('320px');
+
+        expect(attachmentDisplayWidth({ width: 2560, height: 1600 })).toBe(320);
+        expect(attachmentDisplayWidth({ width: 1170, height: 2532 })).toBe(148);
+        expect(attachmentDisplayWidth({ width: 200, height: 150 })).toBe(200);
+
+        const longCaption = 'Well well, looks like Christmas came early for you. '.repeat(3);
+        // Bubble = image + 24px padding, whatever the caption length.
+        expect(mediaBubbleWidth({ attachment: ATTACHMENT, content: longCaption }, null)).toBe(344);
+        // A tall image keeps its caption readable: captioned bubbles are at least 220px.
+        expect(mediaBubbleWidth({ attachment: { width: 1170, height: 2532 }, content: 'Snow!' }, null)).toBe(220);
+        expect(mediaBubbleWidth({ attachment: { width: 1170, height: 2532 }, content: '' }, null)).toBe(172);
+        // A GIPHY GIF is 280 wide; text-only messages keep their natural width.
+        expect(mediaBubbleWidth({ content: 'x' }, { id: 'abc', caption: longCaption })).toBe(304);
+        expect(mediaBubbleWidth({ content: 'Just text' }, null)).toBeNull();
     });
 
     test('falls back when the image fails to load', () => {

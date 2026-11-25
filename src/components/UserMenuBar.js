@@ -11,10 +11,13 @@ function Chevron() {
 
 /**
  * One-line top bar: "HI {NAME} ▾" opens a menu (push notifications, sound while push is on,
- * sign out); the admin season control (if any) sits right-aligned on the same line.
+ * past years when there are any, sign out); the admin season control (if any) sits
+ * right-aligned on the same line.
  * `pushControl` is PushNotificationsControl with variant="toggle"; `pushOn` is its effective state.
+ * `onOpenArchive` (null hides the item) opens the read-only past years; `archiveActive` marks
+ * them as the current view.
  */
-export default function UserMenuBar({ name, soundEnabled, onToggleSound, pushControl, pushOn = false, adminControl = null, onSignOut }) {
+export default function UserMenuBar({ name, soundEnabled, onToggleSound, pushControl, pushOn = false, onOpenArchive = null, archiveActive = false, adminControl = null, onSignOut }) {
     const [open, setOpen] = useState(false);
     const rootRef = useRef(null);
     const buttonRef = useRef(null);
@@ -69,6 +72,21 @@ export default function UserMenuBar({ name, soundEnabled, onToggleSound, pushCon
                             <span className={'user-menu-switch' + (soundEnabled ? ' is-on' : '')} aria-hidden="true">
                                 <span className="user-menu-switch-knob" />
                             </span>
+                        </button>
+                    )}
+                    {onOpenArchive && (
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className="user-menu-item user-menu-archive"
+                            aria-current={archiveActive ? 'page' : undefined}
+                            onClick={() => {
+                                setOpen(false);
+                                onOpenArchive();
+                            }}
+                        >
+                            <span>Archive</span>
+                            <span className="user-menu-hint">Past years</span>
                         </button>
                     )}
                     <button type="button" role="menuitem" className="user-menu-item user-menu-signout" onClick={onSignOut}>

@@ -563,6 +563,27 @@ button.user-menu-item:hover {
   color: var(--text-muted);
 }
 
+/* Archive (past years) opens a view, so it sits with Sign out below the settings. */
+.user-menu-archive {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.user-menu-archive + .user-menu-signout {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.user-menu-archive[aria-current] > span:first-child {
+  font-weight: 600;
+}
+
+.user-menu-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* Layout: header, tabs, then the chat on the page background. */
 @media (max-width: 799px) {
   .chat-layout .main-content {

@@ -100,22 +100,13 @@ describe('Sidebar Component', () => {
         expect(screen.queryByText(/Reset/)).not.toBeInTheDocument();
     });
 
-    // 7. Archives item
-    test('has no Archives item when showArchive is false', () => {
-        render(<Sidebar {...defaultProps} />);
-        expect(screen.queryByRole('button', { name: /archives/i })).not.toBeInTheDocument();
-    });
-
-    test('with showArchive, the Archives item calls onTabChange("archive") and shows active styling', () => {
-        const { rerender } = render(<Sidebar {...defaultProps} showArchive />);
-        const archives = screen.getByRole('button', { name: /📚\s*Archives/ });
-        expect(archives).toHaveStyle({ fontWeight: '400' });
-
-        fireEvent.click(archives);
-        expect(mockOnTabChange).toHaveBeenCalledWith('archive');
-
-        rerender(<Sidebar {...defaultProps} showArchive activeTab="archive" />);
-        expect(screen.getByRole('button', { name: /archives/i })).toHaveStyle({ fontWeight: '600' });
+    // 7. Past years open from the user menu, never from a sidebar item
+    test('has no Archives item; nothing is selected while the archive is shown', () => {
+        render(<Sidebar {...defaultProps} showArchive activeTab="archive" />);
+        expect(screen.queryByRole('button', { name: /archives?/i })).not.toBeInTheDocument();
+        ['Santa', 'Public Feed'].forEach((name) => {
+            expect(screen.getByRole('button', { name: new RegExp(name) })).toHaveStyle({ fontWeight: '400' });
+        });
     });
 
     // 8. Sign Out lives in the user bar's menu
@@ -140,17 +131,9 @@ describe('Sidebar Component', () => {
         expect(screen.getByLabelText('Santa: 1 unread messages')).toHaveAttribute('aria-live', 'polite');
     });
 
-    test('tab navigation has no Archives tab when showArchive is false', () => {
-        render(<TabNavigation activeTab="recipient" onTabChange={jest.fn()} unreadCounts={{}} />);
-        expect(screen.queryByRole('button', { name: /archives/i })).not.toBeInTheDocument();
-    });
-
-    test('tab navigation Archives tab calls onTabChange("archive")', () => {
-        const onTabChange = jest.fn();
-        render(<TabNavigation activeTab="recipient" onTabChange={onTabChange} unreadCounts={{}} showArchive />);
-
-        fireEvent.click(screen.getByRole('button', { name: '📚 Archives' }));
-
-        expect(onTabChange).toHaveBeenCalledWith('archive');
+    test('tab navigation has only Recipient, Santa and Public Feed, even with past years', () => {
+        render(<TabNavigation activeTab="archive" onTabChange={jest.fn()} unreadCounts={{}} showArchive />);
+        expect(screen.getAllByRole('button')).toHaveLength(3);
+        expect(screen.queryByRole('button', { name: /archives?/i })).not.toBeInTheDocument();
     });
 });

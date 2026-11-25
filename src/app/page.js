@@ -220,8 +220,9 @@ export default function Home() {
     }, [soundEnabled]);
 
     // One-line "HI {NAME} ▾" bar: its menu holds Push notifications, Sound on (only while push
-    // is on) and Sign out; the admin season control sits right-aligned on the same line.
-    const userBar = (
+    // is on), Archive (in the open year's chats, when past years exist) and Sign out; the admin
+    // season control sits right-aligned on the same line.
+    const renderUserBar = (archiveProps = {}) => (
         <UserMenuBar
             name={currentUser?.name}
             soundEnabled={soundEnabled}
@@ -230,10 +231,11 @@ export default function Home() {
             pushOn={pushOn}
             adminControl={isAdmin(currentUser?.email) ? adminControl : null}
             onSignOut={handleSignOut}
+            {...archiveProps}
         />
     );
 
-    const standaloneHeader = <div className="standalone-bar">{userBar}</div>;
+    const standaloneHeader = <div className="standalone-bar">{renderUserBar()}</div>;
 
     let body;
     if (!yearOpen) {
@@ -294,6 +296,10 @@ export default function Home() {
     } else {
         // 5. Chats in the open year.
         const recipientLabel = allUsers.find(u => u.id === currentUser?.recipientId)?.name || null;
+        const userBar = renderUserBar({
+            onOpenArchive: archiveYears.length > 0 ? () => setActiveTab('archive') : null,
+            archiveActive: activeTab === 'archive',
+        });
         body = (
             <main className="container chat-layout">
                 {/* Desktop Sidebar */}
@@ -302,7 +308,6 @@ export default function Home() {
                         activeTab={activeTab}
                         onTabChange={setActiveTab}
                         unreadCounts={unreadCounts}
-                        showArchive={archiveYears.length > 0}
                         header={userBar}
                         recipientLabel={recipientLabel}
                     />
@@ -319,7 +324,6 @@ export default function Home() {
                             activeTab={activeTab}
                             onTabChange={setActiveTab}
                             unreadCounts={unreadCounts}
-                            showArchive={archiveYears.length > 0}
                             recipientLabel={recipientLabel}
                         />
                     </div>

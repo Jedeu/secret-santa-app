@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { updateLastReadTimestamp, getCachedTimestamp, getLastReadTimestamp } from '@/lib/lastReadClient';
 import { buildAssignmentMap, resolveMessageConversation } from '@/lib/message-utils';
 import ReactionChips from '@/components/ReactionChips';
-import MessageAttachment from '@/components/MessageAttachment';
+import MessageAttachment, { mediaBubbleWidth } from '@/components/MessageAttachment';
 import MessageGif from '@/components/MessageGif';
 import MessageQuote from '@/components/MessageQuote';
 import { useMessageJump } from '@/hooks/useMessageJump';
@@ -356,6 +356,10 @@ export default function PublicFeed({ messages = [], allReactions = [], allUsers 
                                                         fontSize: '14px',
                                                         marginBottom: '2px',
                                                         boxShadow: group.isSanta ? 'var(--bubble-own-shadow)' : 'none',
+                                                        // An image or GIF sets the width; its caption wraps under it.
+                                                        width: mediaBubbleWidth(msg, gif) ?? undefined,
+                                                        maxWidth: '100%',
+                                                        marginLeft: group.isSanta ? 'auto' : undefined,
                                                         outline: highlightedId === msg.id ? '2px solid var(--accent)' : '2px solid transparent',
                                                         outlineOffset: '2px',
                                                         transition: 'outline-color 300ms ease'

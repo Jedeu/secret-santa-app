@@ -60,15 +60,14 @@ function SidebarItem({ active, onClick, children, unreadCount, icon, badgeLabel 
  * @param {Object} props.unreadCounts - { recipient: number, santa: number }
  * @param {React.ReactNode} [props.header] - The user bar (menu with push, sound, sign out; admin control)
  * @param {string|null} [props.recipientLabel] - The recipient's name for the Recipient item
- * @param {boolean} [props.showArchive] - Show the "📚 Archives" item
+ * Past years open from the user menu in `header`, not from a sidebar item.
  */
 export default function Sidebar({
     activeTab,
     onTabChange,
     unreadCounts,
     header = null,
-    recipientLabel = null,
-    showArchive = false
+    recipientLabel = null
 }) {
     return (
         <div style={{
@@ -111,15 +110,6 @@ export default function Sidebar({
                 >
                     Public Feed
                 </SidebarItem>
-                {showArchive && (
-                    <SidebarItem
-                        active={activeTab === 'archive'}
-                        onClick={() => onTabChange('archive')}
-                        icon="📚"
-                    >
-                        Archives
-                    </SidebarItem>
-                )}
             </nav>
         </div>
     );
