@@ -28,6 +28,20 @@ describe('EasterEggLayer', () => {
         expect(document.documentElement.hasAttribute('data-christmas')).toBe(false);
     });
 
+    test('a running effect ends when the view changes; Christmas Day stays', () => {
+        // Reduced motion: one still frame on a no-op canvas, held until its timeout.
+        const noop = new Proxy({}, { get: () => () => { } });
+        HTMLCanvasElement.prototype.getContext = jest.fn(() => noop);
+        window.matchMedia = jest.fn(() => ({ matches: true }));
+        const { container, rerender } = render(<EasterEggLayer christmas scope='chat-a' />);
+        act(() => triggerEasterEgg('snow'));
+        expect(eggs(container)).toEqual(['christmas', 'snow']);
+
+        rerender(<EasterEggLayer christmas scope={null} />);
+        expect(eggs(container)).toEqual(['christmas']);
+        delete window.matchMedia;
+    });
+
     test('jingle is sound only; a Grinch without a tab bar ends at once', () => {
         const { container } = render(<EasterEggLayer />);
         act(() => {

@@ -17,12 +17,22 @@ const VISUAL_EFFECTS = ['snow', 'confetti', 'grinch'];
  * - `christmas` turns on Christmas Day mode: gentle background snow here, and `data-christmas`
  *   on <html> for the CSS-only lights on the selected tab and the Santa hat on "HI {NAME}".
  *
+ * - `scope` names the view on screen (the open chat's conversation id, or null); when it
+ *   changes, running snow, confetti and Grinch end at once.
+ *
  * Every overlay is pointer-events: none, short, lazy and respects prefers-reduced-motion.
  * Each running effect's root carries `data-easter-egg="<effect>"` (Christmas: "christmas").
  */
-export default function EasterEggLayer({ christmas = false }) {
+export default function EasterEggLayer({ christmas = false, scope = null }) {
     // effect -> { id, still } while it is showing; a new id remounts (restarts) that effect.
     const [running, setRunning] = useState({});
+    // Effects belong to the view they fired in: a new `scope` (another chat, the feed, the
+    // archive) ends them. Conditional reset during render; Christmas Day is unaffected.
+    const [runningScope, setRunningScope] = useState(scope);
+    if (runningScope !== scope) {
+        setRunningScope(scope);
+        setRunning({});
+    }
 
     useEffect(() => onEasterEgg((effect) => {
         if (!VISUAL_EFFECTS.includes(effect)) return;

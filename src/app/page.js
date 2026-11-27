@@ -385,7 +385,7 @@ export default function Home() {
                 loading={allMessagesLoading}
                 soundOn={soundEnabled && pushOn}
             />
-            <EasterEggLayer christmas={christmas} />
+            <EasterEggLayer christmas={christmas} scope={openChat?.key ?? null} />
             {body}
         </AuthGuard>
     );
