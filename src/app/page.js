@@ -29,8 +29,12 @@ import PushNotificationsRuntime from '@/components/PushNotificationsRuntime';
 import MessageOutboxRuntime from '@/components/MessageOutboxRuntime';
 import NotificationSoundRuntime from '@/components/NotificationSoundRuntime';
 import UserMenuBar from '@/components/UserMenuBar';
+import MagicWordsRuntime from '@/components/MagicWordsRuntime';
+import EasterEggLayer from '@/components/EasterEggLayer';
+import { useChristmasDay } from '@/hooks/useChristmasDay';
 
 const EMPTY_USERS = [];
+const EMPTY_MESSAGES = [];
 const USERS_FETCH_TIMEOUT_MS = 10000;
 
 function handleSignOut() {
@@ -73,6 +77,7 @@ export default function Home() {
     // Effective push state reported by PushNotificationsControl. Sound is a sub-setting of
     // push: the chime only plays while push is effectively on.
     const [pushOn, setPushOn] = useState(false);
+    const christmas = useChristmasDay();
 
     const adminControl = <AdminPanel userEmail={currentUser?.email} season={season} onComplete={refreshUser} />;
 
@@ -237,6 +242,8 @@ export default function Home() {
 
     const standaloneHeader = <div className="standalone-bar">{renderUserBar()}</div>;
 
+    // The chat on screen, for magic words; null outside the open year's two chats.
+    let openChat = null;
     let body;
     if (!yearOpen) {
         // 1. The year is closed: read-only archive, no chat.
@@ -295,6 +302,8 @@ export default function Home() {
         );
     } else {
         // 5. Chats in the open year.
+        if (activeTab === 'santa') openChat = { key: santaConversationId, messages: santaMessages };
+        if (activeTab === 'recipient') openChat = { key: recipientConversationId, messages: recipientMessages };
         const recipientLabel = allUsers.find(u => u.id === currentUser?.recipientId)?.name || null;
         const userBar = renderUserBar({
             onOpenArchive: archiveYears.length > 0 ? () => setActiveTab('archive') : null,
@@ -370,6 +379,13 @@ export default function Home() {
                 allMessages={allMessages}
                 allMessagesLoading={allMessagesLoading}
             />
+            <MagicWordsRuntime
+                chatKey={openChat?.key ?? null}
+                messages={openChat?.messages ?? EMPTY_MESSAGES}
+                loading={allMessagesLoading}
+                soundOn={soundEnabled && pushOn}
+            />
+            <EasterEggLayer christmas={christmas} />
             {body}
         </AuthGuard>
     );

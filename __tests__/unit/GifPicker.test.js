@@ -3,6 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import GifPicker from '@/components/GifPicker';
 import { GiphyClientError } from '@/lib/giphy-client';
+import { onEasterEgg } from '@/lib/easter-eggs';
 
 /**
  * GifPicker with a mocked page fetch. Every call returns its own deferred so a test can
@@ -186,6 +187,22 @@ describe('GifPicker', () => {
 
             await resolveCall(1, page(['Cat0', 'Cat1']));
             expect(tileLabels()).toEqual(['GIF: Title Cat0', 'GIF: Title Cat1']);
+        });
+
+        test('searching "grinch" sends the Grinch once per opened picker', async () => {
+            const seen = [];
+            const off = onEasterEgg((effect) => seen.push(effect));
+            renderPicker();
+            type('grin');
+            advance(600);
+            expect(seen).toEqual([]);
+            type('The Grinch');
+            advance(600);
+            expect(seen).toEqual(['grinch']);
+            type('grinch dance');
+            advance(600);
+            expect(seen).toEqual(['grinch']);
+            off();
         });
 
         test('the trimmed query is searched; a whitespace-only edit does nothing', async () => {
