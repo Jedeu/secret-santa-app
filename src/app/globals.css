@@ -836,11 +836,17 @@ button.user-menu-item:hover {
   50% { transform: translateY(-3px); }
 }
 
-/* Christmas Day: a string of small lights along the selected tab's underline (mobile) and the
-   selected sidebar item (desktop). Tiny bulbs below the labels, so their contrast is untouched. */
+/* Christmas Day: a string of small lights replaces the selected tab's underline (mobile) and
+   runs along the selected sidebar item (desktop). Tiny bulbs below the labels, so their contrast
+   is untouched; the bold label still marks the selected tab. */
 html[data-christmas] .tab-button[aria-current="page"],
 html[data-christmas] .sidebar-item[aria-current="page"] {
   position: relative;
+}
+
+/* The underline is an inline style, so hiding it needs !important. */
+html[data-christmas] .tab-button[aria-current="page"] {
+  border-bottom-color: transparent !important;
 }
 
 html[data-christmas] .tab-button[aria-current="page"]::before,
@@ -851,7 +857,8 @@ html[data-christmas] .sidebar-item[aria-current="page"]::after {
   position: absolute;
   left: 2px;
   right: 2px;
-  bottom: 1px;
+  /* Where the hidden 3px underline was, clear of the tab bar's clipped bottom pixel. */
+  bottom: -2px;
   height: 5px;
   pointer-events: none;
   /* `round` fits a whole number of tiles to the width, and the bulbs sit at fractions of a
