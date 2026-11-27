@@ -854,25 +854,27 @@ html[data-christmas] .sidebar-item[aria-current="page"]::after {
   bottom: 1px;
   height: 5px;
   pointer-events: none;
-  background-repeat: repeat-x;
+  /* `round` fits a whole number of tiles to the width, and the bulbs sit at fractions of a
+     tile, so the string is evenly spaced and centred under any label, never clipped. */
+  background-repeat: round no-repeat;
   background-size: 40px 5px;
-  background-position: center bottom;
+  background-position: left bottom;
 }
 
 /* Two interleaved sets of bulbs that twinkle in turn. */
 html[data-christmas] .tab-button[aria-current="page"]::before,
 html[data-christmas] .sidebar-item[aria-current="page"]::before {
   background-image:
-    radial-gradient(circle at 5px 2.5px, var(--primary) 2px, transparent 2.5px),
-    radial-gradient(circle at 25px 2.5px, var(--success) 2px, transparent 2.5px);
+    radial-gradient(circle at 12.5% 50%, var(--primary) 2px, transparent 2.5px),
+    radial-gradient(circle at 62.5% 50%, var(--success) 2px, transparent 2.5px);
   animation: xmas-twinkle 2.4s ease-in-out infinite;
 }
 
 html[data-christmas] .tab-button[aria-current="page"]::after,
 html[data-christmas] .sidebar-item[aria-current="page"]::after {
   background-image:
-    radial-gradient(circle at 15px 2.5px, var(--bubble-outline) 2px, transparent 2.5px),
-    radial-gradient(circle at 35px 2.5px, var(--foreground) 2px, transparent 2.5px);
+    radial-gradient(circle at 37.5% 50%, var(--bubble-outline) 2px, transparent 2.5px),
+    radial-gradient(circle at 87.5% 50%, var(--foreground) 2px, transparent 2.5px);
   animation: xmas-twinkle 2.4s ease-in-out -1.2s infinite;
 }
 
