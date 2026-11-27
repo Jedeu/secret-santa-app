@@ -6,6 +6,7 @@
 function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
     return (
         <button
+            className="tab-button"
             onClick={onClick}
             aria-current={active ? 'page' : undefined}
             style={{
