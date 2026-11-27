@@ -50,6 +50,7 @@ jest.mock('../../src/components/ArchiveViewer', () => {
 jest.mock('../../src/hooks/useRealtimeMessages', () => ({
     useRealtimeAllMessages: jest.fn(() => []),
     useRealtimeAllMessagesLoading: jest.fn(() => false),
+    useRealtimeAllMessagesSynced: jest.fn(() => true),
     useRealtimeAllReactions: jest.fn(() => []),
     useRealtimeUnreadCounts: jest.fn(() => ({ recipientUnread: 0, santaUnread: 0 }))
 }));

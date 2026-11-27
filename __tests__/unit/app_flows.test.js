@@ -30,6 +30,7 @@ jest.mock('@/hooks/useRealtimeMessages', () => ({
     useRealtimeMessages: jest.fn(),
     useRealtimeAllMessages: jest.fn(),
     useRealtimeAllMessagesLoading: jest.fn(() => false),
+    useRealtimeAllMessagesSynced: jest.fn(() => true),
     useRealtimeAllReactions: jest.fn(() => []),
     useRealtimeUnreadCounts: jest.fn(),
     updateLastReadTimestamp: jest.fn(),

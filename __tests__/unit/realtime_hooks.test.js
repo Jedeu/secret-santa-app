@@ -3,7 +3,7 @@
  */
 
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useRealtimeAllMessages, useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
+import { useRealtimeAllMessages, useRealtimeAllMessagesSynced, useRealtimeUnreadCounts } from '@/hooks/useRealtimeMessages';
 import { RealtimeMessagesProvider } from '@/context/RealtimeMessagesContext';
 import { useUser } from '@/hooks/useUser';
 import { LEGACY_ACTIVE_SEASON } from '../helpers/useUser-mock';
@@ -148,6 +148,43 @@ describe('Realtime Hooks with Context', () => {
             await waitFor(() => {
                 expect(result.current).toEqual(mockMessages);
             });
+        });
+    });
+
+    describe('useRealtimeAllMessagesSynced', () => {
+        test('is false while the list comes from cache and true once the server confirms it, keeping the list', async () => {
+            const cached = [{ id: '1', fromId: 'user2', toId: 'user1', content: 'Hi', timestamp: '2025-11-20T10:00:00Z' }];
+            let snapshotCallback;
+            mockOnSnapshot.mockImplementation((...args) => {
+                const { callback } = extractSnapshotCallback(args);
+                if (!snapshotCallback) snapshotCallback = callback;
+                return jest.fn();
+            });
+            const { result } = renderHook(() => ({
+                messages: useRealtimeAllMessages(),
+                synced: useRealtimeAllMessagesSynced(),
+            }), { wrapper });
+            await waitFor(() => expect(mockOnSnapshot).toHaveBeenCalled());
+            expect(mockOnSnapshot.mock.calls[0][1]).toEqual({ includeMetadataChanges: true });
+
+            const snap = (fromCache, changes) => ({
+                forEach: (cb) => cached.forEach((msg) => cb({ data: () => msg })),
+                size: cached.length,
+                metadata: { fromCache },
+                docChanges: () => changes,
+            });
+            await act(async () => snapshotCallback(snap(true, [{}])));
+            expect(result.current.synced).toBe(false);
+            const firstList = result.current.messages;
+            expect(firstList).toEqual(cached);
+
+            // Metadata-only: the server confirms the cache; the list object is unchanged.
+            await act(async () => snapshotCallback(snap(false, [])));
+            expect(result.current.synced).toBe(true);
+            expect(result.current.messages).toBe(firstList);
+
+            await act(async () => snapshotCallback(snap(true, [])));
+            expect(result.current.synced).toBe(false);
         });
     });
 

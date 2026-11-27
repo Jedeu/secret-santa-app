@@ -175,19 +175,15 @@ describe('MagicWordsRuntime', () => {
         expect(fired).toEqual([]);
     });
 
-    it('stays silent when the server fills in recent history the cache lacked', () => {
-        // The cached snapshot is empty; the server then adds a message sent 30 s before opening.
-        const { update } = renderRuntime({ messages: [] });
-        update({ messages: [msg('earlier', 'merry christmas', 'b', 30 * 1000)] });
+    it('stays silent when the server fills in history the cache lacked, however recent', () => {
+        // `loading` stays true until the server confirms the list (page.js passes
+        // allMessagesLoading || !allMessagesSynced): an empty cache, then the server adds a
+        // message sent 5 s before opening.
+        const { update } = renderRuntime({ loading: true, messages: [] });
+        update({ loading: false, messages: [msg('earlier', 'merry christmas', 'b', 5 * 1000)] });
         expect(fired).toEqual([]);
-        update({ messages: [msg('earlier', 'merry christmas', 'b', 30 * 1000), msg('live', 'let it snow', 'b', 0)] });
+        update({ messages: [msg('earlier', 'merry christmas', 'b', 5 * 1000), msg('live', 'let it snow', 'b', 0)] });
         expect(fired).toEqual(['snow']);
-    });
-
-    it('ignores old messages that show up late', () => {
-        const { update } = renderRuntime({ messages: [] });
-        update({ messages: [msg('old', 'let it snow', 'a', 10 * 60 * 1000)] });
-        expect(fired).toEqual([]);
     });
 
     it('plays the jingle only while sound is on', () => {

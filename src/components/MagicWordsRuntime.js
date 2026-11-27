@@ -4,11 +4,6 @@ import { useEffect, useRef } from 'react';
 import { findMagicEffects, triggerEasterEgg } from '@/lib/easter-eggs';
 import { getMessageGif } from '@/lib/giphy-reference';
 
-// A message counts as live only when it was sent after its chat opened (less a grace for clock
-// skew between this device and the server), so a server snapshot that fills in history the
-// cache lacked never fires an effect; and only while fresh, so a late reconnect stays quiet.
-const CLOCK_SKEW_GRACE_MS = 10 * 1000;
-const LIVE_WINDOW_MS = 2 * 60 * 1000;
 const JINGLE_URL = '/sounds/jingle.wav';
 
 function getIdentity(message) {
@@ -20,26 +15,22 @@ function getText(message) {
     return gif ? gif.caption : message?.content;
 }
 
-function isLive(message, openedAt, now) {
-    const at = Date.parse(message?.timestamp);
-    return Number.isFinite(at) && at >= openedAt - CLOCK_SKEW_GRACE_MS && now - at < LIVE_WINDOW_MS;
-}
-
 /**
  * Magic words in the open chat: "let it snow" (snow), "ho ho ho" (jingle) and
  * "merry christmas" (confetti). Only messages that arrive while this chat is open fire an
- * effect, from either person: the first loaded list of a chat is a silent baseline, and a message
- * sent before the chat opened never counts, so loading (cached or from the server), opening or
- * switching chats never fires one. The Public Feed and archives pass no chat.
+ * effect, from either person. The chat's list is a silent baseline once the server has
+ * confirmed it (`loading` stays true until then, so history the cache lacked never fires),
+ * and again whenever the chat changes, so loading, opening or switching chats never does.
+ * The Public Feed and archives pass no chat.
  *
  * @param {Object} props
  * @param {string|null} props.chatKey - The open chat's conversation id; null for any other view
  * @param {Object[]} props.messages - That chat's messages
- * @param {boolean} props.loading - True while the messages listener has not loaded
+ * @param {boolean} props.loading - True until the messages listener is loaded and server-confirmed
  * @param {boolean} props.soundOn - Sound on and push on: the jingle plays only then
  */
 export default function MagicWordsRuntime({ chatKey, messages, loading, soundOn }) {
-    const baselineRef = useRef({ key: null, ids: new Set(), openedAt: 0 });
+    const baselineRef = useRef({ key: null, ids: new Set() });
 
     useEffect(() => {
         const baseline = baselineRef.current;
@@ -51,17 +42,14 @@ export default function MagicWordsRuntime({ chatKey, messages, loading, soundOn 
         if (baseline.key !== chatKey) {
             baseline.key = chatKey;
             baseline.ids = new Set(messages.map(getIdentity));
-            baseline.openedAt = Date.now();
             return;
         }
 
-        const now = Date.now();
         const effects = new Set();
         for (const message of messages) {
             const id = getIdentity(message);
             if (baseline.ids.has(id)) continue;
             baseline.ids.add(id);
-            if (!isLive(message, baseline.openedAt, now)) continue;
             findMagicEffects(getText(message)).forEach((effect) => effects.add(effect));
         }
         if (!effects.size || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) return;

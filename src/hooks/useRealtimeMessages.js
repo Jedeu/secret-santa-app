@@ -37,6 +37,17 @@ export function useRealtimeAllMessagesLoading() {
 }
 
 /**
+ * Hook to read whether the server has confirmed the all-messages list (false while it comes
+ * only from the local cache).
+ *
+ * @returns {boolean}
+ */
+export function useRealtimeAllMessagesSynced() {
+    const { allMessagesSynced } = useRealtimeMessagesContext();
+    return allMessagesSynced === true;
+}
+
+/**
  * Hook to get all reaction documents from shared Context.
  *
  * @returns {Array}

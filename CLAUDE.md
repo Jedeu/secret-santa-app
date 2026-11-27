@@ -219,6 +219,7 @@ Integration tests are excluded from default `npm test` runs. Use `npm run test:i
 - `src/components/GifPicker.js`: GIF browse/search panel with GIPHY attribution
 - `src/components/MessageGif.js`: Renders a GIF reference as a sandboxed GIPHY embed
 - `src/app/api/messages/media/route.js`: Image upload route
+- `src/lib/easter-eggs.js`: Seasonal easter-egg rules (Santa typing lines, magic words, Christmas Day, dev-only `?xmas=1`) and their event bus; `MagicWordsRuntime.js` fires them for live messages, `EasterEggLayer.js` draws them
 - `firebase.json`: Emulator configuration
 - `firestore.rules`: Firestore security rules (authoritative; summarized under Important Notes)
 - `AGENTS.md`: Agent workflow contract (roles, approval loop, safety boundaries)
@@ -280,7 +281,7 @@ The app uses optimized Firestore listeners to minimize reads on the free tier.
 - Look for "from CACHE" vs "from SERVER" in snapshot logs
 
 **Key Optimizations Applied:**
-1. `includeMetadataChanges: false` - Reduces unnecessary snapshot callbacks
+1. `includeMetadataChanges: false` on the reactions listener - Reduces unnecessary snapshot callbacks. The `allMessages` listener sets it to `true` only to learn when the server confirms the cached list (`allMessagesSynced`, which keeps magic-word effects off history); a metadata-only snapshot updates that flag and leaves the message list untouched, and costs no reads
 2. Singleton pattern for `allMessages` listener - Prevents duplicate reads
 3. Refs to track listener state in StrictMode - Prevents recreation on double-mount
 4. Memoized params comparison in `useRealtimeUnreadCounts` - Only recreates on real changes

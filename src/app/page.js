@@ -7,6 +7,7 @@ import {
     useRealtimeUnreadCounts,
     useRealtimeAllMessages,
     useRealtimeAllMessagesLoading,
+    useRealtimeAllMessagesSynced,
     useRealtimeAllReactions
 } from '@/hooks/useRealtimeMessages';
 import { getConversationId, filterMessages, buildViewerAssignmentMap } from '@/lib/message-utils';
@@ -84,6 +85,7 @@ export default function Home() {
     // Real-time message data
     const allMessages = useRealtimeAllMessages(!!currentUser);
     const allMessagesLoading = useRealtimeAllMessagesLoading();
+    const allMessagesSynced = useRealtimeAllMessagesSynced();
     const allReactions = useRealtimeAllReactions();
     const unreadData = useRealtimeUnreadCounts(
         currentUser?.id,
@@ -382,7 +384,7 @@ export default function Home() {
             <MagicWordsRuntime
                 chatKey={openChat?.key ?? null}
                 messages={openChat?.messages ?? EMPTY_MESSAGES}
-                loading={allMessagesLoading}
+                loading={allMessagesLoading || !allMessagesSynced}
                 soundOn={soundEnabled && pushOn}
             />
             <EasterEggLayer christmas={christmas} scope={openChat?.key ?? null} />
