@@ -114,6 +114,9 @@ export function RealtimeMessagesProvider({ children }) {
     // Internal State
     const [allMessages, setAllMessages] = useState([]);
     const [allMessagesLoading, setAllMessagesLoading] = useState(true);
+    // True once the server has confirmed the list (not only the local cache); false again
+    // while the listener is served from cache, e.g. offline.
+    const [allMessagesSynced, setAllMessagesSynced] = useState(false);
     const [allMessagesError, setAllMessagesError] = useState(null);
     const [allReactions, setAllReactions] = useState([]);
 
@@ -133,13 +136,16 @@ export function RealtimeMessagesProvider({ children }) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setAllMessages([]);
             setAllMessagesLoading(false);
+            setAllMessagesSynced(false);
             return undefined;
         }
 
         let cancelled = false;
         let retryTimer = null;
+        let delivered = false;
 
         setAllMessagesLoading(true);
+        setAllMessagesSynced(false);
 
         const messagesRef = yearCollectionRef(year, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'desc'));
@@ -148,9 +154,14 @@ export function RealtimeMessagesProvider({ children }) {
 
         listenerRef.current = onSnapshot(
             q,
-            { includeMetadataChanges: false },
+            // Metadata changes only report cache-to-server confirmation; they cost no reads.
+            { includeMetadataChanges: true },
             (snapshot) => {
                 if (cancelled) return;
+                setAllMessagesSynced(!snapshot.metadata.fromCache);
+                // A metadata-only snapshot leaves the message list as it is.
+                if (delivered && snapshot.docChanges().length === 0) return;
+                delivered = true;
                 const msgs = [];
                 snapshot.forEach((doc) => msgs.push(doc.data()));
 
@@ -291,6 +302,7 @@ export function RealtimeMessagesProvider({ children }) {
     const value = {
         allMessages,
         allMessagesLoading,
+        allMessagesSynced,
         allMessagesError,
         allReactions,
         currentUser: user,

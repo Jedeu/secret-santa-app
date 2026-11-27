@@ -6,6 +6,7 @@
 function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
     return (
         <button
+            className="tab-button"
             onClick={onClick}
             aria-current={active ? 'page' : undefined}
             style={{
@@ -16,8 +17,8 @@ function TabButton({ active, onClick, children, unreadCount, badgeLabel }) {
                 fontSize: '14px',
                 fontWeight: active ? '600' : '400',
                 padding: '12px 4px 10px',
-                flex: '1 0 auto',
-                minWidth: 0,
+                // Equal thirds, centred labels; a label too long for its third keeps its width.
+                flex: '1 1 0',
                 justifyContent: 'center',
                 whiteSpace: 'nowrap',
                 cursor: 'pointer',

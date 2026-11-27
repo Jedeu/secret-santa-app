@@ -27,6 +27,7 @@ import {
 import { setTyping, clearTyping } from '@/lib/typing-client';
 import { toggleReaction } from '@/lib/reactions-client';
 import { getLatestMessageTimestamp } from '@/lib/message-utils';
+import { pickSantaTypingLine } from '@/lib/easter-eggs';
 import {
     getMediaStatus,
     captureMediaSession,
@@ -167,6 +168,12 @@ export default function Chat({
     const wasNearBottomRef = useRef(true);
     const otherLastReadAt = useOtherUserLastRead(otherUser.id, conversationId);
     const isOtherTyping = useTypingIndicator(conversationId, otherUser.id);
+    // One line per typing session: the Santa chat now and then shows a playful one.
+    const [santaTyping, setSantaTyping] = useState({ active: false, line: '' });
+    if (isSantaChat && santaTyping.active !== isOtherTyping) {
+        // Conditional update during render, as for gifState above.
+        setSantaTyping({ active: isOtherTyping, line: isOtherTyping ? pickSantaTypingLine() : '' });
+    }
     const { showToast } = useToast();
     // The label this chat already shows for a message's sender; quotes reuse it.
     const senderLabel = (msg) => {
@@ -818,7 +825,7 @@ export default function Chat({
                     color: 'var(--text-muted)',
                     padding: '4px 0'
                 }}>
-                    {isSantaChat ? 'Santa' : otherUser.name} is typing...
+                    {isSantaChat ? santaTyping.line : `${otherUser.name} is typing...`}
                 </div>
             )}
 

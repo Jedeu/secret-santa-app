@@ -776,3 +776,151 @@ button.user-menu-item:hover {
     padding-top: 12px;
   }
 }
+
+/* Easter eggs: every overlay is decorative, untappable and gone when its effect ends. */
+.easter-egg-canvas,
+.easter-egg-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.easter-egg-canvas {
+  z-index: 1050;
+}
+
+.easter-egg-canvas.is-still {
+  animation: easter-egg-fade 1.4s ease-in both;
+}
+
+/* Christmas Day snow drifts behind the app: bubbles and bars stay on top of it. */
+.easter-egg-backdrop {
+  z-index: -1;
+}
+
+@keyframes easter-egg-fade {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.grinch {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1060;
+  pointer-events: none;
+  will-change: transform;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
+}
+
+.grinch svg {
+  display: block;
+}
+
+.grinch-leg {
+  animation: grinch-step 0.22s steps(1, end) infinite;
+}
+
+.grinch-leg-b {
+  animation-delay: -0.11s;
+}
+
+.grinch.is-still .grinch-leg {
+  animation: none;
+}
+
+@keyframes grinch-step {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+/* Christmas Day: a string of small lights replaces the selected tab's underline (mobile) and
+   runs along the selected sidebar item (desktop). Tiny bulbs below the labels, so their contrast
+   is untouched; the bold label still marks the selected tab. */
+html[data-christmas] .tab-button[aria-current="page"],
+html[data-christmas] .sidebar-item[aria-current="page"] {
+  position: relative;
+}
+
+/* The underline is an inline style, so hiding it needs !important. */
+html[data-christmas] .tab-button[aria-current="page"] {
+  border-bottom-color: transparent !important;
+}
+
+html[data-christmas] .tab-button[aria-current="page"]::before,
+html[data-christmas] .tab-button[aria-current="page"]::after,
+html[data-christmas] .sidebar-item[aria-current="page"]::before,
+html[data-christmas] .sidebar-item[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  /* Where the hidden 3px underline was, clear of the tab bar's clipped bottom pixel. */
+  bottom: -2px;
+  height: 5px;
+  pointer-events: none;
+  /* `round` fits a whole number of tiles to the width, and the bulbs sit at fractions of a
+     tile, so the string is evenly spaced and centred under any label, never clipped. */
+  background-repeat: round no-repeat;
+  background-size: 40px 5px;
+  background-position: left bottom;
+}
+
+/* Two interleaved sets of bulbs that twinkle in turn. */
+html[data-christmas] .tab-button[aria-current="page"]::before,
+html[data-christmas] .sidebar-item[aria-current="page"]::before {
+  background-image:
+    radial-gradient(circle at 12.5% 50%, var(--primary) 2px, transparent 2.5px),
+    radial-gradient(circle at 62.5% 50%, var(--success) 2px, transparent 2.5px);
+  animation: xmas-twinkle 2.4s ease-in-out infinite;
+}
+
+html[data-christmas] .tab-button[aria-current="page"]::after,
+html[data-christmas] .sidebar-item[aria-current="page"]::after {
+  background-image:
+    radial-gradient(circle at 37.5% 50%, var(--bubble-outline) 2px, transparent 2.5px),
+    radial-gradient(circle at 87.5% 50%, var(--foreground) 2px, transparent 2.5px);
+  animation: xmas-twinkle 2.4s ease-in-out -1.2s infinite;
+}
+
+/* Desktop: the string hangs along the bottom of the highlighted item, inside its padding. */
+html[data-christmas] .sidebar-item[aria-current="page"]::before,
+html[data-christmas] .sidebar-item[aria-current="page"]::after {
+  left: 24px;
+  right: 24px;
+  bottom: 4px;
+}
+
+@keyframes xmas-twinkle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Christmas Day: a small Santa hat perched on the "H" of "HI {NAME}". */
+html[data-christmas] .user-bar-trigger {
+  position: relative;
+}
+
+html[data-christmas] .user-bar-trigger::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -1px;
+  width: 18px;
+  height: 14px;
+  pointer-events: none;
+  transform: rotate(-14deg);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 14'%3E%3Cpath d='M2 11 C3 5 7 1.5 12 2 C14 2.3 15.5 4.5 15 8 L14 11 Z' fill='%23c8443a'/%3E%3Crect x='1' y='10' width='14' height='3.5' rx='1.75' fill='%23ece6d6'/%3E%3Ccircle cx='15.2' cy='8.6' r='2.1' fill='%23ece6d6'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grinch-leg,
+  html[data-christmas] .tab-button[aria-current="page"]::before,
+  html[data-christmas] .tab-button[aria-current="page"]::after,
+  html[data-christmas] .sidebar-item[aria-current="page"]::before,
+  html[data-christmas] .sidebar-item[aria-current="page"]::after {
+    animation: none;
+  }
+}

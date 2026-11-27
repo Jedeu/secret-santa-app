@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { fetchGiphyPage, describeGiphyError, GIPHY_QUERY_MAX_LENGTH } from '@/lib/giphy-client';
+import { triggerEasterEgg } from '@/lib/easter-eggs';
 
 /**
  * GIF browse/search panel with GIPHY attribution.
@@ -14,6 +15,8 @@ import { fetchGiphyPage, describeGiphyError, GIPHY_QUERY_MAX_LENGTH } from '@/li
 
 const SEARCH_DEBOUNCE_MS = 600;
 const SEARCH_MIN_LENGTH = 2;
+// Searching this sends the Grinch after the tab bar, once per opened picker.
+const GRINCH_QUERY = /\bgrinch/i;
 const ATTRIBUTION_SRC = '/giphy/PoweredBy_200px-Black_HorizLogo.png';
 
 const LOADING_TEXT = 'Loading GIFs…';
@@ -150,6 +153,7 @@ export default function GifPicker({ onSelect, onClose, canRequest = () => true }
     const mountedRef = useRef(false);
     const rootRef = useRef(null);
     const debounceRef = useRef(null);
+    const grinchRef = useRef(false);
     const propsRef = useRef({ canRequest, onSelect, onClose });
     const requestsRef = useRef({
         trending: { seq: 0, controller: null },
@@ -192,6 +196,10 @@ export default function GifPicker({ onSelect, onClose, canRequest = () => true }
         if (!mountedRef.current || req.query !== q || req.started || q.length < SEARCH_MIN_LENGTH) return;
         req.started = true;
         clearDebounce();
+        if (!grinchRef.current && GRINCH_QUERY.test(q)) {
+            grinchRef.current = true;
+            triggerEasterEgg('grinch');
+        }
         setSearch((prev) => (prev && prev.query === q ? { ...prev, status: 'loading' } : prev));
         requestPage({ requestsRef, mountedRef, propsRef, setTrending, setSearch }, 'search', { query: q, offset: 0, append: false });
     };

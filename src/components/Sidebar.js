@@ -6,6 +6,7 @@
 function SidebarItem({ active, onClick, children, unreadCount, icon, badgeLabel }) {
     return (
         <button
+            className="sidebar-item"
             onClick={onClick}
             aria-current={active ? 'page' : undefined}
             style={{
@@ -82,7 +83,7 @@ export default function Sidebar({
             {header && <div style={{ padding: '0 16px 0 24px', marginBottom: '12px' }}>{header}</div>}
 
             {/* Navigation Items */}
-            <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <nav className="sidebar-nav" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <SidebarItem
                     active={activeTab === 'recipient'}
                     onClick={() => onTabChange('recipient')}
