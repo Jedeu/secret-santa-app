@@ -14,6 +14,12 @@ import {
 import MagicWordsRuntime from '@/components/MagicWordsRuntime';
 import Chat from '@/components/Chat';
 import { useTypingIndicator } from '@/hooks/useTypingIndicator';
+import { getCachedTimestamp, getRemoteTimestamp } from '@/lib/lastReadClient';
+
+jest.mock('@/lib/lastReadClient', () => ({
+    getCachedTimestamp: jest.fn(),
+    getRemoteTimestamp: jest.fn()
+}));
 
 jest.mock('@/hooks/useRealtimeMessages', () => ({
     updateLastReadTimestamp: jest.fn(),
@@ -137,6 +143,9 @@ describe('MagicWordsRuntime', () => {
         unsubscribe = onEasterEgg((effect) => fired.push(effect));
         play = jest.fn(() => Promise.resolve());
         global.Audio = jest.fn(() => ({ play }));
+        // Viewer 'b' read everything up to now unless a test says otherwise.
+        getCachedTimestamp.mockReturnValue(at(0));
+        getRemoteTimestamp.mockReturnValue(undefined);
     });
     afterEach(() => {
         unsubscribe();
@@ -144,7 +153,7 @@ describe('MagicWordsRuntime', () => {
     });
 
     function renderRuntime(props) {
-        let current = { chatKey: conversation, messages: [], loading: false, soundOn: true, ...props };
+        let current = { chatKey: conversation, viewerId: 'b', messages: [], loading: false, soundOn: true, ...props };
         const view = render(<MagicWordsRuntime {...current} />);
         return {
             update: (next) => {
@@ -167,7 +176,7 @@ describe('MagicWordsRuntime', () => {
         expect(fired).toEqual(['confetti', 'snow']);
     });
 
-    it('never fires on opening or switching chats, or outside a chat', () => {
+    it('never fires on opening or switching chats with nothing unread, or outside a chat', () => {
         const { update } = renderRuntime({ chatKey: null, messages: [msg('1', 'let it snow')] });
         update({ chatKey: conversation, messages: [msg('1', 'let it snow')] });
         update({ chatKey: 'santa_b_recipient_c', messages: [msg('2', 'let it snow')] });
@@ -183,6 +192,43 @@ describe('MagicWordsRuntime', () => {
         update({ loading: false, messages: [msg('earlier', 'merry christmas', 'b', 5 * 1000)] });
         expect(fired).toEqual([]);
         update({ messages: [msg('earlier', 'merry christmas', 'b', 5 * 1000), msg('live', 'let it snow', 'b', 0)] });
+        expect(fired).toEqual(['snow']);
+    });
+
+    it('replays unread magic words once on opening, read before the chat moves the marker', () => {
+        getCachedTimestamp.mockReturnValue(at(10 * 1000));
+        const history = [
+            msg('read', 'let it snow', 'a', 20 * 1000),
+            msg('u1', 'let it snow', 'a', 5 * 1000),
+            msg('u2', 'Let it snow!!', 'a', 4 * 1000),
+            msg('u3', 'merry xmas', 'a', 3 * 1000),
+            { ...msg('mine', 'ho ho ho', 'b', 2 * 1000), toId: 'a' },
+        ];
+        const { update } = renderRuntime({ loading: true, messages: history.slice(0, 2) });
+        // Chat's mount effect advances the marker before the server confirms the list.
+        getCachedTimestamp.mockReturnValue(at(0));
+        update({ loading: false, messages: history });
+        expect(fired).toEqual(['snow', 'confetti']);
+        expect(global.Audio).not.toHaveBeenCalled();
+
+        // Reopening never replays them, even with the marker unchanged.
+        getCachedTimestamp.mockReturnValue(at(10 * 1000));
+        update({ chatKey: null, messages: [] });
+        update({ chatKey: conversation, messages: history });
+        expect(fired).toEqual(['snow', 'confetti']);
+    });
+
+    it('on a cold start replays against the marker Firestore reports, and stays quiet until it is known', () => {
+        getCachedTimestamp.mockReturnValue(undefined);
+        const history = [msg('read', 'merry christmas', 'a', 20 * 1000), msg('u1', 'let it snow', 'a', 5 * 1000)];
+        const { update } = renderRuntime({ loading: true, messages: [] });
+        getRemoteTimestamp.mockReturnValue(at(10 * 1000));
+        update({ loading: false, messages: history });
+        expect(fired).toEqual(['snow']);
+
+        getRemoteTimestamp.mockReturnValue(undefined);
+        const other = renderRuntime({ chatKey: 'santa_b_recipient_c', loading: true, messages: [] });
+        other.update({ loading: false, messages: [{ ...msg('u9', 'let it snow', 'c', 1000), conversationId: 'santa_b_recipient_c' }] });
         expect(fired).toEqual(['snow']);
     });
 

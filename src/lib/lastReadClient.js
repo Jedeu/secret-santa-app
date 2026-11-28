@@ -30,7 +30,7 @@ const EPOCH_ISO = new Date(0).toISOString();
 
 // Module state
 let cache = new Map();        // key -> ISO (local view, never moves backwards)
-let remoteSeen = new Map();   // key -> ISO (max remote value observed)
+let remoteSeen = new Map();   // key -> ISO (max remote value observed; epoch once a missing doc is seen)
 let pending = new Map();      // key -> Entry
 let stateGeneration = 0;
 let nextEntryId = 1;
@@ -117,8 +117,11 @@ function mergeRemote(key, remote) {
         if (entry && !entry.inFlight && toMs(entry.observedAt) <= toMs(remote)) {
             deleteEntry(entry);
         }
-    } else if (!cache.has(key)) {
-        cache.set(key, EPOCH_ISO);
+    } else {
+        remoteSeen.set(key, maxIso(remoteSeen.get(key), EPOCH_ISO));
+        if (!cache.has(key)) {
+            cache.set(key, EPOCH_ISO);
+        }
     }
     return cache.get(key) ?? EPOCH_ISO;
 }
@@ -448,4 +451,12 @@ export function clearCache() {
  */
 export function getCachedTimestamp(userId, conversationId) {
     return cache.get(makeKey(userId, conversationId));
+}
+
+/**
+ * The highest marker seen from Firestore (a snapshot, a confirming read or a confirmed
+ * write) without fetching: epoch once the doc is known not to exist, undefined until then.
+ */
+export function getRemoteTimestamp(userId, conversationId) {
+    return remoteSeen.get(makeKey(userId, conversationId));
 }
