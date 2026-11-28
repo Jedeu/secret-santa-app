@@ -37,6 +37,7 @@ import {
     flushPendingWrites,
     resetLastReadState,
     getCachedTimestamp,
+    getRemoteTimestamp,
 } from '@/lib/lastReadClient';
 import { setWritableScope } from '@/lib/year-client';
 
@@ -602,6 +603,25 @@ describe('lastReadClient', () => {
 
             expect(callback).toHaveBeenCalledWith(T2);
             expect(getCachedTimestamp('user1', 'conv1')).toBe(T2);
+        });
+
+        test('reports the remote marker apart from local reads: unknown, then epoch or the doc', () => {
+            const nexts = [];
+            mockOnSnapshot.mockImplementation((ref, onNext) => {
+                nexts.push(onNext);
+                return jest.fn();
+            });
+            subscribeToLastRead('user1', 'conv1', jest.fn());
+            subscribeToLastRead('user1', 'conv2', jest.fn());
+            updateLastReadTimestamp('user1', 'conv1', T3);
+            expect(getRemoteTimestamp('user1', 'conv1')).toBeUndefined();
+
+            nexts[0]({ exists: () => true, data: () => ({ lastReadAt: T1 }) });
+            nexts[1]({ exists: () => false });
+
+            expect(getRemoteTimestamp('user1', 'conv1')).toBe(T1);
+            expect(getCachedTimestamp('user1', 'conv1')).toBe(T3);
+            expect(getRemoteTimestamp('user1', 'conv2')).toBe(new Date(0).toISOString());
         });
     });
 });

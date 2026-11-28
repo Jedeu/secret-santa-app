@@ -383,6 +383,7 @@ export default function Home() {
             />
             <MagicWordsRuntime
                 chatKey={openChat?.key ?? null}
+                viewerId={viewerId}
                 messages={openChat?.messages ?? EMPTY_MESSAGES}
                 loading={allMessagesLoading || !allMessagesSynced}
                 soundOn={soundEnabled && pushOn}
